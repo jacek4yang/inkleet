@@ -46,7 +46,7 @@
   Linux 包已实际安装并从安装位置通过存储及笔记预览 GUI 测试；其余平台尚未实际安装/真机验收。
 - Android 仍为 ARM64 Debug APK，体积约 160 MiB（含调试符号），尚未做真机验证和正式体积优化。
 
-## 独立工具链与 Python IDE（新增；2026-10-13 19:33 UTC）
+## 独立工具链与 Python IDE（2026-10-13）
 - 私有目录、编译内置固定来源及 SHA-256、精确文件长度、分段续传、取消、跨进程安装锁、暂存解压后原子激活。
 - 安全压缩包路径、解压大小限制、文件链接物化；不向系统 PATH / Python / Node 环境写入。
 - Python 3.14.8、Node 24.21.0、Pyright 1.1.414 四平台真实 LSP 协议测试通过：
@@ -66,7 +66,18 @@
 - Windows DAP launch、Mac 私有编译尚有失败；其余语言 LSP / Runner / DAP 尚未完成。
 - 本地驱动与个人源文件隔离，当前支持普通函数常见类型；设计类和特殊接口题明确不支持。
 - 运行是普通用户进程，不是安全沙箱；尚无硬内存限制。调试在暂停时不会触发普通运行超时。
-- 全平台安装包仍是 ab5abd3，不含这一节的新功能，必须重新构建后才能分发新版。
+- 最新五目标安装包已在 9daa959 构建通过：
+  https://github.com/jacek4yang/inkleet/actions/runs/38459086881
+  Windows x64 NSIS、Linux x64 DEB、macOS Intel/ARM DMG、Android ARM64 Debug APK。
+  Linux DEB 已实际安装并完成安装位置 GUI 回归；其他平台仅构建通过，不能等同于真实调试或登录验收。
+- 9daa959 的专门 Linux 原生 IDE 回归通过：Python 本地计算、F9 断点、源码暂停行、真实调用栈和变量列表、停止。
+  https://github.com/jacek4yang/inkleet/actions/runs/38457840681
+- 5512393 新增 Go / JDK / clangd / Delve / CodeLLDB 固定官方分发包。
+  https://github.com/jacek4yang/inkleet/actions/runs/38459229403
+  Mac Intel 和 ARM 的 Go / Java 私有编译运行、标准库文件检查通过；clangd / Delve / CodeLLDB 仅启动检查通过，尚非完整协议或 GUI 集成。
+  Linux JDK 原生库初始化与 Windows JDK 启动路径仍有失败；Rust LSP 尚未通过标准库类型推导。
+- 6abf5b8 新增函数参数提示；前端类型检查和模拟 IPC 测试通过，原生 fixture 的自动缩进 / 括号输入验收在修复中，未宣布原生功能通过。
+- ced1fb2 新增按文件合并待写快照、显式保存重试和冲突门闩；目前正在回归验证。
 
 ## 已实现，真实账号链路尚未验收
 - 桌面独立官方隐私 WebView、原生 HttpOnly Cookie 读取、真实登录状态查询。
