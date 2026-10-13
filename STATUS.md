@@ -29,6 +29,23 @@
   https://github.com/jacek4yang/inkleet/actions/runs/38427518348 （a411b9c）。
   GitHub Runner / Chromium / AMD EPYC 9V74 / 4 CPU。不是原生 IME 或手机真机结论。
 
+## 链接直达与笔记预览（ab5abd3）
+- 顶栏「链接打开」支持中国站题面、题解、该题提交记录与竞赛题目地址；兼容旧中国站域名。
+- 严格域名/协议/端口/用户信息/编码/路径检查，仅将题目标识交给固定中国站接口，丢弃查询参数和片段。
+- 重复点击保护，编辑输入或关闭后忽略旧响应；重复打开题目不覆盖草稿。
+- 无网络时尝试已验证格式的公开题目缓存，并明确标注离线；无缓存保留当前工作区并报错。
+- Markdown 预览使用 marked 18.1.1 Worker 和 DOMPurify 白名单；限制输入、输出及耗时，不改动原文。
+- 前端测试通过（包括链接竞态、恶意 Markdown、完整导出和撤销保持）：
+  https://github.com/jacek4yang/inkleet/actions/runs/38442374753
+- 真实 Linux GUI 与中国站公开协议、链接打开、重复打开草稿保持、断网链接缓存回退通过：
+  https://github.com/jacek4yang/inkleet/actions/runs/38442365157
+  18 项 Rust 单元测试通过；单独实时公开协议探测退出码 0；不含私人账号评测。
+- 全平台最新开发包：
+  https://github.com/jacek4yang/inkleet/actions/runs/38442530818
+  Windows x64、Linux x64、macOS Intel/ARM、Android ARM64 五目标均构建成功。
+  Linux 包已实际安装并从安装位置通过存储及笔记预览 GUI 测试；其余平台尚未实际安装/真机验收。
+- Android 仍为 ARM64 Debug APK，体积约 160 MiB（含调试符号），尚未做真机验证和正式体积优化。
+
 ## 已实现，真实账号链路尚未验收
 - 桌面独立官方隐私 WebView、原生 HttpOnly Cookie 读取、真实登录状态查询。
   仅内存会话；无凭据持久化。取消后忽略迟到响应。Android 安全登录隔离未开放。
@@ -43,7 +60,8 @@
 
 ## 尚未完成或受限
 - 桌面安全会话持久化、Android 安全登录、会员题权限、题面图示/公式完整呈现。
-- Markdown 预览、Typora、外部文件监听与冲突解决 UI；Android 系统文件导出。
+- Typora、外部文件监听与冲突解决 UI；Android 系统文件导出。
+- Markdown 预览暂不加载图片、可导航链接、公式扩展和嵌入内容；原始内容不改变。
 - 六语言本地 Runner、LSP、DAP、按需工具链与进程树清理。
 - 中文 IME、移动软键盘、长时间资源使用、冷启动与原生内存完整测量。
 - 正式 Android 签名身份、Windows/macOS 签名公证、干净系统安装/升级和真机验证。
