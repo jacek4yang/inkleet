@@ -201,6 +201,42 @@ try:
         (evidence/"JAVA_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK/JDTLS install, ArrayList member completion and F12 read-only standard library source. Separate three-platform protocol checks compare returned source byte-for-byte with private JDK src.zip.\n")
         click('select[aria-label="编程语言"] option[value="rust"]')
         wait_for(lambda: text(code) == marker, "switching away preserves Rust draft and stops Python session")
+
+        # Real application-owned Go and Rust language services, not mocked IPC.
+        for group,language,server,code_text,member,definition_word,source_name in [
+            ("golang","golang","gopls",'import "strings"; func example() { var builder strings.Builder; builder. }',"WriteString","Builder","builder.go"),
+            ("rust","rust","rust-analyzer","fn example() { let mut values = Vec::<i32>::new(); values. }","push","Vec","mod.rs"),
+        ]:
+            click('[data-action="open-environments"]')
+            wait_for(lambda: element("dialog.environments"), "environment dialog")
+            click(f'select[aria-label="开发环境语言"] option[value="{group}"]')
+            click(".environment-summary button")
+            wait_for(lambda: all("已安装" in text(f'[data-tool="{tool}"]') for tool in (
+                ["go","gopls"] if group=="golang" else ["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"]
+            )),f"{group} managed installation",seconds=720)
+            click("dialog.environments header button")
+            click(f'select[aria-label="编程语言"] option[value="{language}"]')
+            wait_for(lambda: server+" 已连接" in text(".lsp-status"),f"{group} connected",seconds=90)
+            fill(code,code_text)
+            keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"}]
+            for _ in range(2): keys += [{"type":"keyDown","value":"\ue012"},{"type":"keyUp","value":"\ue012"}]
+            keys += [{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue009"}]
+            cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-completion","actions":keys}]})
+            wait_for(lambda: member in text(".cm-tooltip-autocomplete"),f"real {group} member completion",seconds=90)
+            screenshot(group+"-completion-native.png")
+            keys=[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+            for _ in range(code_text.index(definition_word)+1): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
+            keys += [{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}]
+            cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-source","actions":keys}]})
+            wait_for(lambda: element(".source-viewer"),f"{group} source viewer",seconds=90)
+            screenshot(group+"-stdlib-native.png")
+            click(".source-viewer header button")
+            wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
+            assert text(code)==code_text, "Language scaffolding must not change the draft"
+            (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
+        click('select[aria-label="编程语言"] option[value="rust"]')
+        fill(code,marker)
+
         (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")
     if os.environ.get("INKLEET_LIVE_CN") == "1":
         click('[data-action="open-catalogue"]')

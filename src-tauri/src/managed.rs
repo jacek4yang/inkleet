@@ -16,7 +16,7 @@ impl Environments {
         if jobs.is_some(){return;}
         let mut result=BTreeMap::new();
         if platform()!="unsupported" {
-            for package in catalogue().into_iter().filter(|p|(p.platform==platform()||p.platform=="any")&&(matches!(p.id.as_str(),"python"|"node"|"pyright"|"debugpy")||(!cfg!(windows)&&matches!(p.id.as_str(),"jdk"|"jdtls")))){
+            for package in catalogue().into_iter().filter(|p|(p.platform==platform()||p.platform=="any")&&(matches!(p.id.as_str(),"python"|"node"|"pyright"|"debugpy"|"go"|"gopls"|"rustc"|"cargo"|"rust-std"|"rust-src"|"rust-analyzer-preview")||(!cfg!(windows)&&matches!(p.id.as_str(),"jdk"|"jdtls")))){
                 let (phase,message)=match self.manager.installed(&package.id){
                     Ok(Some(_))=>("ready","已通过入口文件校验".to_owned()),
                     Ok(None)=>("missing",String::new()),
@@ -35,14 +35,14 @@ impl Environments {
     fn prepare(&self,id:&str)->Result<Arc<AtomicBool>,String>{
         let mut jobs=self.jobs.lock().map_err(|_|"工具状态不可用")?;self.initialize(&mut jobs);
         let job=jobs.as_mut().unwrap().get_mut(id).ok_or("当前平台不支持此工具")?;
-        if matches!(job.view.phase.as_str(),"queued"|"downloading"|"verifying"|"extracting"|"canceling"){return Err("安装已经在进行中".into());}
+        if matches!(job.view.phase.as_str(),"queued"|"downloading"|"verifying"|"extracting"|"building"|"canceling"){return Err("安装已经在进行中".into());}
         job.cancel=Arc::new(AtomicBool::new(false));job.view.phase="queued".into();job.view.message.clear();
         Ok(job.cancel.clone())
     }
     pub fn cancel(&self,id:&str)->Result<(),String>{
         let mut jobs=self.jobs.lock().map_err(|_|"工具状态不可用")?;
         let job=jobs.as_mut().and_then(|jobs|jobs.get_mut(id)).ok_or("没有此安装任务")?;
-        if matches!(job.view.phase.as_str(),"queued"|"downloading"|"verifying"|"extracting"){
+        if matches!(job.view.phase.as_str(),"queued"|"downloading"|"verifying"|"extracting"|"building"){
             job.cancel.store(true,Ordering::Relaxed);job.view.phase="canceling".into();
         }
         Ok(())

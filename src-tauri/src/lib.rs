@@ -1,6 +1,7 @@
 mod storage;
 mod managed;
 mod lsp;
+mod lsp_document;
 mod lsp_launch;
 mod local_run;
 mod debugger;

@@ -5,7 +5,7 @@ use std::{path::{Path,PathBuf}, sync::{Arc,Mutex,atomic::{AtomicBool,AtomicU64,O
 use tauri::Manager as _;
 type Result<T> = std::result::Result<T,String>;
 pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, active:Mutex<Option<Arc<Session>>> }
-struct Document { text:String, version:u32 }
+struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
     id:u64, client:Client, uri:String, language:String, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
     diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, _workspace:tempfile::TempDir,
@@ -33,23 +33,26 @@ impl Services {
         if text.len()>2*1024*1024{return Err("源码超过语言服务的 2 MiB 限制".into());}
         let session=self.session(id)?;let mut document=session.document.lock().map_err(|_|"文档状态不可用")?;
         if version<=document.version{return Err("拒绝过期的语言服务文档更新".into());}
-        session.client.notify("textDocument/didChange",json!({"textDocument":{"uri":session.uri,"version":version},"contentChanges":[{"text":text}]}))?;
-        document.text=text;document.version=version;
+        let (wrapped,prefix)=crate::lsp_document::source(&session.language,&text);
+        session.client.notify("textDocument/didChange",json!({"textDocument":{"uri":session.uri,"version":version},"contentChanges":[{"text":wrapped}]}))?;
+        document.text=text;document.version=version;document.prefix=prefix;
         if let Ok(mut diagnostics)=session.diagnostics.lock(){*diagnostics=Value::Null;}
         Ok(())
     }
     pub fn request(&self,id:u64,version:u32,kind:&str,line:u32,character:u32)->Result<Value>{
         let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition","signatureHelp"=>"textDocument/signatureHelp",_=>return Err("不支持此语言服务请求".into())};
         let session=self.session(id)?;
-        {
+        let prefix={
             let document=session.document.lock().map_err(|_|"文档状态不可用")?;
             if document.version!=version{return Err("文档已更新，请重试".into());}
             let current=document.text.split('\n').nth(line as usize).ok_or("行号越界")?;
             if character as usize>current.encode_utf16().count(){return Err("列号越界".into());}
-        }
-        let response=session.client.request(method,json!({"textDocument":{"uri":session.uri},"position":{"line":line,"character":character}}),Duration::from_secs(8))?;
+            document.prefix
+        };
+        let mut response=session.client.request(method,json!({"textDocument":{"uri":session.uri},"position":{"line":line+prefix,"character":character}}),Duration::from_secs(8))?;
         if session.document.lock().map_err(|_|"文档状态不可用")?.version!=version{return Err("忽略旧版本的语言服务结果".into());}
         self.session(id)?;
+        crate::lsp_document::response(kind,&mut response,prefix);
         if kind=="definition"{
             let locations:Vec<&Value>=match response.as_array(){Some(items)=>items.iter().take(32).collect(),None=>vec![&response]};
             let mut allowed=session.approved_sources.lock().map_err(|_|"源码引用状态不可用")?;
@@ -66,7 +69,7 @@ impl Services {
         let document=session.document.lock().map_err(|_|"文档状态不可用")?;
         let diagnostics=session.diagnostics.lock().map_err(|_|"诊断状态不可用")?;
         // Only versioned diagnostics are displayed; stale/unknown versions cannot paint current text.
-        if diagnostics.get("version").and_then(Value::as_u64)==Some(document.version as u64){Ok(diagnostics.clone())}
+        if diagnostics.get("version").and_then(Value::as_u64)==Some(document.version as u64){let mut current=diagnostics.clone();crate::lsp_document::diagnostics(&mut current,document.prefix);Ok(current)}
         else{Ok(json!({"version":document.version,"diagnostics":[]}))}
     }
     pub fn read_source(&self,id:u64,uri:&str)->Result<Source>{
@@ -85,7 +88,7 @@ impl Services {
     }
 }
 pub async fn start(app:tauri::AppHandle,text:String,language:String)->Result<Started>{
-    if !matches!(language.as_str(),"python3"|"java"){return Err("此语言服务尚未接入".into());}
+    if !matches!(language.as_str(),"python3"|"java"|"golang"|"rust"){return Err("此语言服务尚未接入".into());}
     if text.len()>2*1024*1024{return Err("源码超过语言服务的 2 MiB 限制".into());}
     let state=app.state::<Services>();
     if state.starting.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err(){return Err("语言服务正在启动，请稍后重连".into());}
@@ -100,9 +103,10 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String)->Result<Sta
         if state.root.exists() && std::fs::symlink_metadata(&state.root).map_err(|_|"语言服务目录不可用")?.file_type().is_symlink(){return Err("语言服务目录不能是符号链接".into());}
         std::fs::create_dir_all(&state.root).map_err(|_|"无法创建语言服务目录")?;
         let workspace=tempfile::Builder::new().prefix("language-").tempdir_in(&state.root).map_err(|_|"无法创建语言服务工作区")?;
-        let workspace_root=std::fs::canonicalize(workspace.path()).map_err(|_|"无法解析工作区")?;
+        let workspace_root=inkleet_managed_env::process::tool_path(&std::fs::canonicalize(workspace.path()).map_err(|_|"无法解析工作区")?);
         let launch=crate::lsp_launch::prepare(&tools.manager,&workspace_root,&language)?;
-        std::fs::write(workspace_root.join(launch.filename),&text).map_err(|_|"无法准备语言服务源码")?;
+        let (wrapped,prefix)=crate::lsp_document::source(&language,&text);
+        std::fs::write(workspace_root.join(launch.filename),&wrapped).map_err(|_|"无法准备语言服务源码")?;
         let uri=reqwest::Url::from_file_path(workspace_root.join(launch.filename)).map_err(|_|"无法生成文档地址")?.to_string();
         let root_uri=reqwest::Url::from_directory_path(&workspace_root).map_err(|_|"无法生成工作区地址")?.to_string();
         let diagnostics=Arc::new(Mutex::new(Value::Null));let event_diagnostics=diagnostics.clone();let event_uri=uri.clone();
@@ -126,10 +130,10 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String)->Result<Sta
         }),Duration::from_secs(if language=="java"{90}else{30}))?;
         client.notify("initialized",json!({}))?;
         client.notify("workspace/didChangeConfiguration",json!({"settings":if language=="python3"{json!({"python":launch.settings})}else{launch.settings}}))?;
-        client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":text}}))?;
+        client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let roots=launch.roots;
         let started_uri=uri.clone();
-        let session=Arc::new(Session{id:generation,client,uri,language,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1}),diagnostics,roots,_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
@@ -148,14 +152,14 @@ fn read_allowed_source(roots:&[PathBuf],uri:&str)->Result<Source>{
     let path=url.to_file_path().map_err(|_|"源码路径无效")?;
     let canonical=std::fs::canonicalize(path).map_err(|_|"源码文件不存在")?;
     if !roots.iter().any(|root|canonical.starts_with(root)){return Err("拒绝读取工作区和工具链之外的文件".into());}
-    if !matches!(canonical.extension().and_then(|s|s.to_str()),Some("py"|"pyi"|"java")){return Err("仅支持已接入语言的源码或类型声明".into());}
+    if !matches!(canonical.extension().and_then(|s|s.to_str()),Some("py"|"pyi"|"java"|"rs"|"go")){return Err("仅支持已接入语言的源码或类型声明".into());}
     let file=std::fs::File::open(&canonical).map_err(|_|"无法读取源码")?;
     let meta=file.metadata().map_err(|_|"无法读取源码信息")?;
     if !meta.is_file() || meta.len()>2*1024*1024{return Err("源码文件类型或大小不受支持".into());}
     let mut text=String::new();
     file.take(2*1024*1024+1).read_to_string(&mut text).map_err(|_|"源码不是有效 UTF-8 文本")?;
     if text.len()>2*1024*1024{return Err("源码文件增长超过大小限制".into());}
-    Ok(Source{text,name:canonical.file_name().unwrap_or_default().to_string_lossy().into(),declaration:canonical.extension().is_some_and(|e|e=="pyi"),language:if canonical.extension().is_some_and(|e|e=="java"){"java"}else{"python3"}.into()})
+    Ok(Source{text,name:canonical.file_name().unwrap_or_default().to_string_lossy().into(),declaration:canonical.extension().is_some_and(|e|e=="pyi"),language:match canonical.extension().and_then(|e|e.to_str()){Some("java")=>"java",Some("rs")=>"rust",Some("go")=>"golang",_=>"python3"}.into()})
 }
 #[cfg(test)]mod tests{
     use super::*;

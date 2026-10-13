@@ -60,6 +60,39 @@ pub fn prepare(manager:&Manager,root:&Path,language:&str)->Result<Launch>{
             let initialization=json!({"settings":settings,"workspaceFolders":[root_uri],"extendedClientCapabilities":{"classFileContentsSupport":true}});
             Ok(Launch{command,settings,initialization,roots:vec![root.to_owned(),std::fs::canonicalize(java_home).map_err(|_|"Java 标准库目录无效")?],filename:"Solution.java",language_id:"java",server:"Eclipse JDT LS"})
         },
+        "golang"=>{
+            let go=inkleet_managed_env::process::tool_path(&manager.installed("go")?.ok_or("请先安装 Go 工具链")?);
+            let gopls=inkleet_managed_env::process::tool_path(&manager.installed("gopls")?.ok_or("请先安装 gopls 语言服务")?);
+            let go_home=go.parent().and_then(Path::parent).ok_or("Go 工具链目录无效")?;
+            std::fs::write(root.join("go.mod"),"module inkleet.local\n\ngo 1.27.0\n").map_err(|_|"无法准备 Go 模块")?;
+            let mut command=Command::new(gopls);
+            clean(&mut command,root,&[go.parent().ok_or("Go 目录无效")?.to_owned()])?;
+            command.env("GOROOT",go_home).env("GOTOOLCHAIN","local").env("GOENV","off").env("GOWORK","off")
+                .env("CGO_ENABLED","0").env("GOPROXY","off").env("GOSUMDB","off").env("GOTELEMETRY","off")
+                .env("GOCACHE",root.join(".go-cache")).env("GOPATH",root.join(".go-path")).env("GOPLSCACHE",root.join(".gopls-cache"));
+            let initialization=json!({"staticcheck":false,"usePlaceholders":false,"completeUnimported":true,"buildFlags":["-mod=readonly"]});
+            let settings=json!({"gopls":initialization});
+            Ok(Launch{command,settings,initialization,roots:vec![std::fs::canonicalize(root).map_err(|_|"工作区无效")?,std::fs::canonicalize(go_home.join("src")).map_err(|_|"Go 标准库源码无效")?],filename:"solution.go",language_id:"go",server:"gopls"})
+        },
+        "rust"=>{
+            let installed=|id:&str|->Result<PathBuf>{Ok(inkleet_managed_env::process::tool_path(&manager.installed(id)?.ok_or_else(||format!("请先安装 Rust 工具：{id}"))?))};
+            let rustc=installed("rustc")?;let cargo=installed("cargo")?;let analyzer=installed("rust-analyzer-preview")?;
+            let standard=installed("rust-std")?;let sources=installed("rust-src")?;
+            let sysroot=standard.parent().ok_or("Rust 标准库目录无效")?;
+            let source_root=sources.parent().and_then(Path::parent).and_then(Path::parent).ok_or("Rust 标准库源码目录无效")?;
+            let rust_bin=rustc.parent().ok_or("Rust 编译器目录无效")?;
+            let rust_lib=rust_bin.parent().ok_or("Rust 工具链目录无效")?.join("lib");
+            std::fs::write(root.join("Cargo.toml"),"[package]\nname=\"inkleet_local\"\nversion=\"0.0.0\"\nedition=\"2021\"\n[lib]\npath=\"solution.rs\"\n").map_err(|_|"无法准备 Rust 工程")?;
+            let mut command=Command::new(analyzer);
+            clean(&mut command,root,&[rust_bin.to_owned(),rust_lib.clone(),cargo.parent().ok_or("Cargo 目录无效")?.to_owned()])?;
+            command.env("RUSTC",&rustc).env("CARGO",&cargo).env("CARGO_HOME",root.join(".cargo-home")).env("CARGO_NET_OFFLINE","true")
+                .env("CARGO_ENCODED_RUSTFLAGS",format!("--sysroot\u{1f}{}",sysroot.display())).env("RUST_SRC_PATH",source_root)
+                .env("LD_LIBRARY_PATH",&rust_lib).env("DYLD_LIBRARY_PATH",&rust_lib);
+            let mut initialization=json!({"linkedProjects":[root.join("Cargo.toml")],"cargo":{"sysroot":sysroot,"sysrootSrc":source_root,"noDeps":false,"buildScripts":{"enable":false}},"procMacro":{"enable":false},"checkOnSave":false,"cachePriming":{"enable":false},"numThreads":2});
+            if cfg!(windows){initialization["cargo"]["target"]=json!("x86_64-pc-windows-gnu");}
+            let settings=json!({"rust-analyzer":initialization});
+            Ok(Launch{command,settings,initialization,roots:vec![std::fs::canonicalize(root).map_err(|_|"工作区无效")?,std::fs::canonicalize(source_root).map_err(|_|"Rust 标准库源码无效")?],filename:"solution.rs",language_id:"rust",server:"rust-analyzer"})
+        },
         _=>Err("此语言服务尚未接入".into()),
     }
 }
