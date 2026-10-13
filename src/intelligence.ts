@@ -35,6 +35,7 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
     },
     provide: field => showTooltip.from(field),
   });
+  let signatureGeneration = 0;
   let signatureTimer: ReturnType<typeof setTimeout> | undefined;
   let view: EditorView | null = null, session: Started | null = null, closed = false;
   let version = 1, sent: Text | null = null, synchronization = Promise.resolve();
@@ -111,10 +112,10 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
   }
   async function signatureHelp() {
     if (!view || closed || view.composing) return;
-    const target = view, doc = target.state.doc, pos = target.state.selection.main.head;
+    const target = view, doc = target.state.doc, pos = target.state.selection.main.head, generation = ++signatureGeneration;
     try {
       const result = await request("signatureHelp", pos, doc);
-      if (closed || view !== target || target.state.doc !== doc || target.state.selection.main.head !== pos || target.composing) return;
+      if (closed || generation !== signatureGeneration || view !== target || target.state.doc !== doc || target.state.selection.main.head !== pos || target.composing) return;
       if (!object(result) || !Array.isArray(result.signatures) || !result.signatures.length) {
         target.dispatch({ effects: signatureEffect.of(null) }); return;
       }
@@ -135,7 +136,7 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
         if (documentation) { const details = document.createElement("div"); details.textContent = documentation; dom.append(details); }
         return { dom };
       } }) });
-    } catch { if (!closed && view === target && target.state.doc === doc) target.dispatch({ effects: signatureEffect.of(null) }); }
+    } catch { if (!closed && generation === signatureGeneration && view === target && target.state.doc === doc) target.dispatch({ effects: signatureEffect.of(null) }); }
   }
   async function definition(pos: number) {
     if (!view) return;
@@ -178,7 +179,7 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
     signatureField,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([{ key: "Ctrl-Shift-Space", run() { void signatureHelp(); return true; } }, { key: "Escape", run(target) { if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }, { key: "F12", run(target) { void definition(target.state.selection.main.head); return true; } }]),
+    keymap.of([{ key: "Ctrl-Shift-Space", run() { void signatureHelp(); return true; } }, { key: "Escape", run(target) { ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }, { key: "F12", run(target) { void definition(target.state.selection.main.head); return true; } }]),
     EditorView.domEventHandlers({ mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
@@ -186,7 +187,7 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
       event.preventDefault(); void definition(pos); return true;
     }}),
     EditorView.updateListener.of(update => {
-      if (update.docChanged || update.selectionSet) clearTimeout(signatureTimer);
+      if (update.docChanged || update.selectionSet) { ++signatureGeneration; clearTimeout(signatureTimer); }
       if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
       if (update.docChanged && !closed) {
         clearTimeout(changeTimer);
@@ -210,7 +211,7 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      closed = true; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      closed = true; ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },
