@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 type Identity = { username: string; account: string; persistence: string };
 export function Login() {
@@ -6,23 +6,27 @@ export function Login() {
   const [busy, setBusy] = useState(false);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [message, setMessage] = useState("");
+  const generation = useRef(0);
   async function begin() {
+    const token = ++generation.current;
     setBusy(true); setMessage("");
-    try { await invoke("open_login"); setOpen(true); setIdentity(null); }
-    catch (error) { setMessage(String(error)); }
-    finally { setBusy(false); }
+    try { await invoke("open_login"); if (token !== generation.current) return; setOpen(true); setIdentity(null); }
+    catch (error) { if (token === generation.current) setMessage(String(error)); }
+    finally { if (token === generation.current) setBusy(false); }
   }
   async function verify() {
+    const token = ++generation.current;
     setBusy(true); setMessage("");
-    try { setIdentity(await invoke<Identity>("verify_login")); setOpen(false); }
-    catch (error) { setMessage(String(error)); }
-    finally { setBusy(false); }
+    try { const result = await invoke<Identity>("verify_login"); if (token !== generation.current) return; setIdentity(result); setOpen(false); }
+    catch (error) { if (token === generation.current) setMessage(String(error)); }
+    finally { if (token === generation.current) setBusy(false); }
   }
   async function cancel() {
+    const token = ++generation.current;
     setBusy(true);
-    try { await invoke("cancel_login"); setOpen(false); setIdentity(null); setMessage(""); }
-    catch (error) { setMessage(String(error)); }
-    finally { setBusy(false); }
+    try { await invoke("cancel_login"); if (token !== generation.current) return; setOpen(false); setIdentity(null); setMessage(""); }
+    catch (error) { if (token === generation.current) setMessage(String(error)); }
+    finally { if (token === generation.current) setBusy(false); }
   }
   return <div className="login-area">
     <button disabled={busy || !isTauri()} onClick={identity ? cancel : begin}
@@ -32,7 +36,7 @@ export function Login() {
     {(open || message || identity) && <div className="login-panel" role="status">
       <p>{identity ? "已通过中国站登录状态校验 · 仅本次运行有效" : "请在独立窗口完成力扣官方登录，再回到这里校验。当前原型不保存密码或持久化会话。第三方弹窗登录尚未支持。"}</p>
       {message && <p className="error">{message}</p>}
-      {open && <div><button disabled={busy} onClick={verify}>{busy ? "正在校验…" : "已完成登录，校验会话"}</button><button disabled={busy} onClick={cancel}>取消登录</button></div>}
+      {open && <div><button disabled={busy} onClick={verify}>{busy ? "正在校验…" : "已完成登录，校验会话"}</button><button onClick={cancel}>取消登录</button></div>}
     </div>}
   </div>;
 }
