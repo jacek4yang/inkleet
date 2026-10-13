@@ -47,6 +47,21 @@ impl Environments {
         }
         Ok(())
     }
+    fn prepare_group(&self,group:&str)->Result<Vec<(String,Arc<AtomicBool>)>,String>{
+        let ids=group_tools(group)?;
+        let mut jobs=self.jobs.lock().map_err(|_|"工具状态不可用")?;self.initialize(&mut jobs);
+        let mut selected=Vec::new();
+        for id in ids{
+            let Some(job)=jobs.as_mut().unwrap().get_mut(*id)else{continue};
+            if job.view.phase=="ready"||matches!(job.view.phase.as_str(),"queued"|"downloading"|"verifying"|"extracting"|"building"|"canceling"){continue;}
+            job.cancel=Arc::new(AtomicBool::new(false));job.view.phase="queued".into();job.view.message="已加入后台安装队列".into();
+            selected.push(((*id).to_owned(),job.cancel.clone()));
+        }
+        Ok(selected)
+    }
+    fn phase(&self,id:&str)->Result<String,String>{
+        self.jobs.lock().map_err(|_|"工具状态不可用")?.as_ref().and_then(|jobs|jobs.get(id)).map(|job|job.view.phase.clone()).ok_or("依赖工具缺失".into())
+    }
     fn progress(&self,id:&str,progress:Progress){
         if let Ok(mut jobs)=self.jobs.lock(){
             if let Some(job)=jobs.as_mut().and_then(|j|j.get_mut(id)){
@@ -79,4 +94,63 @@ pub async fn start(app:tauri::AppHandle,id:String)->Result<(),String>{
         app.state::<Environments>().finish(&id,result);
     });
     Ok(())
+}
+
+fn group_tools(group:&str)->Result<&'static [&'static str],String>{
+    Ok(match group{
+        "python"=>&["python","node","pyright","debugpy"],
+        "golang"=>&["go","gopls","delve"],
+        "rust"=>&["rustc","cargo","rust-std","rust-src","rust-analyzer-preview","rust-mingw","zig","codelldb"],
+        "cpp"=>&["zig","clangd","codelldb"],
+        "java"=>if cfg!(windows){&["jdk","zig","jdtls","java-debug"]}else{&["jdk","jdtls","java-debug"]},
+        _=>return Err("未知语言环境".into()),
+    })
+}
+pub async fn start_group(app:tauri::AppHandle,group:String)->Result<(),String>{
+    let prepare_app=app.clone();
+    let (manager,selected)=tauri::async_runtime::spawn_blocking(move||{
+        let state=prepare_app.state::<Environments>();
+        Ok::<_,String>((state.manager.clone(),state.prepare_group(&group)?))
+    }).await.map_err(|_|"语言环境准备任务中断")??;
+    // Queue ownership belongs to the backend. Closing or reopening the dialog
+    // cannot lose a pending gopls build or launch a duplicate dependency task.
+    tauri::async_runtime::spawn(async move{
+        for (id,cancel) in selected{
+            let result=async{
+                if cancel.load(Ordering::Acquire){return Err("安装已取消".into());}
+                if id=="gopls"{
+                    let deadline=tokio::time::Instant::now()+std::time::Duration::from_secs(1800);
+                    loop{
+                        if cancel.load(Ordering::Acquire){return Err("安装已取消".into());}
+                        let phase=app.state::<Environments>().phase("go")?;
+                        if phase=="ready"{break;}
+                        if !matches!(phase.as_str(),"queued"|"downloading"|"verifying"|"extracting"|"building"|"canceling"){return Err("Go 工具链未安装成功，请重试语言环境安装".into());}
+                        if tokio::time::Instant::now()>deadline{return Err("等待 Go 工具链超时，请重试".into());}
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    }
+                }
+                let report_app=app.clone();let report_id=id.clone();
+                let report:Report=Arc::new(move|progress|report_app.state::<Environments>().progress(&report_id,progress));
+                manager.install(&id,cancel,report).await
+            }.await;
+            app.state::<Environments>().finish(&id,result);
+        }
+    });
+    Ok(())
+}
+#[cfg(test)]mod group_tests{
+    use super::*;
+    #[test]fn go_group_queues_compiler_before_language_service(){
+        assert_eq!(group_tools("golang").unwrap(),&["go","gopls","delve"]);
+        assert!(group_tools("../custom").is_err());
+    }
+    #[test]fn group_queue_is_idempotent_and_cancellable_without_a_dialog(){
+        let temp=tempfile::tempdir().unwrap();let environments=Environments::new(temp.path().join("tools"));
+        let first=environments.prepare_group("golang").unwrap();
+        assert_eq!(first.iter().map(|(id,_)|id.as_str()).collect::<Vec<_>>(),vec!["go","gopls","delve"]);
+        assert!(environments.prepare_group("golang").unwrap().is_empty());
+        environments.cancel("gopls").unwrap();
+        assert!(first[1].1.load(Ordering::Acquire));
+        assert_eq!(environments.phase("gopls").unwrap(),"canceling");
+    }
 }

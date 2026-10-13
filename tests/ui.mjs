@@ -344,7 +344,8 @@ try {
   const envPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await envPage.addInitScript(() => {
     window.isTauri = true;
-    window.__envTest = { starts: [], pending: [], tools: [
+    window.__envTest = { starts: [], pending: [], groups: [], tools: [
+      ...["go","gopls","delve"].map(id=>({id,version:"fixture",size:1000,downloaded:0,phase:"missing",message:""})),
       { id: "python", version: "3.14.8", size: 30000000, downloaded: 0, phase: "missing", message: "" },
       { id: "node", version: "24.21.0", size: 50000000, downloaded: 50000000, phase: "ready", message: "" },
       { id: "pyright", version: "1.1.414", size: 4000000, downloaded: 4000000, phase: "ready", message: "" },
@@ -354,6 +355,11 @@ try {
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") return;
       if (command === "environment_status") return JSON.parse(JSON.stringify({ platform: "linux-x64", supported: true, tools: window.__envTest.tools }));
+      if (command === "install_environment_group") {
+        window.__envTest.groups.push(args.group);
+        for(const tool of window.__envTest.tools) if(["go","gopls","delve"].includes(tool.id))tool.phase="queued";
+        return;
+      }
       if (command === "install_environment") {
         window.__envTest.starts.push(args.id);
         window.__envTest.tools.find(t => t.id === args.id).phase = "downloading";
@@ -379,10 +385,25 @@ try {
   await envDialog.getByText("已取消", { exact: true }).waitFor();
   await envDialog.getByRole("button", { name: "重试 / 修复", exact: true }).click();
   await envPage.waitForFunction(() => window.__envTest.starts.length === 2);
-  await envPage.evaluate(() => { window.__envTest.tools[0].phase = "ready"; window.__envTest.pending[1](); });
+  await envPage.evaluate(() => { window.__envTest.tools.find(t=>t.id==="python").phase = "ready"; window.__envTest.pending[1](); });
   await envPage.waitForFunction(() => [...document.querySelectorAll(".environment-tools [role=status]")].every(e => e.textContent === "已安装"));
   assert.equal(await envPage.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await envPage.screenshot({ path: "evidence/managed-environment-mobile-ui.png", fullPage: true });
+  await envDialog.getByRole("combobox",{name:"开发环境语言"}).selectOption("golang");
+  await envDialog.locator(".environment-summary button").evaluate(button=>{button.click();button.click();});
+  await envPage.waitForFunction(()=>window.__envTest.groups.length===1);
+  await envDialog.getByRole("button",{name:"关闭",exact:true}).click();
+  await envPage.evaluate(()=>{
+    window.__envTest.tools.find(t=>t.id==="go").phase="ready";
+    window.__envTest.tools.find(t=>t.id==="gopls").phase="building";
+  });
+  await envPage.getByRole("button",{name:"开发环境",exact:true}).click();
+  await envDialog.getByRole("combobox",{name:"开发环境语言"}).selectOption("golang");
+  await envDialog.getByText("编译工具中",{exact:true}).waitFor();
+  assert.equal(await envPage.evaluate(()=>window.__envTest.groups.length),1);
+  await envPage.evaluate(()=>{for(const tool of window.__envTest.tools)tool.phase="ready";});
+  await envPage.waitForFunction(()=>[...document.querySelectorAll(".environment-tools [role=status]")].every(e=>e.textContent==="已安装"));
+
   await envPage.close();
   await writeFile("evidence/ENVIRONMENT_UI_RESULT.txt", "PASS: mocked IPC only; duplicate install guard, close/reopen during background download, cancellation, manual retry, mobile layout. Real installer/protocol verified separately.\n");
 

@@ -287,6 +287,13 @@ try:
             environment_group="cpp" if group=="c" else group
             click(f'select[aria-label="开发环境语言"] option[value="{environment_group}"]')
             click(".environment-summary button")
+            if group=="golang":
+                # Closing before Go finishes must not discard the queued gopls build.
+                click("dialog.environments header button")
+                time.sleep(1)
+                click('[data-action="open-environments"]')
+                wait_for(lambda: element("dialog.environments"),"reopen ongoing Go installation")
+                click('select[aria-label="开发环境语言"] option[value="golang"]')
             wait_for(lambda: all("已安装" in text(f'[data-tool="{tool}"]') for tool in (
                 {"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview","zig","codelldb"],"cpp":["zig","clangd","codelldb"],"c":["zig","clangd","codelldb"]}[group]
             )),f"{group} managed installation",seconds=720)

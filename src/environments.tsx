@@ -22,7 +22,6 @@ export function Environments({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState("");
   const [group,setGroup] = useState<Group>("python");
   const groupName = groups[group].name;
-  const [installGoService,setInstallGoService] = useState(false);
   const visibleTools = overview?.tools.filter(tool => groups[group].ids.includes(tool.id) && !(group==="java" && tool.id==="zig" && overview.platform!=="windows-x64")) ?? [];
   const [, setActions] = useState(0);
   const statusSequence = useRef(0);
@@ -53,19 +52,13 @@ export function Environments({ onClose }: { onClose: () => void }) {
     } catch (e) { if (alive.current) setError(String(e)); }
     finally { pending.current.delete(id); if (alive.current) setActions(v => v + 1); }
   }
-  useEffect(() => {
-    if (!installGoService || !overview) return;
-    const runtime=overview.tools.find(tool=>tool.id==="go");
-    if (runtime?.phase==="ready") { setInstallGoService(false); void action("gopls"); }
-    else if (runtime && ["error","canceled","broken"].includes(runtime.phase)) setInstallGoService(false);
-  },[overview,installGoService]);
-  function installGroup() {
-    const go=overview?.tools.find(tool=>tool.id==="go");
-    if(group==="golang" && go?.phase!=="ready") {
-      for (const tool of visibleTools) if (tool.id !== "gopls" && tool.phase !== "ready" && !busy(tool.phase)) void action(tool.id);
-      setInstallGoService(true); return;
-    }
-    for(const tool of visibleTools) if(tool.phase!=="ready"&&!busy(tool.phase)) void action(tool.id);
+  async function installGroup() {
+    const key="group:"+group;
+    if(pending.current.has(key))return;
+    pending.current.add(key);setActions(value=>value+1);setError("");
+    try {await invoke("install_environment_group",{group});await refreshStatus();}
+    catch(error){if(alive.current)setError(String(error));}
+    finally {pending.current.delete(key);if(alive.current)setActions(value=>value+1);}
   }
   return <dialog ref={dialog} className="environments" aria-labelledby="environment-title" onCancel={e => { e.preventDefault(); onClose(); }}>
     <header><h2 id="environment-title">开发环境</h2><button onClick={onClose}>关闭</button></header>
