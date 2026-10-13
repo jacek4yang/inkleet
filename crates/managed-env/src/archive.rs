@@ -112,6 +112,38 @@ fn extract_reader(reader: impl Read, root: &Path, prefix: &str, cancel: &AtomicB
     }
     if links.is_empty() { Ok(()) } else { Err("压缩包链接循环、缺失或过深".into()) }
 }
+
+pub(crate) fn extract_xz(archive:&Path,root:&Path,prefix:&str,cancel:&AtomicBool)->Result<()>{
+    let reader=lzma_rust2::XzReader::new_mem_limit(io(File::open(archive))?,false,128*1024);
+    extract_reader(reader,root,prefix,cancel)
+}
+pub(crate) fn extract_zip(archive:&Path,root:&Path,prefix:&str,cancel:&AtomicBool)->Result<()>{
+    let mut zip=zip::ZipArchive::new(io(File::open(archive))?).map_err(|_|"无效的 ZIP 分发包")?;
+    if zip.len()>50000{return Err("ZIP 文件数量超限".into());}
+    let mut total=0u64;let mut seen=HashSet::new();
+    for index in 0..zip.len(){
+        canceled(cancel)?;
+        let mut entry=zip.by_index(index).map_err(|_|"ZIP 条目不可读取")?;
+        let path=if prefix.is_empty(){safe_path(entry.name())?}else{stripped(entry.name(),prefix)?};
+        if path.as_os_str().is_empty()&&entry.is_dir(){continue;}
+        if path.as_os_str().is_empty(){return Err("ZIP 根条目类型无效".into());}
+        let mode=entry.unix_mode().unwrap_or(0o644);
+        let kind=mode&0o170000;
+        if kind!=0&&kind!=0o100000&&kind!=0o040000{return Err("ZIP 包含符号链接或非普通文件".into());}
+        let dest=root.join(&path);
+        if entry.is_dir(){io(fs::create_dir_all(dest))?;continue;}
+        if !seen.insert(path.clone()){return Err("ZIP 重复文件路径".into());}
+        let size=entry.size();total=total.checked_add(size).ok_or("ZIP 解压长度溢出")?;
+        if size>MAX_FILE||total>MAX_TOTAL{return Err("ZIP 解压大小超限".into());}
+        io(fs::create_dir_all(dest.parent().ok_or("ZIP 路径缺少父目录")?))?;
+        let mut file=io(OpenOptions::new().write(true).create_new(true).open(&dest))?;
+        copy_cancelled(&mut entry,&mut file,size,cancel)?;
+        #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;io(file.set_permissions(fs::Permissions::from_mode(if mode&0o111!=0{0o755}else{0o644})))?;}
+        io(file.sync_all())?;
+    }
+    Ok(())
+}
+
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn rejects_traversal_and_windows_escape() {
@@ -150,4 +182,18 @@ fn extract_reader(reader: impl Read, root: &Path, prefix: &str, cancel: &AtomicB
         let d = tempfile::tempdir().unwrap(); let bytes=tar_bytes(None);
         assert!(extract_reader(&bytes[..513], d.path(), "python", &AtomicBool::new(false)).is_err());
     }
+    #[test] fn zip_extraction_checks_paths_and_preserves_files() {
+        use std::io::Cursor;
+        let d=tempfile::tempdir().unwrap();
+        let mut writer=zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer.start_file("package/a.py",zip::write::SimpleFileOptions::default()).unwrap();
+        writer.write_all(b"print(1)").unwrap();
+        let bytes=writer.finish().unwrap().into_inner();
+        let archive=d.path().join("test.zip");fs::write(&archive,bytes).unwrap();
+        let dest=d.path().join("dest");fs::create_dir(&dest).unwrap();
+        extract_zip(&archive,&dest,"package",&AtomicBool::new(false)).unwrap();
+        assert_eq!(fs::read(dest.join("a.py")).unwrap(),b"print(1)");
+        assert!(safe_path("package/../../escape.py").is_err());
+    }
+
 }

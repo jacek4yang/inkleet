@@ -3,6 +3,7 @@
 mod archive;
 pub mod protocol;
 pub mod rpc;
+pub mod process;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf},
@@ -65,7 +66,7 @@ fn directory(path: &Path) -> Result<()> {
 fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.username().is_empty() && url.password().is_none()
         && url.port_or_known_default() == Some(443)
-        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org"))
+        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org"))
 }
 impl Manager {
     pub fn new(root: PathBuf) -> Self { Self { root } }
@@ -115,7 +116,12 @@ impl Manager {
                 archive::safe_path(&p.entry)?;
                 io(fs::copy(&partial, stage.path().join(&p.entry)))?;
             } else {
-                archive::extract(&partial, stage.path(), &p.prefix, &verified_cancel).map_err(|e| format!("解压工具失败：{e}"))?;
+                match p.archive.as_str() {
+                    "tar-gz"=>archive::extract(&partial,stage.path(),&p.prefix,&verified_cancel),
+                    "tar-xz"=>archive::extract_xz(&partial,stage.path(),&p.prefix,&verified_cancel),
+                    "zip"=>archive::extract_zip(&partial,stage.path(),&p.prefix,&verified_cancel),
+                    _=>Err("不支持的分发包格式".into()),
+                }.map_err(|e|format!("解压工具失败：{e}"))?;
             }
             let entry = stage.path().join(&p.entry); regular(&entry)?;
             let receipt = Receipt { package_hash: p.sha256.clone(), entry_hash: hash_file(&entry, &verified_cancel)? };
@@ -189,7 +195,7 @@ mod tests {
             assert_eq!(p.sha256.len(), 64); assert!(p.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
             assert!(p.size > 0 && p.size < 512 * 1024 * 1024);
             assert!(host_allowed(&reqwest::Url::parse(&p.url).unwrap()));
-            assert!(matches!(p.archive.as_str(), "tar-gz" | "raw"));
+            assert!(matches!(p.archive.as_str(), "tar-gz" | "tar-xz" | "zip" | "raw"));
             archive::safe_path(&p.entry).unwrap();
         }
     }

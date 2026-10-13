@@ -48,6 +48,71 @@ async fn main() -> Result<(), String> {
         let _=client.notify("exit",json!(null));client.stop();
         Ok(json!({"initialize":true,"hover":true,"completion":true,"stdlibDeclaration":true,"managedNode":true}))
     }).await.map_err(|_|"LSP probe task failed")??;
-    println!("MANAGED_ENV_RESULT {}",serde_json::json!({"platform":platform(),"python":serde_json::from_slice::<serde_json::Value>(&result.stdout).map_err(|e|e.to_string())?,"pyrightPackage":true,"lsp":lsp,"systemPathUsed":false,"reinstallIdempotent":true}));
+
+    let debugpy=manager.install("debugpy",Arc::new(AtomicBool::new(false)),Arc::new(|_|{})).await?;
+    let debug_root=debugpy.parent().and_then(std::path::Path::parent).and_then(std::path::Path::parent).ok_or("debugpy package root")?.to_path_buf();
+    let runtime_python=python.clone();let runtime_work=work.clone();
+    let runtime=tokio::task::spawn_blocking(move || -> Result<serde_json::Value,String> {
+        use inkleet_managed_env::{process,rpc::Client};
+        use std::{process::Command,sync::{mpsc,atomic::Ordering}};
+        use serde_json::json;
+        fn command(python:&std::path::Path,work:&std::path::Path,script:&str)->Command{
+            let mut command=Command::new(python);command.args(["-I","-c",script]).env_clear().current_dir(work)
+                .env("HOME",work).env("USERPROFILE",work).env("TEMP",work).env("TMP",work).env("PATH",python.parent().unwrap());
+            if let Some(root)=std::env::var_os("SystemRoot"){command.env("SystemRoot",root);}
+            command
+        }
+        let normal=process::run(command(&runtime_python,&runtime_work,"print(42)"),Arc::new(AtomicBool::new(false)),Duration::from_secs(5),4096)?;
+        assert_eq!(normal.exit_code,Some(0));assert_eq!(normal.stdout.trim(),"42");
+        let timeout=process::run(command(&runtime_python,&runtime_work,"while True: pass"),Arc::new(AtomicBool::new(false)),Duration::from_millis(200),4096)?;
+        assert!(timeout.timed_out);
+        let flood=process::run(command(&runtime_python,&runtime_work,"print('x'*200000)"),Arc::new(AtomicBool::new(false)),Duration::from_secs(5),4096)?;
+        assert!(flood.truncated);assert!(flood.stdout.len()+flood.stderr.len()<=4096);
+        let cancel=Arc::new(AtomicBool::new(false));let cancel_copy=cancel.clone();
+        std::thread::spawn(move||{std::thread::sleep(Duration::from_millis(200));cancel_copy.store(true,Ordering::Relaxed);});
+        let canceled=process::run(command(&runtime_python,&runtime_work,"import time;time.sleep(30)"),cancel,Duration::from_secs(5),4096)?;
+        assert!(canceled.canceled);
+        let child_script="import time,pathlib;time.sleep(2);pathlib.Path('orphan-marker').write_text('bad')";
+        let parent_script=format!("import sys,subprocess;subprocess.Popen([sys.executable,'-I','-c',{}]);print('parent finished')",serde_json::to_string(child_script).unwrap());
+        let _=process::run(command(&runtime_python,&runtime_work,&parent_script),Arc::new(AtomicBool::new(false)),Duration::from_millis(500),4096)?;
+        std::thread::sleep(Duration::from_millis(2200));
+        assert!(!runtime_work.join("orphan-marker").exists(),"descendant survived process cleanup");
+        let script_path=runtime_work.join("debug_subject.py");
+        std::fs::write(&script_path,"total = 1\ntotal += 2\nresult = total * 2\nprint(result)\n").map_err(|e|e.to_string())?;
+        let mut adapter=command(&runtime_python,&runtime_work,"import sys,runpy;sys.path.insert(0,sys.argv[1]);sys.argv=['debugpy.adapter'];runpy.run_module('debugpy.adapter',run_name='__main__')");
+        adapter.arg(&debug_root);
+        let (events_tx,events_rx)=mpsc::sync_channel(128);
+        let client=Arc::new(Client::spawn_dap(adapter,Arc::new(move|event|{if event.get("event").and_then(serde_json::Value::as_str)!=Some("output"){let _=events_tx.try_send(event);}}))?);
+        client.request("initialize",json!({"clientID":"inkleet","adapterID":"python","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsVariableType":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(15))?;
+        let launch_client=client.clone();let launch_python=runtime_python.clone();let launch_work=runtime_work.clone();let launch_script=script_path.clone();
+        let launching=std::thread::spawn(move||launch_client.request("launch",json!({"name":"InkLeet fixture","type":"python","request":"launch","python":launch_python,"program":launch_script,"cwd":launch_work,"console":"internalConsole","justMyCode":false}),Duration::from_secs(30)));
+        fn event(rx:&mpsc::Receiver<serde_json::Value>,name:&str)->Result<serde_json::Value,String>{
+            let deadline=std::time::Instant::now()+Duration::from_secs(30);
+            loop{let remaining=deadline.saturating_duration_since(std::time::Instant::now());let value=rx.recv_timeout(remaining).map_err(|_|format!("missing DAP event {name}"))?;
+                if value.get("event").and_then(serde_json::Value::as_str)==Some(name){return Ok(value);}
+            }
+        }
+        event(&events_rx,"initialized")?;
+        let breakpoint=client.request("setBreakpoints",json!({"source":{"path":script_path},"breakpoints":[{"line":2}]}),Duration::from_secs(10))?;
+        assert!(breakpoint.pointer("/breakpoints/0/verified").and_then(serde_json::Value::as_bool)==Some(true));
+        client.request("configurationDone",json!({}),Duration::from_secs(10))?;
+        launching.join().map_err(|_|"launch thread failed")??;
+        let stopped=event(&events_rx,"stopped")?;
+        let thread_id=stopped.pointer("/body/threadId").and_then(serde_json::Value::as_i64).ok_or("stopped thread ID")?;
+        let stack=client.request("stackTrace",json!({"threadId":thread_id,"startFrame":0,"levels":10}),Duration::from_secs(10))?;
+        let frame_id=stack.pointer("/stackFrames/0/id").and_then(serde_json::Value::as_i64).ok_or("stack frame ID")?;
+        let scopes=client.request("scopes",json!({"frameId":frame_id}),Duration::from_secs(10))?;
+        let variables_ref=scopes.pointer("/scopes/0/variablesReference").and_then(serde_json::Value::as_i64).ok_or("locals reference")?;
+        let variables=client.request("variables",json!({"variablesReference":variables_ref}),Duration::from_secs(10))?;
+        assert!(variables.get("variables").and_then(serde_json::Value::as_array).is_some_and(|v|v.iter().any(|v|v.get("name").and_then(serde_json::Value::as_str)==Some("total"))));
+        client.request("next",json!({"threadId":thread_id}),Duration::from_secs(10))?;
+        event(&events_rx,"stopped")?;
+        client.request("setBreakpoints",json!({"source":{"path":script_path},"breakpoints":[]}),Duration::from_secs(10))?;
+        client.request("continue",json!({"threadId":thread_id}),Duration::from_secs(10))?;
+        event(&events_rx,"terminated")?;
+        let _=client.request("disconnect",json!({"terminateDebuggee":true}),Duration::from_secs(5));client.stop();
+        Ok(json!({"normalRun":true,"timeout":true,"outputLimit":true,"cancel":true,"processTreeCleanup":true,"dap":{"breakpoint":true,"stack":true,"variables":true,"stepOver":true,"continue":true,"termination":true}}))
+    }).await.map_err(|_|"runtime probe failed")??;
+    println!("MANAGED_ENV_RESULT {}",serde_json::json!({"platform":platform(),"python":serde_json::from_slice::<serde_json::Value>(&result.stdout).map_err(|e|e.to_string())?,"pyrightPackage":true,"lsp":lsp,"runtime":runtime,"systemPathUsed":false,"reinstallIdempotent":true}));
     Ok(())
 }
