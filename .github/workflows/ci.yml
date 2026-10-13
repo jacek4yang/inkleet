@@ -156,6 +156,7 @@ jobs:
           npm ci --ignore-scripts
           npm run tauri -- icon icon.svg
           npm run typecheck
+          npm run build
           cargo test --locked --manifest-path src-tauri/Cargo.toml
           npm run tauri -- build --debug --no-bundle
       - name: Verify native storage through the actual GUI
