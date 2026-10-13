@@ -1,0 +1,16 @@
+[package]
+name = "inkleet"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+name = "inkleet_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = "=2.7.2"
+
+[dependencies]
+tauri = "=2.12.3"
+serde = { version = "1", features = ["derive"] }
+tempfile = "3"
