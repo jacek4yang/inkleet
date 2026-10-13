@@ -469,9 +469,14 @@ try {
       if (command === "start_language_service") throw new Error("Language service intentionally absent in runner UI fixture");
       if (command === "debug_status") return state.debug ? JSON.parse(JSON.stringify(state.debug)) : null;
       if (command === "start_debug") {
-        ++state.debugStarts;
+        ++state.debugStarts; state.debugCode=args.snapshot.code;
         state.debug = { id: state.debugStarts, phase: "paused", title: args.snapshot.title, threadId: 1, epoch: 1, output: "", truncated: false, reason: "breakpoint", error: "", breakpoints: args.lines.map(line => ({ line, verified: true })) };
         return state.debug.id;
+      }
+      if (command === "set_debug_breakpoints") {
+        if(args.code!==state.debugCode)throw new Error("Snapshot changed");
+        state.debug.breakpoints=args.lines.map(line=>({line,verified:true}));
+        state.breakpointUpdates=(state.breakpointUpdates??0)+1;return;
       }
       if (command === "stop_debug") { state.debug.phase = "finished"; state.debug.epoch++; return; }
       if (command === "debug_request") {
@@ -525,12 +530,17 @@ try {
   await runPanel.getByText("已暂停 · breakpoint", { exact: true }).waitFor();
   await runPanel.getByRole("button", { name: "values", exact: true }).waitFor();
   await runPage.locator(".cm-debug-stopped").waitFor();
-  await runPanel.getByRole("button", { name: "单步跳过", exact: true }).click();
+  await runPage.getByRole("textbox", {name:"代码编辑器",exact:true}).press("F9");
+  await runPanel.getByRole("button",{name:"应用断点",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.breakpointUpdates===1&&window.__runTest.debug.breakpoints.length===0);
+  await runPanel.getByText("断点已更新",{exact:true}).waitFor();
+  await runPage.getByRole("textbox", {name:"代码编辑器",exact:true}).press("F10");
   await runPage.waitForFunction(() => window.__runTest.debugCalls.includes("next"));
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).fill("def solve(values): return 0");
   await runPanel.getByText(/调试仍使用启动时快照/).waitFor();
+  assert.equal(await runPanel.getByRole("button",{name:"应用断点",exact:true}).isDisabled(),true);
   await runPage.waitForFunction(() => !document.querySelector(".cm-debug-stopped"));
-  await runPanel.getByRole("button", { name: "停止调试", exact: true }).click();
+  await runPage.getByRole("textbox",{name:"代码编辑器",exact:true}).press("Shift+F5");
   await runPanel.getByText(/调试结束/).waitFor();
   assert.equal(await runPage.evaluate(() => window.__runTest.debugStarts), 1);
   assert.deepEqual(runErrors, []);

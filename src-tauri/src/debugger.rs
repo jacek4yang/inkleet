@@ -7,7 +7,7 @@ type Result<T>=std::result::Result<T,String>;
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct View{pub id:u64,pub phase:String,pub title:String,pub thread_id:Option<i64>,pub epoch:u64,pub output:String,pub truncated:bool,pub reason:String,pub error:String,pub breakpoints:Vec<Value>}
-struct Session{client:Client,view:Arc<Mutex<View>>,source:PathBuf,_work:tempfile::TempDir,closed:AtomicBool}
+struct Session{client:Client,view:Arc<Mutex<View>>,source:PathBuf,source_code:String,points_gate:Mutex<()>,_work:tempfile::TempDir,closed:AtomicBool}
 impl Session{
     fn stop(&self,reason:&str){
         if self.closed.swap(true,Ordering::AcqRel){return;}
@@ -28,6 +28,18 @@ impl Debugger{
         self.active.lock().map_err(|_|"调试状态不可用")?.as_ref().map(|s|s.view.lock().map(|v|v.clone()).map_err(|_|"调试状态不可用".into())).transpose()
     }
     pub fn stop(&self,id:u64)->Result<()>{self.session(id)?.stop("用户停止");Ok(())}
+    pub fn breakpoints(&self,id:u64,code:&str,lines:Vec<u32>)->Result<()>{
+        let session=self.session(id)?;
+        if code!=session.source_code{return Err("源码已改变；请重新启动调试后应用断点".into());}
+        validate_breakpoints(code,&lines)?;
+        let _gate=session.points_gate.lock().map_err(|_|"断点状态不可用")?;
+        if session.closed.load(Ordering::Acquire)||session.view.lock().map_err(|_|"调试状态不可用")?.phase=="finished"{return Err("调试会话已结束".into());}
+        let mut lines=lines;lines.sort_unstable();lines.dedup();
+        let requested:Vec<Value>=lines.into_iter().map(|line|json!({"line":line})).collect();
+        let response=session.client.request("setBreakpoints",json!({"source":{"path":session.source},"breakpoints":requested}),Duration::from_secs(10))?;
+        if let Ok(mut view)=session.view.lock(){view.breakpoints=response.get("breakpoints").and_then(Value::as_array).cloned().unwrap_or_default();}
+        Ok(())
+    }
     pub fn request(&self,id:u64,epoch:u64,kind:&str,reference:i64)->Result<Value>{
         let session=self.session(id)?;
         let (thread,paused)={
@@ -53,7 +65,7 @@ impl Debugger{
 pub async fn start(app:tauri::AppHandle,snapshot:crate::local_run::Snapshot,lines:Vec<u32>)->Result<u64>{
     if snapshot.language!="python3"||snapshot.code.len()>2*1024*1024||snapshot.title.len()>512{return Err("当前调试仅支持有限大小的 Python 源码".into());}
     harness::configuration(&snapshot.metadata,&snapshot.input)?;
-    if lines.len()>200||lines.iter().any(|&line|line==0||line as usize>snapshot.code.lines().count().max(1)){return Err("断点行号超出源码范围".into());}
+    validate_breakpoints(&snapshot.code,&lines)?;
     let state=app.state::<Debugger>();
     if state.starting.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err(){return Err("调试器正在启动".into());}
     drop(state);
@@ -95,7 +107,7 @@ pub async fn start(app:tauri::AppHandle,snapshot:crate::local_run::Snapshot,line
             }
         }))?;
         client.request("initialize",json!({"clientID":"inkleet","adapterID":"python","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsVariableType":true,"supportsVariablePaging":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(15))?;
-        let session=Arc::new(Session{client,view,source:source.clone(),_work:work,closed:AtomicBool::new(false)});
+        let session=Arc::new(Session{client,view,source:source.clone(),source_code:snapshot.code,points_gate:Mutex::new(()),_work:work,closed:AtomicBool::new(false)});
         let launching=session.clone();let program=root.join("harness.py");
         let launch=std::thread::spawn(move||launching.client.request("launch",json!({"name":"InkLeet local snapshot","type":"python","request":"launch","python":python,"program":program,"cwd":root,"console":"internalConsole","justMyCode":false,"redirectOutput":true,"stopOnEntry":false}),Duration::from_secs(30)));
         initialized_rx.recv_timeout(Duration::from_secs(20)).map_err(|_|"调试器初始化超时")?;
@@ -125,4 +137,19 @@ pub async fn start(app:tauri::AppHandle,snapshot:crate::local_run::Snapshot,line
         });
         Ok(id)
     }).await.map_err(|_|"调试启动任务中断".to_owned())?
+}
+
+fn validate_breakpoints(code:&str,lines:&[u32])->Result<()>{
+    if code.len()>2*1024*1024||lines.len()>200||lines.iter().any(|&line|line==0||line as usize>code.lines().count().max(1)){return Err("断点行号超出源码范围".into());}
+    Ok(())
+}
+#[cfg(test)]mod tests{
+    use super::*;
+    #[test]fn breakpoint_updates_are_bounded(){
+        assert!(validate_breakpoints("a\nb",&[1,2,2]).is_ok());
+        assert!(validate_breakpoints("a",&[]).is_ok());
+        assert!(validate_breakpoints("a",&[0]).is_err());
+        assert!(validate_breakpoints("a",&[2]).is_err());
+        assert!(validate_breakpoints("a",&vec![1;201]).is_err());
+    }
 }

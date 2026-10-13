@@ -56,7 +56,15 @@ fn copy_config(from:&Path,to:&Path)->Result<(),String>{
         if !items.iter().any(|item|item.get("label").and_then(Value::as_str).is_some_and(|s|s.starts_with("add"))){return Err("Missing Java member completion".into());}
         let definition=client.request("textDocument/definition",json!({"textDocument":{"uri":uri},"position":{"line":3,"character":5}}),Duration::from_secs(20))?;
         if definition.is_null()||definition.as_array().is_some_and(Vec::is_empty){return Err("Missing Java standard library definition".into());}
-        println!("JAVA_LSP_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"hover":true,"completion":true,"stdlibDefinition":true,"definition":definition,"systemPathUsed":false}));
+        let definition_uri=definition.pointer("/0/uri").and_then(Value::as_str).ok_or("Java definition URI")?;
+        let contents=client.request("java/classFileContents",json!({"uri":definition_uri}),Duration::from_secs(20))?;
+        let contents=contents.as_str().ok_or("Java source text")?;
+        use std::io::Read;
+        let mut sources=zip::ZipArchive::new(std::fs::File::open(java_home.join("lib/src.zip")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        let mut source=sources.by_name("java.base/java/util/ArrayList.java").map_err(|e|e.to_string())?;
+        let mut expected=String::new();source.read_to_string(&mut expected).map_err(|e|e.to_string())?;
+        if contents.replace("\r\n","\n")!=expected.replace("\r\n","\n"){return Err(format!("Java source is not identical to private JDK src.zip (received {} bytes; expected {} bytes)",contents.len(),expected.len()));}
+        println!("JAVA_LSP_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"hover":true,"completion":true,"stdlibDefinition":true,"exactJdkSource":true,"sourceBytes":contents.len(),"systemPathUsed":false}));
         Ok(())
     })();
     if let Err(error)=&result{println!("JAVA_LSP_FAILURE {error}; stderr={}; notices={:?}",client.stderr(),notices.lock().ok());}

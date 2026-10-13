@@ -185,6 +185,10 @@ async fn stop_debug(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64)->Re
     check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().stop(id)).await.map_err(|_|"停止调试任务中断".to_owned())?
 }
 #[tauri::command]
+async fn set_debug_breakpoints(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,code:String,lines:Vec<u32>)->Result<(),String>{
+    check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().breakpoints(id,&code,lines)).await.map_err(|_|"更新断点任务中断".to_owned())?
+}
+#[tauri::command]
 async fn debug_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,epoch:u64,kind:String,reference:i64)->Result<serde_json::Value,String>{
     check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().request(id,epoch,&kind,reference)).await.map_err(|_|"调试请求任务中断".to_owned())?
 }
@@ -206,7 +210,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_debug, debug_status, stop_debug, debug_request, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .run(tauri::generate_context!())
         .expect("InkLeet failed to start");
 }
