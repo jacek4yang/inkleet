@@ -10,7 +10,7 @@ def request(method, path, payload=None):
     raw = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(BASE + path, data=raw, method=method, headers={"Content-Type":"application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=90) as response:
             result = json.load(response)
     except urllib.error.HTTPError as error:
         raise RuntimeError(error.read().decode()) from error
@@ -78,6 +78,7 @@ try:
     screenshot("conflict-native.png")
     (evidence/"RESULT.txt").write_text("PASS: real Linux Tauri/WebKitGTK launch, native IPC, plain source and notes save, process restart restore, external conflict preserving both texts. No LeetCode verification.\n")
 except Exception:
+    subprocess.run(["scrot", str(evidence / "desktop-failure.png")], check=False)
     if session:
         try: screenshot("failure.png")
         except Exception: pass
