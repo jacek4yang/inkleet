@@ -32,6 +32,8 @@ function App() {
   const [status, setStatus] = useState("正在读取");
   const [loading, setLoading] = useState(true);
   const documents = useRef(new Map<string, Document>());
+  const persisted = useRef(new Map<string, string | null>());
+  const sequence = useRef(0);
   const notes = useRef(new Map<string, string>());
   const queue = useRef(Promise.resolve());
   const activeKey = draftKey({ account: "local", problem: problemId, language });
@@ -45,15 +47,17 @@ function App() {
     queue.current.then(async () => {
       if (!documents.current.has(activeKey)) {
         if (isTauri()) {
-          const loaded = await invoke<Document | null>("load_document", { problem: problemId, language });
-          documents.current.set(activeKey, loaded ?? { code: templates[language], notes: "" });
-          if (loaded) notes.current.set(problemId, loaded.notes);
+          const loaded = await invoke<{code: string | null; notes: string | null}>("load_document", { problem: problemId, language });
+          documents.current.set(activeKey, { code: loaded.code ?? templates[language], notes: loaded.notes ?? "" });
+          persisted.current.set(activeKey, loaded.code);
+          persisted.current.set(problemId + "/notes", loaded.notes);
+          notes.current.set(problemId, loaded.notes ?? "");
         } else {
           documents.current.set(activeKey, { code: templates[language], notes: notes.current.get(problemId) ?? "" });
         }
       }
       if (alive) { refresh(r => r + 1); setLoading(false); setStatus(isTauri() ? "已读取本机文件" : "前端预览 · 仅内存，请导出保留"); }
-    }).catch(() => { if (alive) { setLoading(false); setStatus("读取失败，已保护现有文件；请重启后重试"); } });
+    }).catch(() => { if (alive) { setLoading(true); setStatus("读取失败，已保护现有文件；请重启后重试"); } });
     return () => { alive = false; };
   }, [activeKey, problemId, language]);
 
@@ -65,10 +69,13 @@ function App() {
     if (!isTauri()) return;
     setStatus("保存中");
     const key = activeKey;
+    const saveKey = kind === "notes" ? problemId + "/notes" : key;
+    const generation = ++sequence.current;
     // 串行保存保证旧请求不会在新请求之后覆盖正文；失败必须显式可见。
     queue.current = queue.current.then(async () => {
-      await invoke("save_text", { problem: problemId, language, kind, text });
-      if (selected.current === key) setStatus("已保存到本机文件");
+      await invoke("save_text", { problem: problemId, language, kind, text, expected: persisted.current.get(saveKey) ?? null });
+      persisted.current.set(saveKey, text);
+      if (selected.current === key && generation === sequence.current) setStatus("已保存到本机文件");
     }).catch(() => { if (selected.current === key) setStatus("保存失败 · 草稿仍在，请先导出"); });
   }
   const visible = samples.filter(p => (p.number + p.title).includes(query));
