@@ -139,4 +139,22 @@ mod tests {
         assert!(decode_data(b"<html>verification</html>").is_err());
         assert!(decode_data(br#"{"data":{"question":null}}"#).is_ok());
     }
+    #[test]
+    #[ignore = "requires a live request to the public Chinese site; never uses private credentials"]
+    fn public_cn_probe() {
+        tauri::async_runtime::block_on(async {
+            let api = Leetcode::new().unwrap();
+            let question = api.question("two-sum").await.expect("public Chinese question protocol");
+            assert_eq!(question.title_slug, "two-sum");
+            assert!(!question.question_id.is_empty());
+            assert!(question.translated_content.as_ref().is_some_and(|s| !s.is_empty()));
+            let snippets = question.code_snippets.expect("official language templates");
+            for lang in ["python3", "rust", "golang", "c", "cpp", "java"] {
+                assert!(snippets.iter().any(|s| s.lang_slug == lang && !s.code.is_empty()), "missing template: {lang}");
+            }
+            let list = api.search("two sum", 0).await.expect("public Chinese search protocol");
+            assert!(list.total > 0 && !list.questions.is_empty());
+        });
+    }
+
 }
