@@ -45,7 +45,7 @@ def screenshot(name):
     (evidence / name).write_bytes(base64.b64decode(cmd("GET","/screenshot")))
 def start():
     global session
-    result = request("POST","/session",{"capabilities":{"alwaysMatch":{"browserName":"wry","tauri:options":{"application":str(pathlib.Path("src-tauri/target/debug/inkleet").resolve())}}}})
+    result = request("POST","/session",{"capabilities":{"alwaysMatch":{"browserName":"wry","tauri:options":{"application":str(pathlib.Path(os.environ.get("INKLEET_TEST_BINARY", "src-tauri/target/debug/inkleet")).resolve())}}}})
     session = result["sessionId"]
     wait_for(lambda: "已读取本机文件" in text('[role="status"]'), "native IPC initial load")
 def stop():

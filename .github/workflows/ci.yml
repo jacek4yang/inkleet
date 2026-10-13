@@ -78,7 +78,10 @@ jobs:
           key: ${{ matrix.os }}-desktop
       - name: Linux prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
       - name: Prepare frontend and icon
         shell: bash
         run: |
@@ -90,6 +93,27 @@ jobs:
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Build unsigned developer installer
         run: npm run tauri -- build --bundles ${{ matrix.bundle }}
+      - name: Validate and install Linux package, then test the installed application
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p evidence/install
+          mapfile -d '' packages < <(find src-tauri/target/release/bundle/deb -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          package="$(realpath "${packages[0]}")"
+          dpkg-deb --info "$package" | tee evidence/install/package-info.txt
+          sha256sum "$package" > evidence/install/SHA256.txt
+          sudo apt-get install -y "$package" > evidence/install/install.log 2>&1
+          dpkg-query -W -f='${Status} ${Version} ${Architecture}\\n' inkleet > evidence/install/installed.txt
+          test -x /usr/bin/inkleet
+          ldd /usr/bin/inkleet > evidence/install/linked-libraries.txt
+          ! grep -q 'not found' evidence/install/linked-libraries.txt
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY=/usr/bin/inkleet
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -97,6 +121,8 @@ jobs:
           path: |
             src-tauri/target/release/bundle/
             src-tauri/Cargo.lock
+            evidence/install/
+            evidence/native/
           if-no-files-found: warn
           retention-days: 7
   android:
