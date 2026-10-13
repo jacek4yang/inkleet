@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
+import os from "node:os";
 import { mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
@@ -43,6 +44,35 @@ try {
   assert.equal(await editor.isVisible(), true);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   assert.equal(overflow, false, "手机页面不能横向溢出");
+  // 大文件仅作为测试数据，不调用运行/提交，不代表真机 IME 验证。
+  const large = Array.from({ length: 10000 }, (_, i) => "// line " + i + ": bounded editor responsiveness").join("\\n");
+  await editor.fill(large);
+  await editor.press("Control+End");
+  await page.evaluate(() => {
+    window.__inkPerf = { frames: [], tasks: [] };
+    document.addEventListener("beforeinput", () => {
+      const start = performance.now();
+      requestAnimationFrame(() => window.__inkPerf.frames.push(performance.now() - start));
+    }, { capture: true });
+    const observer = new PerformanceObserver(list => {
+      for (const e of list.getEntries()) window.__inkPerf.tasks.push(e.duration);
+    });
+    observer.observe({ type: "longtask" });
+  });
+  await editor.pressSequentially(" // performance probe 0123456789", { delay: 20 });
+  await page.waitForFunction(() => window.__inkPerf.frames.length >= 20);
+  const measured = await page.evaluate(() => window.__inkPerf);
+  const sorted = [...measured.frames].sort((a, b) => a - b);
+  const report = {
+    environment: "GitHub Actions Linux Chromium headless; not native WebView or IME",
+    platform: os.platform(), cpu: os.cpus()[0]?.model, logicalCpus: os.cpus().length,
+    viewport: "390x844", lines: 10000, initialCharacters: large.length,
+    samples: sorted.length, inputToRafP50Ms: sorted[Math.floor(sorted.length * .5)],
+    inputToRafP95Ms: sorted[Math.floor(sorted.length * .95)],
+    longestTaskMs: Math.max(0, ...measured.tasks),
+  };
+  await writeFile("evidence/PERFORMANCE.json", JSON.stringify(report, null, 2));
+  assert.ok(report.inputToRafP95Ms < 100, "受控测试输入响应 P95 不应超过 100ms");
   assert.deepEqual(errors, []);
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }
