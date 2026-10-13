@@ -85,7 +85,7 @@ pub fn prepare_go(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),St
     if has_package&&tokens.get(1)!=Some(&"main"){return Err("本地 Go 驱动需要无 package 声明的力扣函数，或 package main".into());}
     if tokens.windows(2).any(|pair|pair==["func","main"]){return Err("请保留题目函数；本地 Go 驱动会提供 main 入口".into());}
     let source=source.trim_start_matches('\u{feff}');
-    let solution=if has_package{source.to_owned()}else{format!("package main\n{source}")};
+    let solution=if has_package{source.to_owned()}else{format!("package main\n//line solution.go:1\n{source}")};
     let mut definitions=String::from("package main\n");
     let metadata_text=configuration["metadata"].to_string();
     for (name,definition) in [("ListNode","type ListNode struct { Val int; Next *ListNode }\n"),("TreeNode","type TreeNode struct { Val int; Left, Right *TreeNode }\n")]{
@@ -111,7 +111,7 @@ pub fn prepare_go(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),St
         let source="// type ListNode is supplied by the harness\nfunc identity(value *ListNode) *ListNode { return value }";
         prepare_go(temp.path(),source,metadata,"[1,2]").unwrap();
         assert!(fs::read_to_string(temp.path().join("nodes.go")).unwrap().contains("type ListNode struct"));
-        assert_eq!(fs::read_to_string(temp.path().join("solution.go")).unwrap(),format!("package main\n{source}"));
+        assert_eq!(fs::read_to_string(temp.path().join("solution.go")).unwrap(),format!("package main\n//line solution.go:1\n{source}"));
         assert!(!fs::read_to_string(temp.path().join("harness.go")).unwrap().contains("__INKLEET_FUNCTION__"));
         assert!(prepare_go(temp.path(),"package other\nfunc identity(){}",metadata,"[]").is_err());
         assert!(prepare_go(temp.path(),"func main(){}",metadata,"[]").is_err());

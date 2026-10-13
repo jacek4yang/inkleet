@@ -28,7 +28,21 @@ def wait_for(fn, label, seconds=25):
         except Exception as error: last = error
         time.sleep(.2)
     raise AssertionError(f"{label}: {last}")
-def cmd(method, path, payload=None): return request(method, f"/session/{session}" + path, payload)
+def cmd(method, path, payload=None):
+    replayable = method=="POST" and path=="/actions" and payload and all(
+        action.get("type")=="key" and action.get("id","").endswith(("-completion","-source"))
+        for action in payload.get("actions",[])
+    )
+    try: return request(method, f"/session/{session}" + path, payload)
+    except http.client.RemoteDisconnected:
+        if not replayable: raise
+        # These sequences begin at Home/End and only request read-only language
+        # information. Never replay debugger steps, text entry or online actions.
+        with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
+            log.write("Recovered one WebKit transport reset in absolute-position language shortcut\n")
+        request("DELETE",f"/session/{session}/actions")
+        time.sleep(.3)
+        return request(method, f"/session/{session}" + path, payload)
 def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
 def text(css): return cmd("GET",f"/element/{element(css)}/text")
 def click(css): return cmd("POST",f"/element/{element(css)}/click",{})
@@ -60,7 +74,7 @@ def fill_once(css, value):
         if line: cmd("POST",f"/element/{node}/value",{"text":line,"value":list(line)})
     def editor_text():
         lines=cmd("POST",f"/element/{node}/elements",{"using":"css selector","value":".cm-line"})
-        return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else text(css)
+        return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else cmd("GET",f"/element/{node}/property/value")
     wait_for(lambda: editor_text() == value, "GUI line texts match typed text")
 def screenshot(name):
     (evidence / name).write_bytes(base64.b64decode(cmd("GET","/screenshot")))

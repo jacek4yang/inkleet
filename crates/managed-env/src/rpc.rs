@@ -2,14 +2,14 @@
 //! Reader/writer threads keep pipe I/O off the GUI and async executor threads.
 use crate::protocol::{read_message, write_message};
 use serde_json::{json, Value};
-use std::{collections::HashMap, io::{BufReader, Read}, process::{Command, Stdio}, sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc}, time::Duration};
+use std::{collections::HashMap, io::{BufReader, Read, Write}, process::{Command, Stdio}, sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc}, time::Duration};
 type Reply = std::result::Result<Value, String>;
 struct Shared {
     pending: Mutex<HashMap<u64,mpsc::SyncSender<Reply>>>,
     dead: AtomicBool,
 }
 pub struct Client {
-    child: Mutex<Box<dyn process_wrap::std::ChildWrapper>>, shared: Arc<Shared>, outgoing: mpsc::SyncSender<Value>, next: Arc<AtomicU64>, dap: bool, stopped: AtomicBool, stderr: Arc<Mutex<String>>,
+    child: Mutex<Box<dyn process_wrap::std::ChildWrapper>>, shared: Arc<Shared>, outgoing: mpsc::SyncSender<Value>, next: Arc<AtomicU64>, dap: bool, stopped: AtomicBool, stderr: Arc<Mutex<String>>, socket: Option<std::net::TcpStream>,
 }
 impl Client {
     pub fn spawn(command: Command, settings: Value, event: Arc<dyn Fn(Value)+Send+Sync>) -> Result<Self,String> {
@@ -18,12 +18,56 @@ impl Client {
     pub fn spawn_dap(command: Command, event: Arc<dyn Fn(Value)+Send+Sync>) -> Result<Self,String> {
         Self::spawn_inner(command,Value::Null,event,true)
     }
+    /// Delve's own same-user DAP listener binds an OS-selected loopback port.
+    /// The port is learned only from the owned pinned process, never from the UI.
+    pub fn spawn_delve(mut command:Command,event:Arc<dyn Fn(Value)+Send+Sync>)->Result<Self,String>{
+        use std::net::{IpAddr,Ipv4Addr,SocketAddr,TcpStream};
+        command.args(["dap","--listen=127.0.0.1:0"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child=crate::process::spawn(command).map_err(|e|format!("无法启动 Go 调试器：{e}"))?;
+        let result=(||{
+            let stdout=child.stdout().take().ok_or("Go 调试器没有启动输出")?;
+            let (tx,rx)=mpsc::sync_channel(1);
+            std::thread::spawn(move||{
+                let mut reader=BufReader::new(stdout);let mut line=Vec::new();let mut seen=0;let mut byte=[0u8;1];
+                while seen<8192{
+                    match reader.read(&mut byte){Ok(1)=>{},_=>break}
+                    seen+=1;
+                    if byte[0]==b'\n'{
+                        if let Ok(text)=std::str::from_utf8(&line){
+                            if let Some(address)=text.trim().strip_prefix("DAP server listening at: "){
+                                let _=tx.try_send(address.parse::<SocketAddr>().map_err(|_|"Go 调试监听地址无效".to_owned()));
+                                let _=std::io::copy(&mut reader,&mut std::io::sink());return;
+                            }
+                        }
+                        line.clear();
+                    }else{line.push(byte[0]);}
+                }
+                let _=tx.try_send(Err("Go 调试器没有返回受支持的监听地址".into()));
+            });
+            let address=rx.recv_timeout(Duration::from_secs(15)).map_err(|_|"Go 调试器启动超时")??;
+            if address.ip()!=IpAddr::V4(Ipv4Addr::LOCALHOST)||address.port()==0{return Err("拒绝连接非本机 Go 调试器".into());}
+            let socket=TcpStream::connect_timeout(&address,Duration::from_secs(5)).map_err(|e|format!("无法连接 Go 调试器：{e}"))?;
+            socket.set_nodelay(true).map_err(|_|"Go 调试连接配置失败")?;
+            socket.set_write_timeout(Some(Duration::from_secs(5))).map_err(|_|"Go 调试写入限制失败")?;
+            let input=socket.try_clone().map_err(|_|"无法创建 Go 调试输入")?;
+            let output=socket.try_clone().map_err(|_|"无法创建 Go 调试输出")?;
+            let error=child.stderr().take().ok_or("Go 调试器没有错误输出")?;
+            Ok((socket,input,output,error))
+        })();
+        match result{
+            Ok((socket,input,output,error))=>Self::from_io(child,Box::new(input),Box::new(output),Box::new(error),Value::Null,event,true,Some(socket)),
+            Err(error)=>{crate::process::terminate(child.as_mut());Err(error)}
+        }
+    }
     fn spawn_inner(mut command: Command, settings: Value, event: Arc<dyn Fn(Value)+Send+Sync>, dap:bool) -> Result<Self,String> {
         command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child=crate::process::spawn(command).map_err(|e|format!("无法启动语言服务：{e}"))?;
         let stdin=child.stdin().take().ok_or("语言服务缺少输入管道")?;
         let stdout=child.stdout().take().ok_or("语言服务缺少输出管道")?;
         let stderr=child.stderr().take().ok_or("语言服务缺少错误管道")?;
+        Self::from_io(child,Box::new(stdin),Box::new(stdout),Box::new(stderr),settings,event,dap,None)
+    }
+    fn from_io(child:Box<dyn process_wrap::std::ChildWrapper>,stdin:Box<dyn Write+Send>,stdout:Box<dyn Read+Send>,stderr:Box<dyn Read+Send>,settings:Value,event:Arc<dyn Fn(Value)+Send+Sync>,dap:bool,socket:Option<std::net::TcpStream>)->Result<Self,String>{
         let shared=Arc::new(Shared{pending:Mutex::new(HashMap::new()),dead:AtomicBool::new(false)});
         let (outgoing,rx)=mpsc::sync_channel::<Value>(64);
         let writer_shared=shared.clone();
@@ -105,7 +149,7 @@ impl Client {
                 let chunk=String::from_utf8_lossy(&buffer[..n]);let mut end=(8192-text.len()).min(chunk.len());while !chunk.is_char_boundary(end){end-=1;}text.push_str(&chunk[..end]);
             }}}
         });
-        Ok(Self{child:Mutex::new(child),shared,outgoing,next,dap,stopped:AtomicBool::new(false),stderr:stderr_text})
+        Ok(Self{child:Mutex::new(child),shared,outgoing,next,dap,stopped:AtomicBool::new(false),stderr:stderr_text,socket})
     }
     pub fn notify(&self,method:&str,params:Value)->Result<(),String>{
         if self.shared.dead.load(Ordering::Acquire){return Err("语言服务已退出；请重新连接".into());}
@@ -133,6 +177,7 @@ impl Client {
     pub fn stop(&self){
         if self.stopped.swap(true,Ordering::AcqRel){return;}
         fail_all(&self.shared);
+        if let Some(socket)=&self.socket{let _=socket.shutdown(std::net::Shutdown::Both);}
         if let Ok(mut child)=self.child.lock(){crate::process::terminate(child.as_mut());}
     }
 }
