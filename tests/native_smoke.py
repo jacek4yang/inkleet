@@ -102,7 +102,7 @@ try:
         click('[data-action="open-environments"]')
         wait_for(lambda: element(".environment-summary button"), "environment manager opened")
         click(".environment-summary button")
-        wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["python","node","pyright"]), "three verified private tools installed", seconds=300)
+        wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["python","node","pyright","debugpy"]), "three verified private tools installed", seconds=300)
         screenshot("managed-environment-native.png")
         click(".environments header button")
         click('select[aria-label="编程语言"] option[value="python3"]')
@@ -115,6 +115,7 @@ try:
         ]}]})
         wait_for(lambda: "popleft" in text(".cm-tooltip-autocomplete"), "real stdlib member completion", seconds=30)
         screenshot("python-completion-native.png")
+        time.sleep(.3)  # Completion widgets intentionally ignore accidental clicks immediately after opening.
         def choose_completion():
             option=cmd("POST","/element",{"using":"xpath","value":"//li[@role='option'][contains(.,'popleft')]"})[EID]
             try: cmd("POST",f"/element/{option}/click",{})
@@ -144,6 +145,17 @@ try:
         assert "不代表通过力扣判题" in text(".local-runner")
         screenshot("python-local-run-native.png")
         (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
+        click(code)
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-keys","actions":[{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
+        wait_for(lambda: "断点：1。" in text(".debug-panel"), "F9 breakpoint in source")
+        click(".debug-panel .local-actions button:first-of-type")
+        wait_for(lambda: "已暂停" in text(".debug-panel"), "real debugger breakpoint", seconds=45)
+        wait_for(lambda: element(".debug-inspector"), "real call stack and variables")
+        screenshot("python-debug-native.png")
+        (evidence/"DEBUG_GUI_RESULT.txt").write_text("PASS: real Linux GUI private debugpy, F9 breakpoint and paused call stack inspector. Stepping verified separately by protocol probe.\n")
+        stop_debug=cmd("POST","/element",{"using":"xpath","value":"//button[text()='停止调试']"})[EID]
+        cmd("POST",f"/element/{stop_debug}/click",{})
+        wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
         click(".local-runner header button")
         click('select[aria-label="编程语言"] option[value="rust"]')
         wait_for(lambda: text(code) == marker, "switching away preserves Rust draft and stops Python session")

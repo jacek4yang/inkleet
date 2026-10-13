@@ -34,6 +34,9 @@ function download(name: string, content: string) {
 function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [fontInfo, setFontInfo] = useState(false);
+  const points = useRef(new Map<string, number[]>());
+  const [, updatePoints] = useState(0);
+  const [paused, setPaused] = useState({ key: "", line: 0 });
   const [localRunner, setLocalRunner] = useState(false);
   const [environments, setEnvironments] = useState(false);
   const [problems, setProblems] = useState<WorkbenchProblem[]>(samples);
@@ -143,9 +146,9 @@ function App() {
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
       <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><button disabled={editorLoading || language !== "python3" || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本机执行 Python 代码，不上传">本地</button><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
-      {editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor key={activeKey} documentKey={activeKey} language={language} label="代码编辑器" value={doc.code} onChange={text => edit("code", text)} />}
+      {editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor key={activeKey} documentKey={activeKey} language={language} label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
       <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button onClick={() => setEnvironments(true)} data-action="open-environments">开发环境</button><button disabled={editorLoading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
-      {localRunner && <LocalRunner key={problemId} code={doc.code} language={language} title={problem.title} metadata={problem.official ? (problem.official.metaData ?? "") : JSON.stringify({ name: "solve", params: [{ name: "values", type: "integer[]" }], return: { type: "integer" } })} sampleInput={problem.official?.sampleTestCase ?? problem.input} onClose={() => setLocalRunner(false)} />}
+      {localRunner && <LocalRunner breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={problemId} code={doc.code} language={language} title={problem.title} metadata={problem.official ? (problem.official.metaData ?? "") : JSON.stringify({ name: "solve", params: [{ name: "values", type: "integer[]" }], return: { type: "integer" } })} sampleInput={problem.official?.sampleTestCase ?? problem.input} onClose={() => setLocalRunner(false)} />}
       {judge.panel}
     </section>
     {environments && <Environments onClose={() => setEnvironments(false)} />}

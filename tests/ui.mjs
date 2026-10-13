@@ -442,7 +442,7 @@ try {
   const runErrors = []; runPage.on("pageerror", error => runErrors.push(error.message));
   await runPage.addInitScript(() => {
     window.isTauri = true;
-    window.__runTest = { starts: [], result: null, pending: [] };
+    window.__runTest = { starts: [], result: null, pending: [], debug: null, debugStarts: 0, debugCalls: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__runTest;
       if (command === "load_recent_questions") return [];
@@ -450,6 +450,22 @@ try {
       if (command === "save_text" || command === "stop_language_service") return;
       if (command === "login_status") return null;
       if (command === "start_language_service") throw new Error("Language service intentionally absent in runner UI fixture");
+      if (command === "debug_status") return state.debug ? JSON.parse(JSON.stringify(state.debug)) : null;
+      if (command === "start_debug") {
+        ++state.debugStarts;
+        state.debug = { id: state.debugStarts, phase: "paused", title: args.snapshot.title, threadId: 1, epoch: 1, output: "", truncated: false, reason: "breakpoint", error: "", breakpoints: args.lines.map(line => ({ line, verified: true })) };
+        return state.debug.id;
+      }
+      if (command === "stop_debug") { state.debug.phase = "finished"; state.debug.epoch++; return; }
+      if (command === "debug_request") {
+        state.debugCalls.push(args.kind);
+        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, source: { name: "solution.py", path: "/fixture/solution.py" } }] };
+        if (args.kind === "scopes") return { scopes: [{ name: "Locals", variablesReference: 1 }] };
+        if (args.kind === "variables") return { variables: [{ name: "values", value: "[3, -1, 8]", variablesReference: 0 }] };
+        if (args.kind === "next") { state.debug.epoch++; return {}; }
+        if (args.kind === "continue") { state.debug.phase = "finished"; state.debug.epoch++; return {}; }
+        return {};
+      }
       if (command === "local_run_status") return state.result ? JSON.parse(JSON.stringify(state.result)) : null;
       if (command === "start_local_run") {
         state.starts.push(JSON.parse(JSON.stringify(args.snapshot)));
@@ -482,6 +498,22 @@ try {
   await runPanel.getByText(/"value": 10/).waitFor();
   assert.equal(await runPanel.locator("img").count(), 0);
   assert.match(await runPanel.innerText(), /不代表通过力扣判题/);
+
+  await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).press("F9");
+  await runPanel.getByText(/断点：1。/).waitFor();
+  await runPanel.getByRole("button", { name: "开始调试", exact: true }).evaluate(button => { button.click(); button.click(); });
+  await runPage.waitForFunction(() => window.__runTest.debugStarts === 1);
+  await runPanel.getByText("已暂停 · breakpoint", { exact: true }).waitFor();
+  await runPanel.getByRole("button", { name: "values", exact: true }).waitFor();
+  await runPage.locator(".cm-debug-stopped").waitFor();
+  await runPanel.getByRole("button", { name: "单步跳过", exact: true }).click();
+  await runPage.waitForFunction(() => window.__runTest.debugCalls.includes("next"));
+  await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).fill("def solve(values): return 0");
+  await runPanel.getByText(/调试仍使用启动时快照/).waitFor();
+  await runPage.waitForFunction(() => !document.querySelector(".cm-debug-stopped"));
+  await runPanel.getByRole("button", { name: "停止调试", exact: true }).click();
+  await runPanel.getByText(/调试结束/).waitFor();
+  assert.equal(await runPage.evaluate(() => window.__runTest.debugStarts), 1);
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");

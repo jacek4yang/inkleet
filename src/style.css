@@ -61,3 +61,12 @@
 .local-runner h4 { font-size: 12px; margin: 8px 0; }
 .local-actions { justify-content: flex-start; flex-wrap: wrap; }
 .local-actions span { font-size: 12px; }
+
+.debug-panel { border-top: 1px solid #ddd5ca; padding-top: 10px; margin-top: 10px; }
+.debug-inspector { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr); gap: 12px; }
+.debug-inspector > div { min-width: 0; max-height: 230px; overflow: auto; }
+.debug-inspector > div:first-child > button { display: block; text-align: left; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.debug-variable { display: flex; gap: 8px; align-items: start; margin: 4px 0; }
+.debug-variable code { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--font-mono); min-width: 0; }
+.debug-variable button { flex: 0 0 auto; max-width: 45%; overflow-wrap: anywhere; }
+@media(max-width: 600px) { .debug-inspector { grid-template-columns: 1fr; } }

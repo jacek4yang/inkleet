@@ -113,7 +113,10 @@ async fn main() -> Result<(), String> {
                 if value.get("event").and_then(serde_json::Value::as_str)==Some(name){return Ok(value);}
             }
         }
-        event(&events_rx,"initialized")?;
+        if let Err(error)=event(&events_rx,"initialized"){
+            let launch_result=launching.join().map_err(|_|"launch thread failed")?;
+            return Err(format!("{error}; launch={launch_result:?}; adapter stderr={}",client.stderr()));
+        }
         let breakpoint=client.request("setBreakpoints",json!({"source":{"path":script_path},"breakpoints":[{"line":2}]}),Duration::from_secs(10))?;
         assert!(breakpoint.pointer("/breakpoints/0/verified").and_then(serde_json::Value::as_bool)==Some(true));
         client.request("configurationDone",json!({}),Duration::from_secs(10))?;

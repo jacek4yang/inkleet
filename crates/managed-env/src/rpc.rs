@@ -9,7 +9,7 @@ struct Shared {
     dead: AtomicBool,
 }
 pub struct Client {
-    child: Mutex<Box<dyn process_wrap::std::ChildWrapper>>, shared: Arc<Shared>, outgoing: mpsc::SyncSender<Value>, next: Arc<AtomicU64>, dap: bool, stopped: AtomicBool,
+    child: Mutex<Box<dyn process_wrap::std::ChildWrapper>>, shared: Arc<Shared>, outgoing: mpsc::SyncSender<Value>, next: Arc<AtomicU64>, dap: bool, stopped: AtomicBool, stderr: Arc<Mutex<String>>,
 }
 impl Client {
     pub fn spawn(command: Command, settings: Value, event: Arc<dyn Fn(Value)+Send+Sync>) -> Result<Self,String> {
@@ -94,8 +94,14 @@ impl Client {
             fail_all(&reader_shared);
         });
         // Drain without retaining or printing paths/source text from diagnostics logs.
-        std::thread::spawn(move || { let mut reader=stderr;let mut buffer=[0u8;4096];while matches!(reader.read(&mut buffer),Ok(n) if n>0){} });
-        Ok(Self{child:Mutex::new(child),shared,outgoing,next,dap,stopped:AtomicBool::new(false)})
+        let stderr_text=Arc::new(Mutex::new(String::new()));let captured=stderr_text.clone();
+        std::thread::spawn(move || {
+            let mut reader=stderr;let mut buffer=[0u8;4096];
+            while let Ok(n)=reader.read(&mut buffer){if n==0{break;}if let Ok(mut text)=captured.lock(){if text.len()<8192{
+                let chunk=String::from_utf8_lossy(&buffer[..n]);let mut end=(8192-text.len()).min(chunk.len());while !chunk.is_char_boundary(end){end-=1;}text.push_str(&chunk[..end]);
+            }}}
+        });
+        Ok(Self{child:Mutex::new(child),shared,outgoing,next,dap,stopped:AtomicBool::new(false),stderr:stderr_text})
     }
     pub fn notify(&self,method:&str,params:Value)->Result<(),String>{
         if self.shared.dead.load(Ordering::Acquire){return Err("语言服务已退出；请重新连接".into());}
@@ -118,6 +124,7 @@ impl Client {
         if result.is_err()&&!self.dap{let _=self.notify("$/cancelRequest",json!({"id":id}));}
         result
     }
+    pub fn stderr(&self)->String{self.stderr.lock().map(|s|s.clone()).unwrap_or_default()}
     pub fn is_alive(&self)->bool{!self.shared.dead.load(Ordering::Acquire)}
     pub fn stop(&self){
         if self.stopped.swap(true,Ordering::AcqRel){return;}

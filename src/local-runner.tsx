@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { DebugPanel } from "./debug-panel";
 import type { Language } from "./domain";
 type Snapshot = { code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: unknown[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "running", "canceling"].includes(r.phase);
-export function LocalRunner({ code, language, title, metadata, sampleInput, onClose }: {
-  code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void;
+export function LocalRunner({ code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine }: {
+  code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (line: number) => void;
 }) {
   const [input, setInput] = useState(sampleInput);
   const [result, setResult] = useState<Result | null>(null);
@@ -61,6 +62,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
     {result?.results.map((value, index) => <pre key={index} className="local-result">{JSON.stringify(value, null, 2)}</pre>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
+    <DebugPanel snapshot={{ code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} />
     {result && !busy(result) && <p className="muted">退出码：{result.exitCode ?? "无"}。本地输出仅供调试，不代表通过力扣判题。</p>}
   </section>;
 }

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 type Tool = { id: string; version: string; size: number; phase: string; downloaded: number; message: string };
 type Overview = { platform: string; supported: boolean; tools: Tool[] };
-const labels: Record<string, string> = { python: "Python 运行时与标准库", node: "语言服务运行时", pyright: "Python 语言服务 · Pyright" };
+const labels: Record<string, string> = { debugpy: "Python 调试器 · debugpy", python: "Python 运行时与标准库", node: "语言服务运行时", pyright: "Python 语言服务 · Pyright" };
 const phases: Record<string, string> = { ready: "已安装", missing: "未安装", broken: "需要修复", queued: "准备中", downloading: "下载中", verifying: "校验中", extracting: "解压中", canceling: "取消中", canceled: "已取消", error: "未完成" };
 const busy = (phase: string) => ["queued", "downloading", "verifying", "extracting", "canceling"].includes(phase);
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1) + " MiB";
@@ -55,6 +55,6 @@ export function Environments({ onClose }: { onClose: () => void }) {
       </section>)}</div>
     </>}
     {error && <p role="alert" className="error">{error}</p>}
-    <p className="muted">Rust、Go、C/C++、Java 工具链及调试器仍在接入，未安装项不会伪装成可用。下载来源：Python Build Standalone、Node.js 官方发行版、Microsoft Pyright。</p>
+    <p className="muted">Rust、Go、C/C++、Java 工具链和对应调试器仍在接入，未安装项不会伪装成可用。下载来源：Python Build Standalone、Node.js 官方发行版、Microsoft Pyright / debugpy。</p>
   </dialog>;
 }

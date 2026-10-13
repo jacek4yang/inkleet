@@ -2,6 +2,7 @@ mod storage;
 mod managed;
 mod lsp;
 mod local_run;
+mod debugger;
 mod leetcode;
 mod auth;
 mod cache;
@@ -171,6 +172,23 @@ async fn cancel_local_run(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u6
     check_origin(&window)?;app.state::<local_run::Runner>().cancel(id)
 }
 
+#[tauri::command]
+async fn start_debug(window:tauri::WebviewWindow,app:tauri::AppHandle,snapshot:local_run::Snapshot,lines:Vec<u32>)->Result<u64,String>{
+    check_origin(&window)?;debugger::start(app,snapshot,lines).await
+}
+#[tauri::command]
+async fn debug_status(window:tauri::WebviewWindow,app:tauri::AppHandle)->Result<Option<debugger::View>,String>{
+    check_origin(&window)?;app.state::<debugger::Debugger>().status()
+}
+#[tauri::command]
+async fn stop_debug(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64)->Result<(),String>{
+    check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().stop(id)).await.map_err(|_|"停止调试任务中断".to_owned())?
+}
+#[tauri::command]
+async fn debug_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,epoch:u64,kind:String,reference:i64)->Result<serde_json::Value,String>{
+    check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().request(id,epoch,&kind,reference)).await.map_err(|_|"调试请求任务中断".to_owned())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -179,6 +197,7 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             app.manage(Store { root, gate: Mutex::new(()) });
             app.manage(auth::Auth::default());
+            app.manage(debugger::Debugger::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("debug-sessions")));
             app.manage(local_run::Runner::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("local-runs")));
             app.manage(lsp::Services::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("language-workspaces")));
             app.manage(managed::Environments::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("tools")));
@@ -187,7 +206,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![start_debug, debug_status, stop_debug, debug_request, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .run(tauri::generate_context!())
         .expect("InkLeet failed to start");
 }

@@ -10,6 +10,7 @@ import { java } from "@codemirror/lang-java";
 import { markdown } from "@codemirror/lang-markdown";
 import type { Language } from "./domain";
 import { pythonIntelligence, type Source } from "./intelligence";
+import { debugGutter } from "./debug-gutter";
 import { SourceViewer } from "./source-viewer";
 
 // 仅保存本次运行的编辑器状态；正文持久化由原生存储负责。
@@ -40,18 +41,21 @@ function syntax(language: Language | "markdown") {
 type Props = {
   documentKey: string; language: Language | "markdown"; value: string;
   label: string; onChange: (text: string) => void;
+  breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedLine?: number;
 };
-export function CodeEditor({ documentKey, language, value, label, onChange }: Props) {
+export function CodeEditor({ documentKey, language, value, label, onChange, breakpoints = [], onBreakpoints, pausedLine = 0 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [lspStatus, setLspStatus] = useState("");
   const [connection, reconnect] = useState(0);
   const [source, setSource] = useState<Source | null>(null);
-  const callback = useRef(onChange);
-  useLayoutEffect(() => { callback.current = onChange; });
+  const callback = useRef(onChange), pointCallback = useRef(onBreakpoints);
+  const debugView = useRef<{ view: EditorView; stopped: (view: EditorView, line: number) => void } | null>(null);
+  useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => {
     const intelligence = language === "python3" ? pythonIntelligence(setLspStatus, setSource) : null;
+    const debug = language === "python3" && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const extensions = [
-      basicSetup, syntax(language), theme, ...(intelligence?.extensions ?? []),
+      basicSetup, syntax(language), theme, ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
       EditorView.updateListener.of(update => {
         if (update.docChanged) callback.current(update.state.doc.toString());
@@ -64,13 +68,16 @@ export function CodeEditor({ documentKey, language, value, label, onChange }: Pr
       ? cached.state.update({ effects: StateEffect.reconfigure.of(extensions) }).state
       : EditorState.create({ doc: value, extensions });
     const view = new EditorView({ state, parent: host.current! });
+    if (debug) debugView.current = { view, stopped: debug.stopped };
     if (cached) view.scrollDOM.scrollTop = cached.scroll;
     if (intelligence) void intelligence.connect(view);
     return () => {
+      debugView.current = null;
       intelligence?.destroy();
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
       view.destroy();
     };
   }, [documentKey, language, label, connection]);
+  useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedLine); }, [pausedLine, documentKey, connection]);
   return <><div className="editor-host" ref={host} />{language === "python3" && <div className="lsp-status"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }
