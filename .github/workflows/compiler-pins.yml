@@ -1,0 +1,21 @@
+name: Resolve compiler and debugger distributions
+on:
+  push:
+    branches: [feat/first-workbench]
+    paths: ['tests/resolve_compiler_pins.py', '.github/workflows/compiler-pins.yml']
+permissions:
+  contents: read
+jobs:
+  pins:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: python3 tests/resolve_compiler_pins.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compiler-debugger-pins
+          path: evidence/
+          retention-days: 7
