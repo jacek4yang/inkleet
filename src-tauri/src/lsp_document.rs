@@ -1,5 +1,12 @@
 //! Virtual language scaffolding never changes the user's saved/submitted source.
 use serde_json::Value;
+use inkleet_managed_env::lsp_scaffold::Context;
+pub fn contextual_source(language:&str,text:&str,context:&Context)->(String,u32){
+    let (base,prefix)=source(language,text);
+    let (before,after)=context.fragments(language,text);
+    let extra=before.lines().count() as u32;
+    (format!("{before}{base}{after}"),prefix+extra)
+}
 pub fn source(language:&str,text:&str)->(String,u32){
     let prefix=match language{
         "cpp"=>"#include <vector>\n#include <string>\n#include <algorithm>\n#include <array>\n#include <map>\n#include <unordered_map>\n#include <set>\n#include <unordered_set>\n#include <queue>\n#include <stack>\n#include <deque>\n#include <list>\n#include <tuple>\n#include <utility>\n#include <numeric>\n#include <functional>\n#include <limits>\n#include <climits>\n#include <cmath>\n#include <cstdint>\nusing namespace std;\n",
@@ -118,5 +125,20 @@ pub fn definition(value:&mut Value,document_uri:&str,prefix:u32){
         assert_eq!(value[1]["range"]["start"]["line"],23);
         assert_eq!(value[2]["targetSelectionRange"]["start"]["line"],3);
         assert_eq!(value[2]["originSelectionRange"]["start"]["line"],4);
+    }
+}
+
+#[cfg(test)]mod scaffold_tests{
+    use super::*;
+    #[test]fn generated_types_preserve_editable_line_mapping(){
+        let context=Context::parse(Some(r#"{"params":[{"type":"ListNode"},{"type":"TreeNode"}]}"#)).unwrap();
+        for language in ["rust","java","golang","c","cpp"]{
+            let original="// source with no trailing newline";
+            let (wrapped,prefix)=contextual_source(language,original,&context);
+            assert_eq!(wrapped.lines().nth(prefix as usize),Some(original));
+            assert!(wrapped.contains("ListNode"));assert!(wrapped.contains("TreeNode"));
+        }
+        let (rust,prefix)=contextual_source("rust","#![allow(dead_code)]\nimpl Solution{}", &context);
+        assert_eq!(prefix,0);assert!(rust.starts_with("#![allow(dead_code)]"));assert!(rust.contains("pub struct Solution;"));
     }
 }

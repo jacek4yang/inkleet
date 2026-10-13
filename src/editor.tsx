@@ -39,11 +39,11 @@ function syntax(language: Language | "markdown") {
   }
 }
 type Props = {
-  documentKey: string; language: Language | "markdown"; value: string;
+  documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void;
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedLine?: number;
 };
-export function CodeEditor({ documentKey, language, value, label, onChange, breakpoints = [], onBreakpoints, pausedLine = 0 }: Props) {
+export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedLine = 0 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [lspStatus, setLspStatus] = useState("");
   const [connection, reconnect] = useState(0);
@@ -52,7 +52,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, brea
   const debugView = useRef<{ view: EditorView; stopped: (view: EditorView, line: number) => void } | null>(null);
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => {
-    const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource) : null;
+    const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const extensions = [
       basicSetup, syntax(language), theme, ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
@@ -77,7 +77,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, brea
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
       view.destroy();
     };
-  }, [documentKey, language, label, connection]);
+  }, [documentKey, language, label, connection, metadata]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedLine); }, [pausedLine, documentKey, connection]);
   return <><div className="editor-host" ref={host} />{(language !== "markdown") && <div className="lsp-status"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }

@@ -25,7 +25,7 @@ function content(value: unknown): string {
   if (Array.isArray(value)) return value.slice(0, 20).map(content).join("\n\n").slice(0, 32768);
   return object(value) && typeof value.value === "string" ? value.value.slice(0, 32768) : "";
 }
-export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source) => void) {
+export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source) => void, metadata?: string) {
   const serverName = { python3: "Pyright", java: "JDT LS", golang: "gopls", rust: "rust-analyzer", c: "clangd", cpp: "clangd" }[language];
   const signatureEffect = StateEffect.define<Tooltip | null>();
   const signatureField = StateField.define<Tooltip | null>({
@@ -221,7 +221,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       status(`正在连接 ${{ python3: "Python", java: "Java", golang: "Go", rust: "Rust", c: "C", cpp: "C++" }[language]} 语言服务…`);
       const initial = target.state.doc;
       try {
-        const connecting = connectionQueue.then(() => closed ? null : invoke<Started>("start_language_service", {text: initial.toString(), language}));
+        const connecting = connectionQueue.then(() => closed ? null : invoke<Started>("start_language_service", {text: initial.toString(), language, metadata: metadata ?? null}));
         connectionQueue = connecting.then(() => undefined, () => undefined);
         const started = await connecting;
         if (!started) return;

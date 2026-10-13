@@ -139,8 +139,8 @@ async fn cancel_environment_install(window: tauri::WebviewWindow, app: tauri::Ap
 
 
 #[tauri::command]
-async fn start_language_service(window:tauri::WebviewWindow,app:tauri::AppHandle,text:String,language:Option<String>)->Result<lsp::Started,String>{
-    check_origin(&window)?;lsp::start(app,text,language.unwrap_or_else(||"python3".into())).await
+async fn start_language_service(window:tauri::WebviewWindow,app:tauri::AppHandle,text:String,language:Option<String>,metadata:Option<String>)->Result<lsp::Started,String>{
+    check_origin(&window)?;lsp::start(app,text,language.unwrap_or_else(||"python3".into()),metadata).await
 }
 #[tauri::command]
 async fn stop_language_service(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64)->Result<(),String>{

@@ -260,3 +260,5 @@ pub mod java_harness;
 pub mod java_runtime;
 
 pub mod java_debug;
+
+pub mod lsp_scaffold;

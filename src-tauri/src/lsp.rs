@@ -7,7 +7,7 @@ type Result<T> = std::result::Result<T,String>;
 pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, active:Mutex<Option<Arc<Session>>> }
 struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
-    id:u64, client:Client, uri:String, language:String, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
+    id:u64, client:Client, uri:String, language:String, context:inkleet_managed_env::lsp_scaffold::Context, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
     diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
@@ -33,7 +33,7 @@ impl Services {
         if text.len()>2*1024*1024{return Err("源码超过语言服务的 2 MiB 限制".into());}
         let session=self.session(id)?;let mut document=session.document.lock().map_err(|_|"文档状态不可用")?;
         if version<=document.version{return Err("拒绝过期的语言服务文档更新".into());}
-        let (wrapped,prefix)=crate::lsp_document::source(&session.language,&text);
+        let (wrapped,prefix)=crate::lsp_document::contextual_source(&session.language,&text,&session.context);
         session.client.notify("textDocument/didChange",json!({"textDocument":{"uri":session.uri,"version":version},"contentChanges":[{"text":wrapped}]}))?;
         document.text=text;document.version=version;document.prefix=prefix;
         if let Ok(mut diagnostics)=session.diagnostics.lock(){*diagnostics=Value::Null;}
@@ -88,7 +88,8 @@ impl Services {
         read_allowed_source(&session.roots,uri)
     }
 }
-pub async fn start(app:tauri::AppHandle,text:String,language:String)->Result<Started>{
+pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Option<String>)->Result<Started>{
+    let context=inkleet_managed_env::lsp_scaffold::Context::parse(metadata.as_deref())?;
     if !matches!(language.as_str(),"python3"|"java"|"golang"|"rust"|"c"|"cpp"){return Err("此语言服务尚未接入".into());}
     if text.len()>2*1024*1024{return Err("源码超过语言服务的 2 MiB 限制".into());}
     let state=app.state::<Services>();
@@ -106,7 +107,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String)->Result<Sta
         let workspace=tempfile::Builder::new().prefix("language-").tempdir_in(&state.root).map_err(|_|"无法创建语言服务工作区")?;
         let workspace_root=inkleet_managed_env::process::tool_path(&std::fs::canonicalize(workspace.path()).map_err(|_|"无法解析工作区")?);
         let launch=crate::lsp_launch::prepare(&tools.manager,&workspace_root,&language)?;
-        let (wrapped,prefix)=crate::lsp_document::source(&language,&text);
+        let (wrapped,prefix)=crate::lsp_document::contextual_source(&language,&text,&context);
         std::fs::write(workspace_root.join(launch.filename),&wrapped).map_err(|_|"无法准备语言服务源码")?;
         let uri=reqwest::Url::from_file_path(workspace_root.join(launch.filename)).map_err(|_|"无法生成文档地址")?.to_string();
         let root_uri=reqwest::Url::from_directory_path(&workspace_root).map_err(|_|"无法生成工作区地址")?.to_string();
@@ -134,7 +135,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String)->Result<Sta
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let roots=launch.roots;
         let started_uri=uri.clone();
-        let session=Arc::new(Session{id:generation,client,uri,language,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
