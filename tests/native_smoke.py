@@ -223,7 +223,7 @@ try:
         wait_for(lambda: "断点已更新" in text(".debug-panel"), "live debugger accepts cleared breakpoints")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-stop-keys","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
         wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
-        click(".local-runner header button")
+        click(".local-runner header > button:last-child")
         click('[data-action="open-environments"]')
         wait_for(lambda: element('select[aria-label="开发环境语言"]'), "language-specific tool groups")
         click('select[aria-label="开发环境语言"] option[value="java"]')
