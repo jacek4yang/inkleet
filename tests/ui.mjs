@@ -45,7 +45,7 @@ try {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   assert.equal(overflow, false, "手机页面不能横向溢出");
   // 大文件仅作为测试数据，不调用运行/提交，不代表真机 IME 验证。
-  const large = Array.from({ length: 10000 }, (_, i) => "// line " + i + ": bounded editor responsiveness").join("\\n");
+  const large = Array.from({ length: 10000 }, (_, i) => "// line " + i + ": bounded editor responsiveness").join("\n");
   await editor.fill(large);
   await editor.press("Control+End");
   await page.evaluate(() => {
