@@ -31,8 +31,18 @@ jobs:
           npm run tauri -- icon icon.svg
           npm run typecheck
           npm run build
-          cargo test --manifest-path src-tauri/Cargo.toml
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
           npm run tauri -- build --debug --no-bundle
+      - name: Probe public Chinese site separately
+        id: public-probe
+        continue-on-error: true
+        run: |
+          mkdir -p evidence/protocol
+          set +e
+          cargo test --locked --manifest-path src-tauri/Cargo.toml public_cn_probe -- --ignored > evidence/protocol/public-cn.log 2>&1
+          result=$?
+          printf '%s\n' "$result" > evidence/protocol/exit-code.txt
+          exit "$result"
       - name: Verify native storage through the actual GUI
         run: |
           export XDG_DATA_HOME="$(mktemp -d)"
@@ -45,6 +55,7 @@ jobs:
           name: native-linux-verification
           path: |
             evidence/native/
+            evidence/protocol/
             src-tauri/Cargo.lock
           if-no-files-found: warn
           retention-days: 7
