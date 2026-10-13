@@ -55,10 +55,15 @@ function App() {
       if (!documents.current.has(activeKey)) {
         if (isTauri()) {
           const loaded = await invoke<{code: string | null; notes: string | null}>("load_document", { problem: problemId, language });
-          documents.current.set(activeKey, { code: loaded.code ?? baseCode, notes: loaded.notes ?? "" });
-          persisted.current.set(activeKey, loaded.code);
-          persisted.current.set(problemId + "/notes", loaded.notes);
-          notes.current.set(problemId, loaded.notes ?? "");
+          // 迟到的读取不能覆盖已打开/已编辑的草稿；笔记跨语言共享，不能被新语言读取重置。
+          if (!notes.current.has(problemId)) {
+            notes.current.set(problemId, loaded.notes ?? "");
+            persisted.current.set(problemId + "/notes", loaded.notes);
+          }
+          if (!documents.current.has(activeKey)) {
+            documents.current.set(activeKey, { code: loaded.code ?? baseCode, notes: notes.current.get(problemId) ?? "" });
+            persisted.current.set(activeKey, loaded.code);
+          }
         } else {
           documents.current.set(activeKey, { code: baseCode, notes: notes.current.get(problemId) ?? "" });
         }

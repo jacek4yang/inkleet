@@ -150,6 +150,13 @@ try {
   await authPage.getByRole("combobox", { name: "编程语言" }).selectOption("rust");
   await fixtureEditor.waitFor();
   assert.equal(await fixtureEditor.innerText(), "// preserved fixture draft");
+  await authPage.getByRole("button", { name: "笔记", exact: true }).click();
+  const sharedNote = authPage.getByRole("textbox", { name: "Markdown 笔记" });
+  await sharedNote.fill("# shared pending note");
+  // mock load_document 返回 null，模拟新语言还没有源码；不得清空已有共享笔记。
+  await authPage.getByRole("combobox", { name: "编程语言" }).selectOption("golang");
+  await sharedNote.waitFor();
+  assert.equal(await sharedNote.innerText(), "# shared pending note");
   assert.deepEqual(authErrors, []);
   await authPage.close();
   await writeFile("evidence/AUTH_UI_RESULT.txt", "PASS: mocked IPC only; cancel during verification, ignore stale success, explicit failure and recovery. NOT real login validation.\n");
