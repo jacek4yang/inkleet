@@ -83,6 +83,16 @@ pub fn cancel(app: &AppHandle) -> Result<(), String> {
 pub fn status(app: &AppHandle) -> Result<Option<Identity>, String> {
     Ok(app.state::<Auth>().inner.lock().map_err(|_| "登录状态不可用")?.session.as_ref().map(|s| s.identity.clone()))
 }
+pub fn credentials_for(app: &AppHandle, account: &str) -> Result<(crate::judge_transport::Credentials, u64), String> {
+    let state = app.state::<Auth>();
+    let inner = state.inner.lock().map_err(|_| "登录状态不可用")?;
+    let session = inner.session.as_ref().ok_or("请先登录中国站")?;
+    if session.identity.account != account { return Err("账号已切换，未发送旧账号的代码".into()); }
+    Ok((crate::judge_transport::Credentials { cookie: session._cookie.clone(), csrf: session._csrf.clone() }, inner.generation))
+}
+pub fn still_current(app: &AppHandle, generation: u64) -> bool {
+    app.state::<Auth>().inner.lock().is_ok_and(|inner| inner.generation == generation && inner.session.is_some())
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,7 +5,8 @@ import { languages, draftKey, type Language } from "./domain";
 import "./style.css";
 import { CodeEditor } from "./editor";
 import { FontInfo } from "./font-info";
-import { Login } from "./login";
+import { Login, type Identity } from "./login";
+import { useOnlineJudge } from "./online-judge";
 import { Catalogue, QuestionStatement, type RemoteQuestion } from "./catalogue";
 
 type WorkbenchProblem = { id: string; number: string; title: string; detail: string; input: string; output: string; official?: RemoteQuestion; cached?: boolean };
@@ -28,6 +29,7 @@ function download(name: string, content: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function App() {
+  const [identity, setIdentity] = useState<Identity | null>(null);
   const [fontInfo, setFontInfo] = useState(false);
   const [problems, setProblems] = useState<WorkbenchProblem[]>(samples);
   const [cacheWarning, setCacheWarning] = useState("");
@@ -51,6 +53,7 @@ function App() {
   const baseCode = problem.official ? (problem.official.codeSnippets?.find(s => s.langSlug === language)?.code ?? "") : templates[language];
   const doc = documents.current.get(activeKey) ?? { code: baseCode, notes: notes.current.get(problemId) ?? "" };
 
+  const judge = useOnlineJudge({ identity, question: problem.official, language, code: doc.code });
   const editorLoading = loading || !documents.current.has(activeKey);
 
   useEffect(() => {
@@ -117,7 +120,7 @@ function App() {
   const visible = problems.filter(p => (p.number + p.title).includes(query));
   return <main className={focus ? "workbench focus" : "workbench"}>
     <header className="topbar"><strong><span className="brand">墨</span> 墨题 <small>InkLeet</small></strong>
-      <div><Login /><button disabled={!isTauri()} data-action="open-catalogue" onClick={() => setCatalogue(true)} title={isTauri() ? "读取中国站公开题目" : "请在原生客户端使用"}>中国站题库</button><span className="preview">开发预览</span><button onClick={() => setFocus(!focus)}>{focus ? "退出专注" : "专注"}</button></div>
+      <div><Login onIdentity={setIdentity} /><button disabled={!isTauri()} data-action="open-catalogue" onClick={() => setCatalogue(true)} title={isTauri() ? "读取中国站公开题目" : "请在原生客户端使用"}>中国站题库</button><span className="preview">开发预览</span><button onClick={() => setFocus(!focus)}>{focus ? "退出专注" : "专注"}</button></div>
     </header>
     <aside className="sidebar">
       <label className="search"><span>找题</span><input aria-label="搜索题目" placeholder="题号或名称" value={query} onChange={e => setQuery(e.target.value)} /></label>
@@ -133,13 +136,14 @@ function App() {
       <article>{problem.official ? <>{problem.cached && <p className="cache-warning">已缓存题面 · 可离线编辑；重新搜索可更新题面。</p>}<QuestionStatement question={problem.official} /></> : <><p className="eyebrow">练习 {problem.number} <span className="badge">自编样例</span></p><h1>{problem.title}</h1><p className="description">{problem.detail}</p><h3>示例</h3><pre>输入：{problem.input}{"\n"}输出：{problem.output}</pre><h3>写下你的第一种思路</h3><p className="muted">先想清楚边界，再开始写代码。笔记和每种语言的草稿相互独立。</p></>}</article>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
-      <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><button disabled title="中国站接入开发中">运行</button><button disabled className="primary" title="中国站接入开发中">提交</button></div></div>
+      <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
       {editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor key={activeKey} documentKey={activeKey} language={language} label="代码编辑器" value={doc.code} onChange={text => edit("code", text)} />}
       <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button disabled={editorLoading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
+      {judge.panel}
     </section>
     {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
     {catalogue && <Catalogue onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
-    <footer className="statusbar" role="status"><span>{status}</span><span>仅本机 · 不上传私人解答</span></footer>
+    <footer className="statusbar" role="status"><span>{status}</span><span>源码和笔记本机保存 · 评测按需上传代码</span></footer>
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<App />);

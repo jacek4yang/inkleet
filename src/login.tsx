@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-type Identity = { username: string; account: string; persistence: string };
-export function Login() {
+export type Identity = { username: string; account: string; persistence: string };
+export function Login({ onIdentity }: { onIdentity: (value: Identity | null) => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [identity, setIdentity] = useState<Identity | null>(null);
@@ -10,21 +10,21 @@ export function Login() {
   async function begin() {
     const token = ++generation.current;
     setBusy(true); setMessage("");
-    try { await invoke("open_login"); if (token !== generation.current) return; setOpen(true); setIdentity(null); }
+    try { await invoke("open_login"); if (token !== generation.current) return; setOpen(true); setIdentity(null); onIdentity(null); }
     catch (error) { if (token === generation.current) setMessage(String(error)); }
     finally { if (token === generation.current) setBusy(false); }
   }
   async function verify() {
     const token = ++generation.current;
     setBusy(true); setMessage("");
-    try { const result = await invoke<Identity>("verify_login"); if (token !== generation.current) return; setIdentity(result); setOpen(false); }
+    try { const result = await invoke<Identity>("verify_login"); if (token !== generation.current) return; setIdentity(result); onIdentity(result); setOpen(false); }
     catch (error) { if (token === generation.current) setMessage(String(error)); }
     finally { if (token === generation.current) setBusy(false); }
   }
   async function cancel() {
     const token = ++generation.current;
     setBusy(true);
-    try { await invoke("cancel_login"); if (token !== generation.current) return; setOpen(false); setIdentity(null); setMessage(""); }
+    try { await invoke("cancel_login"); if (token !== generation.current) return; setOpen(false); setIdentity(null); onIdentity(null); setMessage(""); }
     catch (error) { if (token === generation.current) setMessage(String(error)); }
     finally { if (token === generation.current) setBusy(false); }
   }

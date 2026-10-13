@@ -90,7 +90,7 @@ fn parse_check(value: Value) -> Result<CheckResult, String> {
 pub struct Transport { client: Client }
 impl Transport {
     pub fn new() -> Result<Self, String> {
-        Ok(Self { client: Client::builder().https_only(true).redirect(Policy::none())
+        Ok(Self { client: Client::builder().https_only(true).redirect(Policy::none()).retry(reqwest::retry::never())
             .connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(20))
             .user_agent("InkLeet/0.0.1 (+https://github.com/jacek4yang/inkleet)")
             .build().map_err(|_| "无法初始化评测连接")? })

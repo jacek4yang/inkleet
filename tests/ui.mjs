@@ -103,8 +103,27 @@ try {
   authPage.on("pageerror", error => authErrors.push(error.message));
   await authPage.addInitScript(() => {
     window.isTauri = true;
-    window.__inkAuthTest = { pending: [], cancelled: 0 };
+    window.__inkAuthTest = { pending: [], cancelled: 0, judgeStarts: [], jobs: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      if (command === "list_judgements") return window.__inkAuthTest.jobs;
+      if (command === "start_judge") {
+        window.__inkAuthTest.judgeStarts.push(args.snapshot);
+        const job = { snapshot: args.snapshot, created: Date.now(), state: args.snapshot.kind === "submission"
+          ? { state: "unknown", message: "测试：发送状态未知，未自动重发" }
+          : { state: "waiting", server_id: "fixture-run-123" } };
+        window.__inkAuthTest.jobs = [...window.__inkAuthTest.jobs, job];
+        return job;
+      }
+      if (command === "check_judge") {
+        const job = window.__inkAuthTest.jobs.find(j => j.snapshot.id === args.id);
+        job.state = { state: "finished", server_id: "fixture-run-123", result: { status_code: 10, status_msg: "Accepted", code_output: ["3"], expected_output: ["3"] } };
+        return job;
+      }
+      if (command === "acknowledge_unknown_judge") {
+        const job = window.__inkAuthTest.jobs.find(j => j.snapshot.id === args.id);
+        job.state = { state: "acknowledged", message: "测试：用户已核查，未重发" };
+        return job;
+      }
       if (command === "load_recent_questions") return [];
       if (command === "search_questions") return { total: 1, hasMore: false, questions: [{
         frontendQuestionId: "T1", title: "UI Test", titleCn: "题库测试样例", titleSlug: "fixture-test", difficulty: "Easy", paidOnly: false
@@ -168,6 +187,29 @@ try {
   await authPage.getByRole("combobox", { name: "编程语言" }).selectOption("java");
   await fixtureEditor.waitFor();
   assert.equal(await fixtureEditor.innerText(), "// restored Java draft", "读取完成前不能挂载空模板并忽略恢复内容");
+  // 以下仍为纯 UI 协议 fixture，不是真实力扣评测。
+  await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
+  await authPage.getByRole("button", { name: "已完成登录，校验会话", exact: true }).click();
+  await authPage.waitForFunction(() => window.__inkAuthTest.pending.length === 3);
+  await authPage.evaluate(() => window.__inkAuthTest.pending[2].resolve({ username: "fixture-user", account: "fixture-user", persistence: "memory-only" }));
+  await authPage.getByRole("button", { name: "fixture-user · 退出", exact: true }).waitFor();
+  await authPage.getByRole("button", { name: "运行", exact: true }).click();
+  await authPage.getByText("评测编号：fixture-run-123", { exact: true }).waitFor();
+  assert.equal(await authPage.getByRole("button", { name: "运行", exact: true }).isEnabled(), false);
+  await fixtureEditor.fill("// changed after online snapshot");
+  await authPage.getByText(/结果对应发起时的代码和用例快照/).waitFor();
+  await authPage.getByText(/Accepted · 编号 fixture-run-123/).waitFor();
+  assert.equal(await authPage.evaluate(() => window.__inkAuthTest.judgeStarts.length), 1);
+  const sent = await authPage.evaluate(() => window.__inkAuthTest.judgeStarts[0]);
+  assert.equal(sent.code, "// restored Java draft");
+  await authPage.getByRole("button", { name: "提交", exact: true }).click();
+  await authPage.getByRole("dialog", { name: "确认正式提交", exact: true }).getByRole("button", { name: "确认", exact: true }).click();
+  await authPage.getByText("测试：发送状态未知，未自动重发", { exact: true }).waitFor();
+  assert.equal(await authPage.getByRole("button", { name: "提交", exact: true }).isEnabled(), false);
+  await authPage.getByRole("button", { name: "我已核查官方记录", exact: true }).click();
+  await authPage.getByRole("dialog", { name: "解除未知提交保护", exact: true }).getByRole("button", { name: "确认", exact: true }).click();
+  await authPage.getByText("测试：用户已核查，未重发", { exact: true }).waitFor();
+  assert.equal(await authPage.evaluate(() => window.__inkAuthTest.judgeStarts.length), 2, "解除保护不能自动重发");
   assert.deepEqual(authErrors, []);
   await authPage.close();
   await writeFile("evidence/AUTH_UI_RESULT.txt", "PASS: mocked IPC only; cancel during verification, ignore stale success, explicit failure and recovery. NOT real login validation.\n");
