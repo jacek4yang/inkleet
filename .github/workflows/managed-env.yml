@@ -24,11 +24,11 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: crates/managed-env
-      - name: Resolve initial crate lock and test safety boundaries
+      - name: Test locked installer and protocol safety boundaries
         shell: bash
         run: |
           mkdir -p evidence
-          cargo test --manifest-path crates/managed-env/Cargo.toml 2>&1 | tee evidence/unit-tests.txt
+          cargo test --locked --manifest-path crates/managed-env/Cargo.toml 2>&1 | tee evidence/unit-tests.txt
       - name: Download, verify and execute private Python without system PATH
         shell: bash
         run: cargo run --locked --manifest-path crates/managed-env/Cargo.toml --example probe 2>&1 | tee evidence/private-tools.txt

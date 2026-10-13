@@ -99,7 +99,7 @@ impl Manager {
         canceled(&cancel)?;
         let manager = self.clone();
         let verified_cancel = cancel.clone();
-        let entry = tokio::task::spawn_blocking(move || {
+        let entry = tokio::task::spawn_blocking(move || -> Result<PathBuf> {
             report(Progress { phase: "verifying", downloaded: p.size, total: p.size });
             if hash_file(&partial, &verified_cancel)? != p.sha256 {
                 // A bad cache can never become executable; truncate only this app-owned partial.
@@ -110,7 +110,12 @@ impl Manager {
             let packages = manager.root.join("packages"); directory(&packages)?;
             let stage = io(tempfile::Builder::new().prefix(".install-").tempdir_in(&packages))?;
             report(Progress { phase: "extracting", downloaded: p.size, total: p.size });
-            archive::extract(&partial, stage.path(), &p.prefix, &verified_cancel)?;
+            if p.archive == "raw" {
+                archive::safe_path(&p.entry)?;
+                io(fs::copy(&partial, stage.path().join(&p.entry)))?;
+            } else {
+                archive::extract(&partial, stage.path(), &p.prefix, &verified_cancel)?;
+            }
             let entry = stage.path().join(&p.entry); regular(&entry)?;
             let receipt = Receipt { package_hash: p.sha256.clone(), entry_hash: hash_file(&entry, &verified_cancel)? };
             let receipt_file = stage.path().join(".inkleet-receipt.json");
@@ -183,7 +188,7 @@ mod tests {
             assert_eq!(p.sha256.len(), 64); assert!(p.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
             assert!(p.size > 0 && p.size < 512 * 1024 * 1024);
             assert!(host_allowed(&reqwest::Url::parse(&p.url).unwrap()));
-            assert_eq!(p.archive, "tar-gz");
+            assert!(matches!(p.archive.as_str(), "tar-gz" | "raw"));
             archive::safe_path(&p.entry).unwrap();
         }
     }
