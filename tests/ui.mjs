@@ -21,7 +21,18 @@ try {
   await editor.fill("# Python 独立草稿");
   await page.getByRole("combobox", { name: "编程语言" }).selectOption("rust");
   await editor.waitFor({ state: "visible" });
-  assert.equal(await editor.inputValue(), "// Rust 独立草稿");
+  assert.equal(await editor.innerText(), "// Rust 独立草稿");
+  // 跨语言切换后撤销只改变当前草稿；另一个语言不受影响。
+  await editor.press("Control+End");
+  await editor.press("Enter");
+  await editor.pressSequentially("// second");
+  await editor.press("Control+z");
+  assert.ok(!(await editor.innerText()).includes("second"));
+  for (const language of ["python3", "golang", "c", "cpp", "java", "rust"]) {
+    await page.getByRole("combobox", { name: "编程语言" }).selectOption(language);
+    await editor.waitFor({ state: "visible" });
+  }
+  assert.ok((await editor.innerText()).startsWith("// Rust 独立草稿"));
   await page.screenshot({ path: "evidence/desktop-code.png", fullPage: true });
   await page.getByRole("button", { name: "笔记", exact: true }).click();
   await page.getByRole("textbox", { name: "Markdown 笔记" }).fill("# 推导\n\n- 检查空数组\n- 时间复杂度 O(n)\n\n自编样例，非私人笔记。");
