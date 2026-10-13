@@ -84,6 +84,27 @@ async fn main()->Result<(),String>{
     assert!(items.iter().any(|item|item.get("label").and_then(serde_json::Value::as_str).is_some_and(|s|s.starts_with("push"))),"missing Rust Vec member completion");
     let definition=client.request("textDocument/definition",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":1,"character":23}}),Duration::from_secs(15))?;
     assert!(definition.to_string().contains("file:"),"missing real Rust source definition");
+    // Official templates rely on judge-owned Solution/ListNode/TreeNode types.
+    // Exercise the same fixed scaffolding used by the application, not a mock.
+    let context=inkleet_managed_env::lsp_scaffold::Context::parse(Some(r#"{"name":"inspect","params":[{"type":"ListNode"},{"type":"TreeNode"}]}"#))?;
+    for (version,kind) in [(2,"ListNode"),(3,"TreeNode")]{
+        let original=format!("// struct {kind} in a comment is not a definition\nimpl Solution {{ pub fn inspect(node: {kind}) {{\n    node.va\n}} }}\n");
+        let (before,after)=context.fragments("rust",&original);
+        assert!(before.is_empty());
+        let virtual_source=format!("{original}{after}");
+        client.notify("textDocument/didChange",serde_json::json!({"textDocument":{"uri":uri,"version":version},"contentChanges":[{"text":virtual_source}]}))?;
+        let deadline=std::time::Instant::now()+Duration::from_secs(30);
+        loop{
+            let result=client.request("textDocument/completion",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":2,"character":11}}),Duration::from_secs(10))?;
+            let items=result.as_array().or_else(||result.get("items").and_then(serde_json::Value::as_array));
+            if items.is_some_and(|items|items.iter().any(|item|item["label"].as_str().is_some_and(|label|label=="val"||label.starts_with("val ")))){break;}
+            if std::time::Instant::now()>deadline{return Err(format!("implicit {kind} field completion missing: {result}"));}
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        let resolved=client.request("textDocument/hover",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":1,"character":7}}),Duration::from_secs(10))?;
+        assert!(resolved.to_string().contains("Solution"),"implicit Solution is unresolved: {resolved}");
+    }
+    println!("RUST_JUDGE_TYPES_RESULT {}",serde_json::json!({"platform":inkleet_managed_env::platform(),"solution":true,"listNodeCompletion":true,"treeNodeCompletion":true,"sourceLinesPreserved":true}));
     let _=client.request("shutdown",serde_json::Value::Null,Duration::from_secs(5));client.stop();
     println!("RUST_LSP_RESULT {}",serde_json::json!({"platform":inkleet_managed_env::platform(),"hover":true,"completion":true,"stdlibDefinition":true,"systemPathUsed":false}));
 
