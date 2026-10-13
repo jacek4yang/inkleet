@@ -115,13 +115,13 @@ impl Manager {
                 archive::safe_path(&p.entry)?;
                 io(fs::copy(&partial, stage.path().join(&p.entry)))?;
             } else {
-                archive::extract(&partial, stage.path(), &p.prefix, &verified_cancel)?;
+                archive::extract(&partial, stage.path(), &p.prefix, &verified_cancel).map_err(|e| format!("解压工具失败：{e}"))?;
             }
             let entry = stage.path().join(&p.entry); regular(&entry)?;
             let receipt = Receipt { package_hash: p.sha256.clone(), entry_hash: hash_file(&entry, &verified_cancel)? };
             let receipt_file = stage.path().join(".inkleet-receipt.json");
             let mut f = io(OpenOptions::new().write(true).create_new(true).open(receipt_file))?;
-            io(f.write_all(&serde_json::to_vec(&receipt).map_err(|_| "无法写入安装记录")?))?; io(f.sync_all())?;
+            io(f.write_all(&serde_json::to_vec(&receipt).map_err(|_| "无法写入安装记录")?))?; io(f.sync_all())?; drop(f);
             canceled(&verified_cancel)?;
             let dest = manager.destination(&p);
             // Repair never deletes an existing installation. Keep it for diagnostics/rollback.
@@ -131,7 +131,7 @@ impl Manager {
                 io(fs::rename(&dest, backup.path().join("previous")))?;
                 let _ = backup.keep();
             }
-            io(fs::rename(stage.path(), &dest))?;
+            io(fs::rename(stage.path(), &dest)).map_err(|e| format!("激活工具目录失败：{e}"))?;
             #[cfg(unix)] io(File::open(&packages).and_then(|f| f.sync_all()))?;
             Ok(dest.join(p.entry))
         }).await.map_err(|_| "工具安装任务中断")??;

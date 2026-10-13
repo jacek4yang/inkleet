@@ -339,5 +339,52 @@ try {
   await linkPage.close();
   await writeFile("evidence/LINK_UI_RESULT.txt", "PASS: mock IPC only; invalid host no request, duplicate guard, stale request ignored, duplicate question preserves draft, explicit network failure/manual retry, cancel, mismatched response, mobile layout.\n");
 
+
+  // Environment manager UI uses mocked IPC here; real downloads/LSP run in the separate four-platform probe.
+  const envPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await envPage.addInitScript(() => {
+    window.isTauri = true;
+    window.__envTest = { starts: [], pending: [], tools: [
+      { id: "python", version: "3.14.8", size: 30000000, downloaded: 0, phase: "missing", message: "" },
+      { id: "node", version: "24.21.0", size: 50000000, downloaded: 50000000, phase: "ready", message: "" },
+      { id: "pyright", version: "1.1.414", size: 4000000, downloaded: 4000000, phase: "ready", message: "" },
+    ] };
+    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      if (command === "load_recent_questions") return [];
+      if (command === "load_document") return { code: null, notes: null };
+      if (command === "save_text") return;
+      if (command === "environment_status") return JSON.parse(JSON.stringify({ platform: "linux-x64", supported: true, tools: window.__envTest.tools }));
+      if (command === "install_environment") {
+        window.__envTest.starts.push(args.id);
+        window.__envTest.tools.find(t => t.id === args.id).phase = "downloading";
+        return new Promise(resolve => window.__envTest.pending.push(resolve));
+      }
+      if (command === "cancel_environment_install") { window.__envTest.tools.find(t => t.id === args.id).phase = "canceled"; return; }
+      throw new Error("Unexpected environment fixture command: " + command);
+    }};
+  });
+  await envPage.goto("http://127.0.0.1:5173");
+  await envPage.getByRole("button", { name: "代码", exact: true }).click();
+  await envPage.getByRole("button", { name: "开发环境", exact: true }).click();
+  const envDialog = envPage.getByRole("dialog", { name: "开发环境", exact: true });
+  await envDialog.getByText("未安装", { exact: true }).waitFor();
+  await envDialog.locator('[data-tool="python"] button').evaluate(button => { button.click(); button.click(); });
+  await envPage.waitForFunction(() => window.__envTest.starts.length === 1);
+  await envPage.evaluate(() => window.__envTest.pending[0]());
+  await envDialog.getByText("下载中", { exact: true }).waitFor();
+  await envDialog.getByRole("button", { name: "关闭", exact: true }).click();
+  await envPage.getByRole("button", { name: "开发环境", exact: true }).click();
+  await envDialog.getByText("下载中", { exact: true }).waitFor();
+  await envDialog.getByRole("button", { name: "取消", exact: true }).click();
+  await envDialog.getByText("已取消", { exact: true }).waitFor();
+  await envDialog.getByRole("button", { name: "重试 / 修复", exact: true }).click();
+  await envPage.waitForFunction(() => window.__envTest.starts.length === 2);
+  await envPage.evaluate(() => { window.__envTest.tools[0].phase = "ready"; window.__envTest.pending[1](); });
+  await envPage.waitForFunction(() => [...document.querySelectorAll(".environment-tools [role=status]")].every(e => e.textContent === "已安装"));
+  assert.equal(await envPage.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await envPage.screenshot({ path: "evidence/managed-environment-mobile-ui.png", fullPage: true });
+  await envPage.close();
+  await writeFile("evidence/ENVIRONMENT_UI_RESULT.txt", "PASS: mocked IPC only; duplicate install guard, close/reopen during background download, cancellation, manual retry, mobile layout. Real installer/protocol verified separately.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

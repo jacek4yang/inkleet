@@ -2,7 +2,7 @@ name: Native Linux
 on:
   push:
     branches: [main, feat/first-workbench]
-    paths: ['src/**', 'src-tauri/**', 'package*.json', 'tests/native_smoke.py', '.github/workflows/native.yml']
+    paths: ['src/**', 'src-tauri/**', 'crates/managed-env/**', 'package*.json', 'tests/native_smoke.py', '.github/workflows/native.yml']
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,4 +1,5 @@
 mod storage;
+mod managed;
 mod leetcode;
 mod auth;
 mod cache;
@@ -109,6 +110,21 @@ async fn acknowledge_unknown_judge(window: tauri::WebviewWindow, app: tauri::App
     check_origin(&window)?; judge::acknowledge_unknown(app, account, id, confirmed).await
 }
 
+
+#[tauri::command]
+async fn environment_status(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<managed::Overview, String> {
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move || app.state::<managed::Environments>().list()).await.map_err(|_| "环境检查任务中断".to_string())?
+}
+#[tauri::command]
+async fn install_environment(window: tauri::WebviewWindow, app: tauri::AppHandle, id: String) -> Result<(), String> {
+    check_origin(&window)?; managed::start(app, id).await
+}
+#[tauri::command]
+async fn cancel_environment_install(window: tauri::WebviewWindow, app: tauri::AppHandle, id: String) -> Result<(), String> {
+    check_origin(&window)?; app.state::<managed::Environments>().cancel(&id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -117,12 +133,13 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             app.manage(Store { root, gate: Mutex::new(()) });
             app.manage(auth::Auth::default());
+            app.manage(managed::Environments::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("tools")));
             app.manage(journal::Journal::new(app.path().app_data_dir()?));
             app.manage(judge::Active::default());
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .run(tauri::generate_context!())
         .expect("InkLeet failed to start");
 }

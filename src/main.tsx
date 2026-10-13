@@ -6,6 +6,7 @@ import "./style.css";
 import { CodeEditor } from "./editor";
 import { FontInfo } from "./font-info";
 import { Notes } from "./notes";
+import { Environments } from "./environments";
 import { Login, type Identity } from "./login";
 import { useOnlineJudge } from "./online-judge";
 import { Catalogue, QuestionStatement, type RemoteQuestion } from "./catalogue";
@@ -32,6 +33,7 @@ function download(name: string, content: string) {
 function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [fontInfo, setFontInfo] = useState(false);
+  const [environments, setEnvironments] = useState(false);
   const [problems, setProblems] = useState<WorkbenchProblem[]>(samples);
   const [cacheWarning, setCacheWarning] = useState("");
   const [catalogue, setCatalogue] = useState(false);
@@ -140,9 +142,10 @@ function App() {
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
       <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
       {editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor key={activeKey} documentKey={activeKey} language={language} label="代码编辑器" value={doc.code} onChange={text => edit("code", text)} />}
-      <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button disabled={editorLoading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
+      <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button onClick={() => setEnvironments(true)} data-action="open-environments">开发环境</button><button disabled={editorLoading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
       {judge.panel}
     </section>
+    {environments && <Environments onClose={() => setEnvironments(false)} />}
     {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
     {catalogue && <Catalogue initialMode={catalogueMode} onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
     <footer className="statusbar" role="status"><span>{status}</span><span>源码和笔记本机保存 · 评测按需上传代码</span></footer>

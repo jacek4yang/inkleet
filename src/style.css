@@ -39,3 +39,10 @@
 
 .catalogue-modes{display:flex;gap:8px;margin:8px 0}.catalogue-modes button{font-size:12px}.catalogue-modes button[aria-pressed=true]{background:#e8ddd0;color:#906442}
 @media(max-width:420px){.topbar{padding:0 8px}.topbar>div{gap:3px}.topbar .brand{font-size:18px}.topbar button{font-size:10px;padding:5px}.topbar>strong{font-size:11px}}
+
+.environments{width:min(650px,94vw);max-height:88dvh;overflow:auto;border:1px solid #ddd5ca;border-radius:9px;background:#faf9f5;color:#2b2621;padding:22px}
+.environments::backdrop{background:#2b26214a}.environments header{display:flex;justify-content:space-between;align-items:center;gap:12px}.environments h2{font-size:18px;margin:0}.environments p{font-size:12px;line-height:1.8}
+.environments .muted{font-size:11px;color:#72695e}.environment-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;margin:18px 0}
+.environment-tools section{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:16px 0;border-top:1px solid #ddd5ca}.environment-tools section>div{display:flex;align-items:center;gap:10px;font-size:12px}.environment-tools section>div:first-child{align-items:flex-start;flex-direction:column;gap:5px}.environment-tools small{color:#72695e;font-family:var(--font-mono);font-size:10px}
+.environment-tools progress,.environment-tools p{grid-column:1/-1;width:100%;margin:0}.environment-tools progress{accent-color:#bc6a3a;height:5px}.environment-tools button{font-size:11px}
+@media(max-width:420px){.environments{padding:16px}.environment-summary{flex-wrap:wrap}.environment-tools section{gap:8px}}

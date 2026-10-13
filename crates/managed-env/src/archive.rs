@@ -79,7 +79,7 @@ fn extract_reader(reader: impl Read, root: &Path, prefix: &str, cancel: &AtomicB
         total = total.checked_add(size).ok_or("解压总长度溢出")?;
         if size > MAX_FILE || total > MAX_TOTAL { return Err("解压内容大小超限".into()); }
         io(fs::create_dir_all(dest.parent().ok_or("压缩包路径无父目录")?))?;
-        let mut file = io(OpenOptions::new().write(true).create_new(true).open(&dest))?;
+        let mut file = io(OpenOptions::new().write(true).create_new(true).open(&dest)).map_err(|e| format!("创建分发文件 {} 失败：{e}", path.display()))?;
         copy_cancelled(&mut entry, &mut file, size, cancel)?;
         #[cfg(unix)] {
             use std::os::unix::fs::PermissionsExt;
@@ -101,7 +101,7 @@ fn extract_reader(reader: impl Read, root: &Path, prefix: &str, cancel: &AtomicB
             if !meta.is_file() || meta.file_type().is_symlink() { return Err("压缩包目录链接不受支持".into()); }
             total = total.checked_add(meta.len()).ok_or("链接复制长度溢出")?;
             if total > MAX_TOTAL || meta.len() > MAX_FILE { return Err("链接复制总量超限".into()); }
-            let dest = root.join(path); io(fs::create_dir_all(dest.parent().ok_or("链接路径无父目录")?))?;
+            let dest = root.join(&path); io(fs::create_dir_all(dest.parent().ok_or("链接路径无父目录")?))?;
             let mut file = io(OpenOptions::new().write(true).create_new(true).open(&dest))?;
             copy_cancelled(io(File::open(source))?, &mut file, meta.len(), cancel)?;
             io(file.set_permissions(meta.permissions()))?; io(file.sync_all())?;
