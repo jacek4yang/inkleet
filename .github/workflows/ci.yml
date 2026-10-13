@@ -104,7 +104,8 @@ jobs:
           dpkg-deb --info "$package" | tee evidence/install/package-info.txt
           sha256sum "$package" > evidence/install/SHA256.txt
           sudo apt-get install -y "$package" > evidence/install/install.log 2>&1
-          dpkg-query -W -f='${Status} ${Version} ${Architecture}\\n' inkleet > evidence/install/installed.txt
+          package_name="$(dpkg-deb -f "$package" Package)"
+          dpkg-query -W -f='${Status} ${Version} ${Architecture}\\n' "$package_name" > evidence/install/installed.txt
           test -x /usr/bin/inkleet
           ldd /usr/bin/inkleet > evidence/install/linked-libraries.txt
           ! grep -q 'not found' evidence/install/linked-libraries.txt
