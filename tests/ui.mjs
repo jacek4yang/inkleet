@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import os from "node:os";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
 const server = spawn("npm", ["run", "dev", "--", "--port", "5173"], { stdio: "inherit" });
@@ -46,7 +46,16 @@ try {
   assert.equal(overflow, false, "手机页面不能横向溢出");
   // 大文件仅作为测试数据，不调用运行/提交，不代表真机 IME 验证。
   const large = Array.from({ length: 10000 }, (_, i) => "// line " + i + ": bounded editor responsiveness").join("\n");
-  await editor.fill(large);
+  // 用编辑器粘贴管线装载大文档；不能用 fill 构造一万个原生 DOM 行再测重绘。
+  await editor.click();
+  await editor.press("Control+a");
+  const pasteStarted = Date.now();
+  await editor.evaluate((el, value) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", value);
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, large);
+  const pasteSetupMs = Date.now() - pasteStarted;
   await editor.press("Control+End");
   await page.evaluate(() => {
     window.__inkPerf = { frames: [], tasks: [] };
@@ -67,10 +76,16 @@ try {
     environment: "GitHub Actions Linux Chromium headless; not native WebView or IME",
     platform: os.platform(), cpu: os.cpus()[0]?.model, logicalCpus: os.cpus().length,
     viewport: "390x844", lines: 10000, initialCharacters: large.length,
+    setup: "Synthetic paste event through CodeMirror; input samples use Playwright keyboard", pasteSetupMs,
     samples: sorted.length, inputToRafP50Ms: sorted[Math.floor(sorted.length * .5)],
     inputToRafP95Ms: sorted[Math.floor(sorted.length * .95)],
     longestTaskMs: Math.max(0, ...measured.tasks),
   };
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出源码", exact: true }).click();
+  const exported = await downloadPromise;
+  const exportedText = await readFile(await exported.path(), "utf8");
+  assert.equal(exportedText, large + " // performance probe 0123456789");
   await writeFile("evidence/PERFORMANCE.json", JSON.stringify(report, null, 2));
   assert.ok(report.inputToRafP95Ms < 100, "受控测试输入响应 P95 不应超过 100ms");
   assert.deepEqual(errors, []);
