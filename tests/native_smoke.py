@@ -1,5 +1,5 @@
 """Linux WebKitGTK smoke test against the built native application, not a browser mock."""
-import base64, json, os, pathlib, subprocess, time, urllib.request, urllib.error
+import base64, json, os, pathlib, subprocess, time, urllib.request, urllib.error, http.client
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
@@ -33,6 +33,17 @@ def element(css): return cmd("POST","/element",{"using":"css selector","value":c
 def text(css): return cmd("GET",f"/element/{element(css)}/text")
 def click(css): return cmd("POST",f"/element/{element(css)}/click",{})
 def fill(css, value):
+    # Only authored test-field replacement is replayable. Never replay a judge,
+    # login, submission, or arbitrary click after an uncertain transport result.
+    for attempt in range(2):
+        try: return fill_once(css, value)
+        except http.client.RemoteDisconnected:
+            with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
+                log.write(f"sendKeys connection reset while replacing authored fixture: {css}; attempt={attempt+1}\n")
+            if attempt: raise
+            cmd("DELETE","/actions")  # release any modifier whose key-up was uncertain
+            time.sleep(.3)
+def fill_once(css, value):
     node = element(css)
     cmd("POST",f"/element/{node}/click",{})
     cmd("POST","/actions",{"actions":[{"type":"key","id":"keyboard","actions":[
@@ -235,6 +246,21 @@ try:
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
+            if group=="golang":
+                go_solution="func solve(values []int) int { total:=0; for _,value:=range values { total+=value }; return total }"
+                fill(code,go_solution)
+                if not cmd("POST","/elements",{"using":"css selector","value":".local-runner"}):
+                    click(".pane-heading .actions button")
+                click('[data-local-tab="run"]')
+                fill('[aria-label="本地测试输入"]',"[3,-1,8]")
+                click('[data-action="local-execute"]')
+                wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),"Go private compilation and typed local result",seconds=160)
+                screenshot("golang-local-run-native.png")
+                assert text(code)==go_solution,"Go local run rewrote the editor"
+                (evidence/"GO_LOCAL_GUI_RESULT.txt").write_text("PASS: actual Linux GUI compiles a Go solution using its private downloaded toolchain, executes the bounded JSON harness and returns exact value 10. No online judge verdict.\n")
+                click(".local-runner header > button:last-child")
+                fill(code,code_text)
+
         click('select[aria-label="编程语言"] option[value="rust"]')
         fill(code,marker)
 

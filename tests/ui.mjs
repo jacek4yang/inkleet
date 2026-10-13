@@ -543,6 +543,15 @@ try {
   await runPage.getByRole("textbox",{name:"代码编辑器",exact:true}).press("Shift+F5");
   await runPanel.getByText(/调试结束/).waitFor();
   assert.equal(await runPage.evaluate(() => window.__runTest.debugStarts), 1);
+  await runPage.getByRole("combobox", { name: "编程语言" }).selectOption("golang");
+  assert.equal(await runPanel.locator('[data-local-tab="debug"]').isDisabled(), true);
+  await runPanel.getByRole("button", { name: "本地执行", exact: true }).click();
+  await runPage.waitForFunction(() => window.__runTest.starts.length === 3);
+  await runPage.evaluate(() => { window.__runTest.pending[2](); window.__runTest.result.phase = "compiling"; });
+  await runPanel.getByText("编译中…", { exact: true }).waitFor();
+  assert.equal(await runPanel.getByRole("button", { name: "本地执行", exact: true }).isDisabled(), true);
+  await runPanel.getByRole("button", { name: "停止", exact: true }).click();
+  await runPanel.getByText("已停止", { exact: true }).waitFor();
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");

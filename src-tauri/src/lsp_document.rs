@@ -83,3 +83,40 @@ pub fn diagnostics(value:&mut Value,prefix:u32){
         diagnostics(&mut errors,1);assert_eq!(errors["diagnostics"].as_array().unwrap().len(),1);assert_eq!(errors["diagnostics"][0]["range"]["start"]["line"],2);
     }
 }
+
+
+/// Definition locations in the current virtual document must map back to the
+/// editable source, while standard-library locations keep their original lines.
+pub fn definition(value:&mut Value,document_uri:&str,prefix:u32){
+    if prefix==0{return;}
+    fn map(value:&mut Value,uri:&str,prefix:u32)->bool{
+        if let Some(origin)=value.get_mut("originSelectionRange"){if !range(origin,prefix){return false;}}
+        let same=value.get("uri").or_else(||value.get("targetUri")).and_then(Value::as_str)==Some(uri);
+        if same{
+            for key in ["range","targetRange","targetSelectionRange"]{
+                if let Some(span)=value.get_mut(key){if !range(span,prefix){return false;}}
+            }
+        }
+        true
+    }
+    if let Some(locations)=value.as_array_mut(){locations.retain_mut(|item|map(item,document_uri,prefix));}
+    else if value.is_object()&&!map(value,document_uri,prefix){*value=Value::Null;}
+}
+#[cfg(test)]mod definition_tests{
+    use super::*;use serde_json::json;
+    #[test]fn definition_maps_only_current_virtual_source(){
+        let span=|line|json!({"start":{"line":line,"character":0},"end":{"line":line,"character":3}});
+        let mut value=json!([
+            {"uri":"file:///solution.cpp","range":span(23)},
+            {"uri":"file:///stdlib/vector","range":span(23)},
+            {"targetUri":"file:///solution.cpp","targetRange":span(24),"targetSelectionRange":span(24),"originSelectionRange":span(25)},
+            {"uri":"file:///solution.cpp","range":span(2)}
+        ]);
+        definition(&mut value,"file:///solution.cpp",21);
+        assert_eq!(value.as_array().unwrap().len(),3);
+        assert_eq!(value[0]["range"]["start"]["line"],2);
+        assert_eq!(value[1]["range"]["start"]["line"],23);
+        assert_eq!(value[2]["targetSelectionRange"]["start"]["line"],3);
+        assert_eq!(value[2]["originSelectionRange"]["start"]["line"],4);
+    }
+}

@@ -20,21 +20,21 @@ impl Runner{
     pub fn cancel(&self,id:u64)->Result<(),String>{
         if let Some(job)=self.active.lock().map_err(|_|"运行状态不可用")?.as_ref(){
             let mut view=job.view.lock().map_err(|_|"运行状态不可用")?;
-            if view.id==id&&matches!(view.phase.as_str(),"queued"|"running"){
+            if view.id==id&&matches!(view.phase.as_str(),"queued"|"compiling"|"running"){
                 job.cancel.store(true,Ordering::Release);view.phase="canceling".into();
             }
         }Ok(())
     }
 }
 pub async fn start(app:tauri::AppHandle,snapshot:Snapshot)->Result<u64,String>{
-    if snapshot.language!="python3"{return Err("此版本本地运行暂支持 Python；其他语言可使用力扣运行".into());}
+    if !matches!(snapshot.language.as_str(),"python3"|"golang"){return Err("此版本本地运行支持 Python 和 Go；其他语言可使用力扣运行".into());}
     if snapshot.code.len()>2*1024*1024||snapshot.title.len()>512{return Err("运行快照超过大小限制".into());}
     harness::configuration(&snapshot.metadata,&snapshot.input)?;
     let state=app.state::<Runner>();
     let job={
         let mut active=state.active.lock().map_err(|_|"运行状态不可用")?;
         if let Some(previous)=active.as_ref(){
-            if matches!(previous.view.lock().map_err(|_|"运行状态不可用")?.phase.as_str(),"queued"|"running"|"canceling"){return Err("已有本地运行任务，请停止后再试".into());}
+            if matches!(previous.view.lock().map_err(|_|"运行状态不可用")?.phase.as_str(),"queued"|"compiling"|"running"|"canceling"){return Err("已有本地运行任务，请停止后再试".into());}
         }
         let id=state.next.fetch_add(1,Ordering::Relaxed);
         let job=Arc::new(Job{cancel:Arc::new(AtomicBool::new(false)),view:Mutex::new(View{id,phase:"queued".into(),title:snapshot.title.clone(),stdout:String::new(),stderr:String::new(),results:Vec::new(),exit_code:None,timed_out:false,canceled:false,truncated:false,elapsed_ms:0,error:String::new()})});
@@ -45,18 +45,45 @@ pub async fn start(app:tauri::AppHandle,snapshot:Snapshot)->Result<u64,String>{
     tauri::async_runtime::spawn_blocking(move||{
         let execute=||->Result<(process::Output,Vec<String>),String>{
             let state=app.state::<Runner>();let tools=app.state::<crate::managed::Environments>();
-            let python=tools.manager.installed("python")?.ok_or("请先在开发环境中安装 Python")?;
+            let tool_id=if snapshot.language=="golang"{"go"}else{"python"};
+            let tool=process::tool_path(&tools.manager.installed(tool_id)?.ok_or("请先在开发环境中安装当前语言工具链")?);
             if state.root.exists()&&fs::symlink_metadata(&state.root).map_err(|_|"运行目录不可用")?.file_type().is_symlink(){return Err("运行目录不能是符号链接".into());}
             fs::create_dir_all(&state.root).map_err(|_|"无法创建运行目录")?;
-            let work=tempfile::Builder::new().prefix("python-").tempdir_in(&state.root).map_err(|_|"无法创建独立运行目录")?;
-            let root=fs::canonicalize(work.path()).map_err(|_|"无法解析运行目录")?;
-            harness::prepare(&root,&snapshot.code,&snapshot.metadata,&snapshot.input)?;
+            let work=tempfile::Builder::new().prefix("run-").tempdir_in(&state.root).map_err(|_|"无法创建独立运行目录")?;
+            let root=process::tool_path(&fs::canonicalize(work.path()).map_err(|_|"无法解析运行目录")?);
+            let mut command;
+            if snapshot.language=="golang"{
+                harness::prepare_go(&root,&snapshot.code,&snapshot.metadata,&snapshot.input)?;
+                if job.cancel.load(Ordering::Acquire){return Err("运行已取消".into());}
+                if let Ok(mut view)=job.view.lock(){view.phase="compiling".into();}
+                let temporary=root.join("temp");fs::create_dir(&temporary).map_err(|_|"无法创建 Go 临时目录")?;
+                let binary=root.join(if cfg!(windows){"solution.exe"}else{"solution"});
+                let mut compile=Command::new(&tool);
+                compile.current_dir(&root).env_clear().env("PATH",tool.parent().ok_or("Go 路径无效")?)
+                    .env("GOROOT",tool.parent().and_then(std::path::Path::parent).ok_or("Go 根目录无效")?)
+                    .env("HOME",&root).env("USERPROFILE",&root).env("TMP",&temporary).env("TEMP",&temporary).env("TMPDIR",&temporary)
+                    .env("APPDATA",&temporary).env("LOCALAPPDATA",&temporary).env("GOENV","off").env("GOWORK","off").env("GOTOOLCHAIN","local")
+                    .env("CGO_ENABLED","0").env("GOPROXY","off").env("GOSUMDB","off").env("GOTELEMETRY","off")
+                    .env("GOCACHE",process::tool_path(&state.root.join("go-cache"))).env("GOPATH",root.join("go-path"))
+                    .args(["build","-trimpath","-buildvcs=false","-o"]).arg(&binary).args(["solution.go","nodes.go","harness.go"]);
+                if let Some(system)=std::env::var_os("SystemRoot"){compile.env("SystemRoot",system);}
+                let output=process::run(compile,job.cancel.clone(),Duration::from_secs(120),64*1024)?;
+                if output.exit_code!=Some(0)||output.canceled||output.timed_out||output.truncated{
+                    if let Ok(mut view)=job.view.lock(){view.error=if output.timed_out{"编译超过 120 秒，已终止"}else if output.canceled{"编译已停止"}else{"编译未完成，请查看错误输出"}.into();}
+                    return Ok((output,Vec::new()));
+                }
+                command=Command::new(binary);
+                command.current_dir(&root).env_clear().env("PATH",tool.parent().ok_or("Go 路径无效")?)
+                    .env("HOME",&root).env("USERPROFILE",&root).env("TMP",&temporary).env("TEMP",&temporary).env("TMPDIR",&temporary);
+            }else{
+                harness::prepare(&root,&snapshot.code,&snapshot.metadata,&snapshot.input)?;
+                command=Command::new(&tool);
+                command.arg("-I").arg(root.join("harness.py")).current_dir(&root).env_clear()
+                    .env("PATH",tool.parent().ok_or("Python 路径无效")?).env("HOME",&root).env("USERPROFILE",&root).env("TMP",&root).env("TEMP",&root)
+                    .env("PYTHONIOENCODING","utf-8");
+            }
             if job.cancel.load(Ordering::Acquire){return Err("运行已取消".into());}
             if let Ok(mut view)=job.view.lock(){view.phase="running".into();}
-            let mut command=Command::new(&python);
-            command.arg("-I").arg(root.join("harness.py")).current_dir(&root).env_clear()
-                .env("PATH",python.parent().ok_or("Python 路径无效")?).env("HOME",&root).env("USERPROFILE",&root).env("TMP",&root).env("TEMP",&root)
-                .env("PYTHONIOENCODING","utf-8");
             if let Some(system)=std::env::var_os("SystemRoot"){command.env("SystemRoot",system);}
             let output=process::run(command,job.cancel.clone(),Duration::from_secs(10),64*1024)?;
             let path=root.join("results.jsonl");let mut results=Vec::new();

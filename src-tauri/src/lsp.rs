@@ -54,6 +54,7 @@ impl Services {
         self.session(id)?;
         crate::lsp_document::response(kind,&mut response,prefix);
         if kind=="definition"{
+            crate::lsp_document::definition(&mut response,&session.uri,prefix);
             let locations:Vec<&Value>=match response.as_array(){Some(items)=>items.iter().take(32).collect(),None=>vec![&response]};
             let mut allowed=session.approved_sources.lock().map_err(|_|"源码引用状态不可用")?;
             for location in locations{
