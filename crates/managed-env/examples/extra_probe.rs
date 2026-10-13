@@ -58,8 +58,11 @@ fn legacy_java_path(path:&Path)->Result<PathBuf,String>{
     checked(cmd)?;assert_eq!(checked(clean(&binary,&work,&paths))?.trim(),"6");
     assert!(go_root.join("src/fmt/print.go").is_file());
     std::fs::write(work.join("Main.java"),"import java.util.Arrays; class Main { public static void main(String[] args) {System.out.println(Arrays.stream(new int[]{1,2,3}).sum());} }\n").map_err(|e|e.to_string())?;
-    let javac=jdk.with_file_name(format!("javac{extension}"));let mut cmd=clean(&javac,&work,&paths);cmd.arg("Main.java").env("JAVA_HOME",java_root);checked(cmd)?;
-    let mut cmd=clean(&jdk,&work,&paths);cmd.args(["-cp",".","Main"]).env("JAVA_HOME",java_root);assert_eq!(checked(cmd)?.trim(),"6");
+    let javac=jdk.with_file_name(format!("javac{extension}"));let mut cmd=clean(&javac,&work,&paths);cmd.arg("Main.java").env("JAVA_HOME",java_root);
+    #[cfg(windows)] {cmd.arg("-J-Xshare:off").arg(format!("-J-Djava.home={}",java_root.display()));}
+    checked(cmd)?;
+    let mut cmd=clean(&jdk,&work,&paths);#[cfg(windows)] {cmd.arg("-Xshare:off").arg(format!("-Djava.home={}",java_root.display()));}
+    cmd.args(["-cp",".","Main"]).env("JAVA_HOME",java_root);assert_eq!(checked(cmd)?.trim(),"6");
     assert!(java_root.join("lib/src.zip").is_file());
     println!("LANGUAGE_RUNTIME_RESULT {}",serde_json::json!({"platform":inkleet_managed_env::platform(),"goCompileRun":true,"javaCompileRun":true,"goSource":true,"javaSourceArchive":true,"systemPathUsed":false}));
     for id in ["clangd","delve","codelldb"]{

@@ -610,5 +610,17 @@
     "prefix": "",
     "entry": "dlv",
     "license": "MIT; LICENSE retained"
+  },
+  {
+    "id": "jdtls",
+    "platform": "any",
+    "version": "1.61.0",
+    "url": "https://download.eclipse.org/jdtls/milestones/1.61.0/jdt-language-server-1.61.0-202609031315.tar.gz",
+    "sha256": "338e7e73d61836651ba2453919a0d34fa763eb4e7c03342092309bffb8934c64",
+    "size": 51037522,
+    "archive": "tar-gz",
+    "prefix": "",
+    "entry": "plugins/org.eclipse.equinox.launcher_1.8.0.v20260804-1928.jar",
+    "license": "EPL-2.0; bundled dependency licenses retained"
   }
 ]

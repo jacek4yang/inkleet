@@ -67,7 +67,7 @@ fn directory(path: &Path) -> Result<()> {
 fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.username().is_empty() && url.password().is_none()
         && url.port_or_known_default() == Some(443)
-        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org" | "go.dev" | "dl.google.com"))
+        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org" | "go.dev" | "dl.google.com" | "download.eclipse.org"))
 }
 impl Manager {
     pub fn new(root: PathBuf) -> Self { Self { root } }
@@ -146,7 +146,32 @@ impl Manager {
         Ok(entry)
     }
 }
+// Retry only transient transport/server failures. Hash, path, permissions and
+// resume-integrity failures always require an explicit repair/retry decision.
+fn transient_download_error(message:&str)->bool{
+    matches!(message,"下载连接失败，已保留断点，可重试"|"下载中断，已保留断点，可重试"|"下载不完整，已保留断点，可重试")
+        || [408,500,502,503,504].iter().any(|code|message==format!("工具下载失败（HTTP {code}），可重试"))
+}
 async fn download(p: &Package, path: &Path, cancel: &AtomicBool, report: &Report) -> Result<()> {
+    for attempt in 0..3u64{
+        match download_once(p,path,cancel,report).await{
+            Ok(())=>return Ok(()),
+            Err(error)=>{
+                canceled(cancel)?;
+                if attempt==2||!transient_download_error(&error){return Err(error);}
+                // Keep the partial and wait interruptibly; the next request verifies Content-Range.
+                let delay=Duration::from_secs(2u64.pow(attempt as u32+1));
+                let until=tokio::time::Instant::now()+delay;
+                while tokio::time::Instant::now()<until{
+                    canceled(cancel)?;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+    }
+    Err("下载重试预算已用尽".into())
+}
+async fn download_once(p: &Package, path: &Path, cancel: &AtomicBool, report: &Report) -> Result<()> {
     if path.exists() { regular(path)?; }
     let mut offset = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     if offset > p.size { io(OpenOptions::new().write(true).truncate(true).open(path))?; offset = 0; }
@@ -203,6 +228,13 @@ mod tests {
     #[test] fn hostile_download_hosts_are_rejected() {
         for url in ["http://github.com/x", "https://github.com.evil.test/x", "https://user@github.com/x", "https://nodejs.org:8443/x"] {
             assert!(!host_allowed(&reqwest::Url::parse(url).unwrap()));
+        }
+    }
+    #[test] fn retry_policy_never_retries_integrity_or_access_failures(){
+        assert!(transient_download_error("下载中断，已保留断点，可重试"));
+        assert!(transient_download_error("工具下载失败（HTTP 503），可重试"));
+        for error in ["工具下载失败（HTTP 403），可重试","服务器返回了不一致的下载断点","工具文件校验失败，请修复","安装已取消；可稍后继续下载"]{
+            assert!(!transient_download_error(error));
         }
     }
     #[test] fn canceled_install_does_not_start_network() {

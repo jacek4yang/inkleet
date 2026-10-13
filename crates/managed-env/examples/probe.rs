@@ -104,11 +104,10 @@ async fn main() -> Result<(), String> {
         println!("PROBE_STAGE Bounded process cleanup verified");
         let script_path=runtime_work.join("debug_subject.py");
         std::fs::write(&script_path,"total = 1\ntotal += 2\nresult = total * 2\nprint(result)\n").map_err(|e|e.to_string())?;
-        let log_dir=runtime_work.join("adapter-logs");std::fs::create_dir(&log_dir).map_err(|e|e.to_string())?;
         let mut adapter=command(&runtime_python,&runtime_work,r#"import sys,runpy,os,traceback
 original_stderr=sys.stderr
 sys.path.insert(0,sys.argv[1])
-sys.argv=['debugpy.adapter','--log-dir',sys.argv[2]]
+sys.argv=['debugpy.adapter']
 try:
     runpy.run_module('debugpy.adapter',run_name='__main__')
 except BaseException:
@@ -116,18 +115,15 @@ except BaseException:
     sys.stderr=original_stderr
     raise
 "#);
-        adapter.arg(&debug_root).arg(&log_dir);
+        adapter.arg(&debug_root);
         let (events_tx,events_rx)=mpsc::sync_channel(128);
         let client=Arc::new(Client::spawn_dap(adapter,Arc::new(move|event|{if event.get("event").and_then(serde_json::Value::as_str)!=Some("output"){let _=events_tx.try_send(event);}}))?);
         println!("PROBE_STAGE DAP adapter spawned");
         if let Err(error)=client.request("initialize",json!({"clientID":"inkleet","adapterID":"python","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsVariableType":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(15)){
             // Synthetic fixture only: emit exception lines, never full adapter logs or access tokens.
             std::thread::sleep(Duration::from_millis(100));
-            let mut texts=vec![client.stderr()];
-            for entry in std::fs::read_dir(&log_dir).map_err(|e|e.to_string())?.flatten(){
-                if let Ok(text)=std::fs::read_to_string(entry.path()){texts.push(text);}
-            }
-            for text in texts {for line in text.lines().filter(|line|line.contains("Error")||line.contains("Exception")||line.contains("No module")||line.trim_start().starts_with("File ")).take(20){
+            // Match the application: no adapter file logs (they contain access tokens).
+            for text in [client.stderr()] {for line in text.lines().filter(|line|line.contains("Error")||line.contains("Exception")||line.contains("No module")||line.trim_start().starts_with("File ")).take(20){
                 if !line.to_ascii_lowercase().contains("token"){println!("DAP_INITIALIZE_FAILURE {}",line.chars().take(500).collect::<String>());}
             }}
             return Err(format!("DAP initialize: {error}; stderr bytes={}",client.stderr().len()));
@@ -143,14 +139,6 @@ except BaseException:
         }
         if let Err(error)=event(&events_rx,"initialized"){
             let launch_result=launching.join().map_err(|_|"launch thread failed")?;
-            // Only fixed synthetic CI fixtures run here. Never upload raw adapter logs, which contain ephemeral access tokens.
-            for entry in std::fs::read_dir(&log_dir).map_err(|e|e.to_string())?.flatten(){
-                if let Ok(text)=std::fs::read_to_string(entry.path()){
-                    for line in text.lines().filter(|line|line.contains("spawning launcher:")||line.contains("Timed out")||line.contains("Failed to spawn")||line.contains("WinError")).take(20){
-                        if !line.to_ascii_lowercase().contains("token"){println!("ADAPTER_FAILURE {}",line.chars().take(500).collect::<String>());}
-                    }
-                }
-            }
             return Err(format!("{error}; launch={launch_result:?}; adapter stderr bytes={}",client.stderr().len()));
         }
         let breakpoint=client.request("setBreakpoints",json!({"source":{"path":script_path},"breakpoints":[{"line":2}]}),Duration::from_secs(10))?;

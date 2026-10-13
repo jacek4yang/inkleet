@@ -18,8 +18,10 @@ fn checked(command:Command)->Result<String,String>{
 #[tokio::main]
 async fn main()->Result<(),String>{
     if std::env::var("INKLEET_LINKER_MODE").as_deref()==Ok("1"){
-        let status=Command::new(std::env::var_os("INKLEET_ZIG").ok_or("missing private linker")?)
-            .arg("cc").args(std::env::args_os().skip(1)).status().map_err(|e|e.to_string())?;
+        let mut driver=Command::new(std::env::var_os("INKLEET_ZIG").ok_or("missing private linker")?);
+        driver.arg("cc");
+        if cfg!(windows){driver.args(["-target","x86_64-windows-gnu"]);}
+        let status=driver.args(std::env::args_os().skip(1)).status().map_err(|e|e.to_string())?;
         std::process::exit(status.code().unwrap_or(1));
     }
     let temp=tempfile::Builder::new().prefix("inkleet compiler 空格 ").tempdir().map_err(|e|e.to_string())?;
@@ -48,10 +50,15 @@ async fn main()->Result<(),String>{
     let source_root=install["rust-src"].parent().and_then(Path::parent).and_then(Path::parent).ok_or("Rust source root")?;
     let mut ra=clean(&install["rust-analyzer-preview"],&lsp_work,&paths);
     ra.env("RUSTC",&rustc).env("CARGO",&cargo).env("CARGO_HOME",lsp_work.join("cargo-home")).env("CARGO_NET_OFFLINE","true")
-        .env("CARGO_ENCODED_RUSTFLAGS",format!("--sysroot\u{1f}{}",stdroot.display())).env("RUST_SRC_PATH",source_root);
-    let mut config=serde_json::json!({"cargo":{"sysroot":stdroot,"sysrootSrc":source_root,"noDeps":true,"buildScripts":{"enable":false}},"procMacro":{"enable":false},"checkOnSave":false,"cachePriming":{"enable":false},"numThreads":2});
+        .env("RA_LOG","info").env("CARGO_ENCODED_RUSTFLAGS",format!("--sysroot\u{1f}{}",stdroot.display())).env("RUST_SRC_PATH",source_root);
+    let mut config=serde_json::json!({"linkedProjects":[lsp_work.join("Cargo.toml")],"cargo":{"sysroot":stdroot,"sysrootSrc":source_root,"noDeps":true,"buildScripts":{"enable":false}},"procMacro":{"enable":false},"checkOnSave":false,"cachePriming":{"enable":false},"numThreads":2});
     if cfg!(windows){config["cargo"]["target"]=serde_json::json!("x86_64-pc-windows-gnu");}
-    let client=inkleet_managed_env::rpc::Client::spawn(ra,serde_json::json!({"rust-analyzer":config}),Arc::new(|_|{}))?;
+    let notices=Arc::new(std::sync::Mutex::new(Vec::<String>::new()));let observed=notices.clone();
+    let client=inkleet_managed_env::rpc::Client::spawn(ra,serde_json::json!({"rust-analyzer":config}),Arc::new(move|event|{
+        if matches!(event.get("method").and_then(serde_json::Value::as_str),Some("window/logMessage"|"window/showMessage"|"experimental/serverStatus")){
+            if let Ok(mut items)=observed.lock(){if items.len()<20{items.push(event.to_string().chars().take(1500).collect());}}
+        }
+    }))?;
     let uri=reqwest::Url::from_file_path(lsp_work.join("solution.rs")).map_err(|_|"Rust document URI")?.to_string();
     let root_uri=reqwest::Url::from_directory_path(&lsp_work).map_err(|_|"Rust workspace URI")?.to_string();
     client.request("initialize",serde_json::json!({"processId":null,"rootUri":root_uri,"workspaceFolders":[{"uri":root_uri,"name":"InkLeet fixture"}],"initializationOptions":config,"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true},"textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}}}}}),Duration::from_secs(30))?;
@@ -61,7 +68,10 @@ async fn main()->Result<(),String>{
     let hover=loop{
         let result=client.request("textDocument/hover",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":2,"character":8}}),Duration::from_secs(10))?;
         if result.to_string().contains("Vec"){break result;}
-        if std::time::Instant::now()>deadline{return Err(format!("Rust hover unavailable; diagnostic={}",client.stderr()));}
+        if std::time::Instant::now()>deadline{
+            let status=client.request("rust-analyzer/analyzerStatus",serde_json::json!({}),Duration::from_secs(5));
+            return Err(format!("Rust hover unavailable; last={result}; status={status:?}; notifications={:?}; diagnostic={}",notices.lock().ok(),client.stderr()));
+        }
         std::thread::sleep(Duration::from_millis(300));
     };
     assert!(hover.to_string().contains("Vec"),"unexpected Rust hover: {hover}");
@@ -84,7 +94,9 @@ async fn main()->Result<(),String>{
     ]{
         let source_path=work.join(filename);std::fs::write(&source_path,source).map_err(|e|e.to_string())?;
         let output=work.join(format!("{filename}-run{extension}"));
-        let mut command=clean(&zig,&work,&paths);command.arg(driver).arg(&source_path).arg("-o").arg(&output);
+        let mut command=clean(&zig,&work,&paths);command.arg(driver);
+        if cfg!(windows){command.args(["-target","x86_64-windows-gnu"]);}
+        command.arg(&source_path).arg("-o").arg(&output);
         checked(command)?;
         assert_eq!(checked(clean(&output,&work,&paths))?.trim(),"6");
     }
