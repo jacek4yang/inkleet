@@ -84,7 +84,7 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     #[test]fn original_java_snapshot_preserves_lines(){
         let root=tempfile::tempdir().unwrap();let source="// comment\nclass Solution{int f(int n){return n;}}";
         prepare(root.path(),source,r#"{"name":"f","params":[{"name":"n","type":"integer"}],"return":{"type":"integer"}}"#,"1").unwrap();
-        assert_eq!(fs::read_to_string(root.path().join("solution.java")).unwrap(),source);
+        assert_eq!(fs::read_to_string(root.path().join("original-snapshot.java")).unwrap(),source);
         assert_eq!(fs::read_to_string(root.path().join("Solution.java")).unwrap().lines().count(),source.lines().count());
     }
 }
