@@ -4,6 +4,13 @@ User solution code executes with normal local user privileges. Not a sandbox.
 import collections
 import contextlib
 import dataclasses
+import functools
+import bisect
+import random
+import statistics
+import operator
+import re
+import string
 import heapq
 import itertools
 import json
@@ -138,9 +145,9 @@ def encode(value, active=None, budget=None):
 
 def execute(config, solution, results):
     namespace = {"ListNode": ListNode, "TreeNode": TreeNode}
-    for module in (typing, collections, heapq, itertools, math):
+    for module in (typing, collections, heapq, itertools, math, functools, bisect):
         namespace.update({name: getattr(module, name) for name in dir(module) if not name.startswith("_")})
-    namespace.update({"collections": collections, "heapq": heapq, "itertools": itertools, "math": math})
+    namespace.update({"collections": collections, "heapq": heapq, "itertools": itertools, "math": math, "functools": functools, "bisect": bisect, "random": random, "statistics": statistics, "operator": operator, "re": re, "string": string})
     loaded = runpy.run_path(str(solution), init_globals=namespace)
     metadata = config["metadata"]
     total_bytes = 0

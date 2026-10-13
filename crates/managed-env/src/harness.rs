@@ -42,6 +42,12 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
         assert!(configuration(META,"__import__('os').system('bad')\n9").is_err());
         assert!(configuration(META,"[1,2]").is_err());
     }
+    #[test]fn integer_inputs_never_round_through_binary_float(){
+        let meta=r#"{"name":"identity","params":[{"name":"value","type":"long"}]}"#;
+        let exact="900719925474099312345678901234567890";
+        let result=configuration(meta,exact).unwrap();
+        assert_eq!(result["cases"][0][0].to_string(),exact);
+    }
     #[test]fn rejects_unsupported_types_and_magic_names(){
         assert!(configuration(&META.replace("twoSum","__dict__"),"[]\n0").is_err());
         assert!(configuration(&META.replace("integer[]","Node"),"[]\n0").is_err());

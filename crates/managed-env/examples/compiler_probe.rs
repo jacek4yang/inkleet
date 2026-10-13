@@ -10,6 +10,7 @@ fn clean(program:&Path,work:&Path,paths:&[PathBuf])->Command{
     command
 }
 fn checked(command:Command)->Result<String,String>{
+    println!("COMPILER_COMMAND {:?} {:?}",command.get_program(),command.get_args().collect::<Vec<_>>());
     let result=process::run(command,Arc::new(AtomicBool::new(false)),Duration::from_secs(120),1024*1024)?;
     if result.exit_code!=Some(0)||result.timed_out||result.truncated{return Err(format!("compiler probe failed: {:?}",result));}
     Ok(result.stdout)

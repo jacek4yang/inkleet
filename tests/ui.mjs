@@ -494,9 +494,10 @@ try {
   await runPanel.getByRole("button", { name: "本地执行", exact: true }).click();
   await runPage.waitForFunction(() => window.__runTest.starts.length === 2);
   await runPage.evaluate(() => window.__runTest.pending[1]());
-  await runPage.evaluate(() => Object.assign(window.__runTest.result, { phase: "finished", exitCode: 0, results: [{ case: 1, ok: true, value: 10 }], stdout: "<img src=x onerror=alert(1)>", elapsedMs: 12 }));
+  await runPage.evaluate(() => Object.assign(window.__runTest.result, { phase: "finished", exitCode: 0, results: ['{"case": 1, "ok": true, "value": 10, "exactInteger": 9007199254740993}'], stdout: "<img src=x onerror=alert(1)>", elapsedMs: 12 }));
   await runPanel.getByText(/"value": 10/).waitFor();
   assert.equal(await runPanel.locator("img").count(), 0);
+  assert.match(await runPanel.innerText(), /9007199254740993/);
   assert.match(await runPanel.innerText(), /不代表通过力扣判题/);
 
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).press("F9");

@@ -25,6 +25,7 @@ jobs:
         with:
           workspaces: crates/managed-env
       - name: Test locked installer and protocol safety boundaries
+        id: unit
         shell: bash
         run: |
           mkdir -p evidence
@@ -33,6 +34,7 @@ jobs:
         shell: bash
         run: cargo run --locked --manifest-path crates/managed-env/Cargo.toml --example probe 2>&1 | tee evidence/private-tools.txt
       - name: Verify private Rust and C/C++ compilation without system PATH
+        if: ${{ !cancelled() && steps.unit.outcome == 'success' }}
         shell: bash
         run: cargo run --locked --manifest-path crates/managed-env/Cargo.toml --example compiler_probe 2>&1 | tee evidence/private-compilers.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

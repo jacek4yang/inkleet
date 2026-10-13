@@ -79,6 +79,7 @@ async fn main() -> Result<(), String> {
                 Ok(())
             }
             check(&runtime_python,&runtime_work,"class Solution:\n    def twoSum(self, nums: List[int], target: int) -> List[int]:\n        seen = {}\n        for i, n in enumerate(nums):\n            if target-n in seen: return [seen[target-n],i]\n            seen[n]=i\n",r#"{"name":"twoSum","params":[{"name":"nums","type":"integer[]"},{"name":"target","type":"integer"}],"return":{"type":"integer[]"}}"#,"[2,7,11,15]\n9",json!([0,1]))?;
+            check(&runtime_python,&runtime_work,"def identity(value): return value\n",r#"{"name":"identity","params":[{"name":"value","type":"long"}]}"#,"900719925474099312345678901234567890",serde_json::from_str("900719925474099312345678901234567890").unwrap())?;
             check(&runtime_python,&runtime_work,"class Solution:\n    def identity(self, head: Optional[ListNode]) -> Optional[ListNode]:\n        return head\n",r#"{"name":"identity","params":[{"name":"head","type":"ListNode"}]}"#,"[1,2,3]",json!([1,2,3]))?;
             check(&runtime_python,&runtime_work,"class Solution:\n    def identity(self, root: Optional[TreeNode]) -> Optional[TreeNode]:\n        return root\n",r#"{"name":"identity","params":[{"name":"root","type":"TreeNode"}]}"#,"[1,null,2,3]",json!([1,null,2,3]))?;
         }
@@ -100,8 +101,9 @@ async fn main() -> Result<(), String> {
         assert!(!runtime_work.join("orphan-marker").exists(),"descendant survived process cleanup");
         let script_path=runtime_work.join("debug_subject.py");
         std::fs::write(&script_path,"total = 1\ntotal += 2\nresult = total * 2\nprint(result)\n").map_err(|e|e.to_string())?;
-        let mut adapter=command(&runtime_python,&runtime_work,"import sys,runpy;sys.path.insert(0,sys.argv[1]);sys.argv=['debugpy.adapter'];runpy.run_module('debugpy.adapter',run_name='__main__')");
-        adapter.arg(&debug_root);
+        let log_dir=runtime_work.join("adapter-logs");std::fs::create_dir(&log_dir).map_err(|e|e.to_string())?;
+        let mut adapter=command(&runtime_python,&runtime_work,"import sys,runpy;sys.path.insert(0,sys.argv[1]);sys.argv=['debugpy.adapter','--log-dir',sys.argv[2]];runpy.run_module('debugpy.adapter',run_name='__main__')");
+        adapter.arg(&debug_root).arg(&log_dir);
         let (events_tx,events_rx)=mpsc::sync_channel(128);
         let client=Arc::new(Client::spawn_dap(adapter,Arc::new(move|event|{if event.get("event").and_then(serde_json::Value::as_str)!=Some("output"){let _=events_tx.try_send(event);}}))?);
         client.request("initialize",json!({"clientID":"inkleet","adapterID":"python","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsVariableType":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(15))?;
@@ -115,7 +117,15 @@ async fn main() -> Result<(), String> {
         }
         if let Err(error)=event(&events_rx,"initialized"){
             let launch_result=launching.join().map_err(|_|"launch thread failed")?;
-            return Err(format!("{error}; launch={launch_result:?}; adapter stderr={}",client.stderr()));
+            // Only fixed synthetic CI fixtures run here. Never upload raw adapter logs, which contain ephemeral access tokens.
+            for entry in std::fs::read_dir(&log_dir).map_err(|e|e.to_string())?.flatten(){
+                if let Ok(text)=std::fs::read_to_string(entry.path()){
+                    for line in text.lines().filter(|line|line.contains("spawning launcher:")||line.contains("Timed out")||line.contains("Failed to spawn")||line.contains("WinError")).take(20){
+                        if !line.to_ascii_lowercase().contains("token"){println!("ADAPTER_FAILURE {}",line.chars().take(500).collect::<String>());}
+                    }
+                }
+            }
+            return Err(format!("{error}; launch={launch_result:?}; adapter stderr bytes={}",client.stderr().len()));
         }
         let breakpoint=client.request("setBreakpoints",json!({"source":{"path":script_path},"breakpoints":[{"line":2}]}),Duration::from_secs(10))?;
         assert!(breakpoint.pointer("/breakpoints/0/verified").and_then(serde_json::Value::as_bool)==Some(true));

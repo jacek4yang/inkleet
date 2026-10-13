@@ -150,7 +150,10 @@ try:
         wait_for(lambda: "断点：1。" in text(".debug-panel"), "F9 breakpoint in source")
         click(".debug-panel .local-actions button:first-of-type")
         wait_for(lambda: "已暂停" in text(".debug-panel"), "real debugger breakpoint", seconds=45)
-        wait_for(lambda: element(".debug-inspector"), "real call stack and variables")
+        wait_for(lambda: element(".debug-inspector > div:first-child > button"), "real call stack loaded")
+        click(".debug-inspector > div:first-child > button")
+        wait_for(lambda: element(".debug-variable"), "real variable values loaded")
+        wait_for(lambda: element(".cm-debug-stopped"), "paused source line highlighted")
         screenshot("python-debug-native.png")
         (evidence/"DEBUG_GUI_RESULT.txt").write_text("PASS: real Linux GUI private debugpy, F9 breakpoint and paused call stack inspector. Stepping verified separately by protocol probe.\n")
         stop_debug=cmd("POST","/element",{"using":"xpath","value":"//button[text()='停止调试']"})[EID]

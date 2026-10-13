@@ -3,7 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { DebugPanel } from "./debug-panel";
 import type { Language } from "./domain";
 type Snapshot = { code: string; input: string; metadata: string; title: string; language: Language };
-type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: unknown[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
+type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "running", "canceling"].includes(r.phase);
 export function LocalRunner({ code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine }: {
   code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (line: number) => void;
@@ -59,7 +59,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
     {!snapshot && result && <p className="muted">以下为先前运行的结果，不能视为当前草稿的结果。</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
     {result?.truncated && <p role="alert">输出达到上限，已截断并终止进程。</p>}
-    {result?.results.map((value, index) => <pre key={index} className="local-result">{JSON.stringify(value, null, 2)}</pre>)}
+    {result?.results.map((value, index) => <pre key={index} className="local-result">{value}</pre>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
     <DebugPanel snapshot={{ code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} />

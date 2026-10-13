@@ -8,7 +8,7 @@ use tauri::Manager as _;
 pub struct Snapshot{pub code:String,pub input:String,pub metadata:String,pub title:String,pub language:String}
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct View{pub id:u64,pub phase:String,pub title:String,pub stdout:String,pub stderr:String,pub results:Vec<Value>,pub exit_code:Option<i32>,pub timed_out:bool,pub canceled:bool,pub truncated:bool,pub elapsed_ms:u128,pub error:String}
+pub struct View{pub id:u64,pub phase:String,pub title:String,pub stdout:String,pub stderr:String,pub results:Vec<String>,pub exit_code:Option<i32>,pub timed_out:bool,pub canceled:bool,pub truncated:bool,pub elapsed_ms:u128,pub error:String}
 struct Job{view:Mutex<View>,cancel:Arc<AtomicBool>}
 pub struct Runner{root:PathBuf,next:AtomicU64,active:Mutex<Option<Arc<Job>>>}
 impl Runner{
@@ -43,7 +43,7 @@ pub async fn start(app:tauri::AppHandle,snapshot:Snapshot)->Result<u64,String>{
     let id=job.view.lock().map_err(|_|"运行状态不可用")?.id;
     drop(state);
     tauri::async_runtime::spawn_blocking(move||{
-        let execute=||->Result<(process::Output,Vec<Value>),String>{
+        let execute=||->Result<(process::Output,Vec<String>),String>{
             let state=app.state::<Runner>();let tools=app.state::<crate::managed::Environments>();
             let python=tools.manager.installed("python")?.ok_or("请先在开发环境中安装 Python")?;
             if state.root.exists()&&fs::symlink_metadata(&state.root).map_err(|_|"运行目录不可用")?.file_type().is_symlink(){return Err("运行目录不能是符号链接".into());}
@@ -67,7 +67,7 @@ pub async fn start(app:tauri::AppHandle,snapshot:Snapshot)->Result<u64,String>{
                 fs::File::open(&path).map_err(|_|"无法读取运行结果")?.take(1024*1024+1).read_to_string(&mut text).map_err(|_|"运行结果不是 UTF-8")?;
                 if text.len()>1024*1024{return Err("运行结果超限".into());}
                 for line in text.lines().take(100){
-                    match serde_json::from_str(line){Ok(value)=>results.push(value),Err(_)=>return Err("运行结果被截断或不是有效 JSON".into())}
+                    match serde_json::from_str::<Value>(line){Ok(_)=>results.push(line.to_owned()),Err(_)=>return Err("运行结果被截断或不是有效 JSON".into())}
                 }
             }
             Ok((output,results))

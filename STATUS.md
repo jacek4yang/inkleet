@@ -59,8 +59,10 @@
   Mac ARM 的 Python 运行 / 调试协议也通过，但同 job 后续编译失败；不能将整个平台记为通过。
 - 新增本地运行面板、F9 / gutter 断点、DAP 控制、调用栈与变量面板；前端模拟 IPC 交互通过：
   https://github.com/jacek4yang/inkleet/actions/runs/38455636400 （fd8b8ae）。
-  这是前端集成测试，不等于原生 DAP 界面已经通过。
-- 最新原生 GUI 回归在补全点击处出现时序问题，正在修复并重新验收；de63eb1 的已通过结果不替代最新提交验收。
+  随后的真实 Linux GUI 通过自动环境安装、Python 本地计算结果、F9 断点命中、调用栈面板和停止：
+  https://github.com/jacek4yang/inkleet/actions/runs/38455628161 （fd8b8ae）。
+  原生 GUI 的变量刷新与单步变化还需更深入验收；协议测试另有覆盖。
+- 修正原生补全 fixture：等待 CodeMirror 的短暂误触保护时间后点击；最新原生回归已通过。
 - Windows DAP launch、Mac 私有编译尚有失败；其余语言 LSP / Runner / DAP 尚未完成。
 - 本地驱动与个人源文件隔离，当前支持普通函数常见类型；设计类和特殊接口题明确不支持。
 - 运行是普通用户进程，不是安全沙箱；尚无硬内存限制。调试在暂停时不会触发普通运行超时。
