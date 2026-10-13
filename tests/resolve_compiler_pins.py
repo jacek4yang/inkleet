@@ -1,6 +1,6 @@
 """Maintainer-only fixed-version metadata resolver. Outputs reviewable pins; executes nothing."""
 import json, pathlib, urllib.request, urllib.parse, tomllib
-RUST = "1.99.1"
+RUST = "1.99.0"
 ALLOWED = {"static.rust-lang.org", "ziglang.org", "pypi.org", "files.pythonhosted.org"}
 def open_url(url, method="GET"):
     parsed=urllib.parse.urlsplit(url)
@@ -16,7 +16,7 @@ def size(url):
 channel=tomllib.loads(get(f"https://static.rust-lang.org/dist/channel-rust-{RUST}.toml").decode())
 pins=[]
 for platform,triple in [("linux-x64","x86_64-unknown-linux-gnu"),("windows-x64","x86_64-pc-windows-msvc"),("macos-x64","x86_64-apple-darwin"),("macos-arm64","aarch64-apple-darwin")]:
-    for package,entry in [("rustc","rustc/bin/rustc"),("cargo","cargo/bin/cargo"),("rust-std",f"rust-std-{triple}/lib/rustlib/{triple}/lib"),("rust-analyzer-preview","rust-analyzer-preview/bin/rust-analyzer")]:
+    for package,entry in [("rustc","rustc/bin/rustc"),("cargo","cargo/bin/cargo"),("rust-std",f"rust-std-{triple}/manifest.in"),("rust-analyzer-preview","rust-analyzer-preview/bin/rust-analyzer")]:
         record=channel["pkg"][package]["target"][triple]
         assert record["available"]
         url=record["url"]

@@ -39,7 +39,14 @@ def fill(css, value):
         {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"a"},
         {"type":"keyUp","value":"a"},{"type":"keyUp","value":"\ue009"}
     ]}]})
-    cmd("POST",f"/element/{node}/value",{"text":value,"value":list(value)})
+    # WebKitGTK WebDriver strips literal LF from sendKeys. Use actual Escape/Enter keys between lines.
+    for index, line in enumerate(value.split("\n")):
+        if index:
+            cmd("POST","/actions",{"actions":[{"type":"key","id":"multiline-keyboard","actions":[
+                {"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},
+                {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}
+            ]}]})
+        if line: cmd("POST",f"/element/{node}/value",{"text":line,"value":list(line)})
     wait_for(lambda: text(css) == value, "GUI text matches typed text")
 def screenshot(name):
     (evidence / name).write_bytes(base64.b64decode(cmd("GET","/screenshot")))
