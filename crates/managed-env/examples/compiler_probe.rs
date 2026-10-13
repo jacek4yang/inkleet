@@ -38,13 +38,47 @@ async fn main()->Result<(),String>{
     let version={let mut c=clean(&rustc,&work,&paths);c.arg("--version");checked(c)?};
     let cargo_version={let mut c=clean(&cargo,&work,&paths);c.arg("--version");checked(c)?};
     let ra_version={let mut c=clean(&install["rust-analyzer-preview"],&work,&paths);c.arg("--version");checked(c)?};
+    
+    let lsp_work=root.join("language-service");std::fs::create_dir(&lsp_work).map_err(|e|e.to_string())?;
+    let cargo_manifest="[package]\nname=\"inkleet_fixture\"\nversion=\"0.0.0\"\nedition=\"2021\"\n[lib]\npath=\"solution.rs\"\n";
+    std::fs::write(lsp_work.join("Cargo.toml"),cargo_manifest).map_err(|e|e.to_string())?;
+    let doc="pub fn inspect() {\n    let mut numbers = Vec::<i32>::new();\n    numbers.push(1);\n    numbers.\n}\n";
+    std::fs::write(lsp_work.join("solution.rs"),doc).map_err(|e|e.to_string())?;
+    let source_root=install["rust-src"].parent().and_then(Path::parent).and_then(Path::parent).ok_or("Rust source root")?;
+    let mut ra=clean(&install["rust-analyzer-preview"],&lsp_work,&paths);
+    ra.env("RUSTC",&rustc).env("CARGO",&cargo).env("CARGO_HOME",lsp_work.join("cargo-home")).env("CARGO_NET_OFFLINE","true")
+        .env("CARGO_ENCODED_RUSTFLAGS",format!("--sysroot\u{1f}{}",stdroot.display())).env("RUST_SRC_PATH",source_root);
+    let mut config=serde_json::json!({"cargo":{"sysroot":stdroot,"sysrootSrc":source_root,"noDeps":true,"buildScripts":{"enable":false}},"procMacro":{"enable":false},"checkOnSave":false,"cachePriming":{"enable":false},"numThreads":2});
+    if cfg!(windows){config["cargo"]["target"]=serde_json::json!("x86_64-pc-windows-gnu");}
+    let client=inkleet_managed_env::rpc::Client::spawn(ra,serde_json::json!({"rust-analyzer":config}),Arc::new(|_|{}))?;
+    let uri=reqwest::Url::from_file_path(lsp_work.join("solution.rs")).map_err(|_|"Rust document URI")?.to_string();
+    let root_uri=reqwest::Url::from_directory_path(&lsp_work).map_err(|_|"Rust workspace URI")?.to_string();
+    client.request("initialize",serde_json::json!({"processId":null,"rootUri":root_uri,"workspaceFolders":[{"uri":root_uri,"name":"InkLeet fixture"}],"initializationOptions":config,"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true},"textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}}}}}),Duration::from_secs(30))?;
+    client.notify("initialized",serde_json::json!({}))?;
+    client.notify("textDocument/didOpen",serde_json::json!({"textDocument":{"uri":uri,"languageId":"rust","version":1,"text":doc}}))?;
+    let deadline=std::time::Instant::now()+Duration::from_secs(60);
+    let hover=loop{
+        let result=client.request("textDocument/hover",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":2,"character":8}}),Duration::from_secs(10))?;
+        if !result.is_null(){break result;}
+        if std::time::Instant::now()>deadline{return Err(format!("Rust hover unavailable; adapter stderr bytes={}",client.stderr().len()));}
+        std::thread::sleep(Duration::from_millis(300));
+    };
+    assert!(hover.to_string().contains("Vec"),"unexpected Rust hover: {hover}");
+    let completion=client.request("textDocument/completion",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":3,"character":12}}),Duration::from_secs(15))?;
+    let items=completion.as_array().or_else(||completion.get("items").and_then(serde_json::Value::as_array)).ok_or("Rust completion list")?;
+    assert!(items.iter().any(|item|item.get("label").and_then(serde_json::Value::as_str).is_some_and(|s|s.starts_with("push"))),"missing Rust Vec member completion");
+    let definition=client.request("textDocument/definition",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":1,"character":23}}),Duration::from_secs(15))?;
+    assert!(definition.to_string().contains("file:"),"missing real Rust source definition");
+    let _=client.request("shutdown",serde_json::Value::Null,Duration::from_secs(5));client.stop();
+    println!("RUST_LSP_RESULT {}",serde_json::json!({"platform":inkleet_managed_env::platform(),"hover":true,"completion":true,"stdlibDefinition":true,"systemPathUsed":false}));
+
     let extension=if cfg!(windows){".exe"}else{""};
     for (filename,source,driver) in [
         ("check.c","#include <stdio.h>\nint main(void){printf(\"6\\n\");return 0;}\n","cc"),
         ("check.cpp","#include <vector>\n#include <iostream>\nint main(){std::vector<int> v{1,2,3};int sum=0;for(int x:v)sum+=x;std::cout<<sum<<'\\n';}\n","c++")
     ]{
         let source_path=work.join(filename);std::fs::write(&source_path,source).map_err(|e|e.to_string())?;
-        let output=work.join(format!("{filename}{extension}"));
+        let output=work.join(format!("{filename}-run{extension}"));
         let mut command=clean(&zig,&work,&paths);command.arg(driver).arg(&source_path).arg("-o").arg(&output);
         checked(command)?;
         assert_eq!(checked(clean(&output,&work,&paths))?.trim(),"6");

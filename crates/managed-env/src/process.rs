@@ -13,8 +13,17 @@ pub fn spawn(command:Command)->std::io::Result<Box<dyn ChildWrapper>>{
     }
     command.spawn()
 }
+/// Never use the wrapper's blocking kill()/wait(): a Windows job completion
+/// notification may already have been consumed by try_wait().
+pub fn terminate(child:&mut dyn ChildWrapper){
+    let _=child.start_kill();
+    let deadline=Instant::now()+Duration::from_secs(2);
+    while Instant::now()<deadline{
+        match child.try_wait(){Ok(Some(_))|Err(_)=>break,Ok(None)=>std::thread::sleep(Duration::from_millis(10))}
+    }
+}
 struct Guard(Box<dyn ChildWrapper>,bool);
-impl Drop for Guard{fn drop(&mut self){if !self.1{let _=self.0.kill();}}}
+impl Drop for Guard{fn drop(&mut self){if !self.1{terminate(self.0.as_mut());}}}
 #[derive(Debug,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Output{
@@ -54,7 +63,7 @@ pub fn run(mut command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_li
     }
     // Also clean up descendants when the top-level program exits normally.
     child.1=true;
-    if child.0.kill().is_ok(){let _=child.0.wait();}
+    terminate(child.0.as_mut());
     let stdout=out.recv_timeout(Duration::from_secs(2)).map_err(|_|"输出管道未关闭；子进程清理异常")?;
     let stderr=err.recv_timeout(Duration::from_secs(2)).map_err(|_|"错误输出管道未关闭；子进程清理异常")?;
     Ok(Output{exit_code,stdout:String::from_utf8_lossy(&stdout).into(),stderr:String::from_utf8_lossy(&stderr).into(),

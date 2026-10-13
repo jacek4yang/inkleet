@@ -70,3 +70,9 @@
 .debug-variable code { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--font-mono); min-width: 0; }
 .debug-variable button { flex: 0 0 auto; max-width: 45%; overflow-wrap: anywhere; }
 @media(max-width: 600px) { .debug-inspector { grid-template-columns: 1fr; } }
+
+.local-runner > header { position: sticky; top: -12px; padding: 8px 0; background: #faf9f5; z-index: 1; }
+.local-runner [hidden] { display: none; }
+.local-runner .debug-panel { margin-top: 0; border-top: none; padding-top: 8px; }
+.local-safety { font-size: 11px; color: #72695e; margin: 6px 0 10px; line-height: 1.6; }
+.local-safety summary { cursor: pointer; }

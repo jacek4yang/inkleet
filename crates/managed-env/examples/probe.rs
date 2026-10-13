@@ -49,6 +49,7 @@ async fn main() -> Result<(), String> {
         Ok(json!({"initialize":true,"hover":true,"completion":true,"stdlibDeclaration":true,"managedNode":true}))
     }).await.map_err(|_|"LSP probe task failed")??;
 
+    println!("PROBE_STAGE Python LSP verified");
     let debugpy=manager.install("debugpy",Arc::new(AtomicBool::new(false)),Arc::new(|_|{})).await?;
     let debug_root=debugpy.parent().and_then(std::path::Path::parent).and_then(std::path::Path::parent).ok_or("debugpy package root")?.to_path_buf();
     let runtime_python=python.clone();let runtime_work=work.clone();
@@ -84,6 +85,7 @@ async fn main() -> Result<(), String> {
             check(&runtime_python,&runtime_work,"class Solution:\n    def identity(self, root: Optional[TreeNode]) -> Optional[TreeNode]:\n        return root\n",r#"{"name":"identity","params":[{"name":"root","type":"TreeNode"}]}"#,"[1,null,2,3]",json!([1,null,2,3]))?;
         }
 
+        println!("PROBE_STAGE Typed harness verified");
         let normal=process::run(command(&runtime_python,&runtime_work,"print(42)"),Arc::new(AtomicBool::new(false)),Duration::from_secs(5),4096)?;
         assert_eq!(normal.exit_code,Some(0));assert_eq!(normal.stdout.trim(),"42");
         let timeout=process::run(command(&runtime_python,&runtime_work,"while True: pass"),Arc::new(AtomicBool::new(false)),Duration::from_millis(200),4096)?;
@@ -99,6 +101,7 @@ async fn main() -> Result<(), String> {
         let _=process::run(command(&runtime_python,&runtime_work,&parent_script),Arc::new(AtomicBool::new(false)),Duration::from_millis(500),4096)?;
         std::thread::sleep(Duration::from_millis(2200));
         assert!(!runtime_work.join("orphan-marker").exists(),"descendant survived process cleanup");
+        println!("PROBE_STAGE Bounded process cleanup verified");
         let script_path=runtime_work.join("debug_subject.py");
         std::fs::write(&script_path,"total = 1\ntotal += 2\nresult = total * 2\nprint(result)\n").map_err(|e|e.to_string())?;
         let log_dir=runtime_work.join("adapter-logs");std::fs::create_dir(&log_dir).map_err(|e|e.to_string())?;
@@ -106,7 +109,9 @@ async fn main() -> Result<(), String> {
         adapter.arg(&debug_root).arg(&log_dir);
         let (events_tx,events_rx)=mpsc::sync_channel(128);
         let client=Arc::new(Client::spawn_dap(adapter,Arc::new(move|event|{if event.get("event").and_then(serde_json::Value::as_str)!=Some("output"){let _=events_tx.try_send(event);}}))?);
+        println!("PROBE_STAGE DAP adapter spawned");
         client.request("initialize",json!({"clientID":"inkleet","adapterID":"python","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsVariableType":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(15))?;
+        println!("PROBE_STAGE DAP initialized");
         let launch_client=client.clone();let launch_python=runtime_python.clone();let launch_work=runtime_work.clone();let launch_script=script_path.clone();
         let launching=std::thread::spawn(move||launch_client.request("launch",json!({"name":"InkLeet fixture","type":"python","request":"launch","python":launch_python,"program":launch_script,"cwd":launch_work,"console":"internalConsole","justMyCode":false}),Duration::from_secs(30)));
         fn event(rx:&mpsc::Receiver<serde_json::Value>,name:&str)->Result<serde_json::Value,String>{

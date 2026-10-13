@@ -500,6 +500,7 @@ try {
   assert.match(await runPanel.innerText(), /9007199254740993/);
   assert.match(await runPanel.innerText(), /不代表通过力扣判题/);
 
+  await runPanel.locator('[data-local-tab="debug"]').click();
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).press("F9");
   await runPanel.getByText(/断点：1。/).waitFor();
   await runPanel.getByRole("button", { name: "开始调试", exact: true }).evaluate(button => { button.click(); button.click(); });

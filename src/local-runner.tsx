@@ -9,6 +9,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
   code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (line: number) => void;
 }) {
   const [input, setInput] = useState(sampleInput);
+  const [pane, setPane] = useState<"run" | "debug">("run");
   const [result, setResult] = useState<Result | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState("");
@@ -51,10 +52,11 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
   }
   const stale = snapshot && (snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
   return <section className="local-runner" aria-label="本地运行">
-    <header><strong>本地运行 · Python</strong><button onClick={onClose}>收起</button></header>
-    <p className="muted">在应用独立 Python 中执行当前代码快照，不上传。10 秒超时，输出最多 64 KiB。以当前用户权限运行，尚无内存硬限制；只运行你信任的代码。</p>
+    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><button onClick={onClose}>收起</button></header>
+    <details className="local-safety"><summary>仅运行可信代码 · 本机执行，不上传 · 非安全沙箱</summary><p className="muted">使用应用独立 Python 执行快照。普通运行 10 秒超时，输出最多 64 KiB。以当前用户权限运行，尚无内存硬限制。</p></details>
+    <div hidden={pane !== "run"}>
     <label>测试输入<textarea aria-label="本地测试输入" value={input} onChange={e => setInput(e.target.value)} spellCheck={false} placeholder="每个参数填写一个 JSON 值；多组用例依次排列。" /></label>
-    <div className="local-actions"><button onClick={run} disabled={!isTauri() || language !== "python3" || pending || busy(result)}>{pending ? "启动中…" : "本地执行"}</button>{busy(result) && <button onClick={cancel} disabled={result?.phase === "canceling"}>停止</button>}<span role="status">{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过 10 秒，已终止" : result.phase === "error" ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
+    <div className="local-actions"><button data-action="local-execute" onClick={run} disabled={!isTauri() || language !== "python3" || pending || busy(result)}>{pending ? "启动中…" : "本地执行"}</button>{busy(result) && <button onClick={cancel} disabled={result?.phase === "canceling"}>停止</button>}<span role="status">{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过 10 秒，已终止" : result.phase === "error" ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
     {stale && <p className="cache-warning">当前代码或用例已改变，下面是上一次快照的结果。</p>}
     {!snapshot && result && <p className="muted">以下为先前运行的结果，不能视为当前草稿的结果。</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
@@ -62,7 +64,9 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
     {result?.results.map((value, index) => <pre key={index} className="local-result">{value}</pre>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
-    <DebugPanel snapshot={{ code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} />
+
     {result && !busy(result) && <p className="muted">退出码：{result.exitCode ?? "无"}。本地输出仅供调试，不代表通过力扣判题。</p>}
+    </div>
+    <div hidden={pane !== "debug"}><DebugPanel snapshot={{ code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
   </section>;
 }

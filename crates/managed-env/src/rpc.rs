@@ -80,7 +80,7 @@ impl Client {
                             let items=value.pointer("/params/items").and_then(Value::as_array).cloned().unwrap_or_default();
                             let result:Vec<Value>=items.iter().take(64).map(|item|match item.get("section").and_then(Value::as_str) {
                                 Some("python")=>settings.clone(),Some("python.analysis")=>settings.get("analysis").cloned().unwrap_or(json!({})),
-                                _=>json!({}),
+                                Some(section)=>settings.get(section).cloned().unwrap_or(json!({})),None=>settings.clone(),
                             }).collect();
                             json!({"jsonrpc":"2.0","id":id,"result":result})
                         },
@@ -129,7 +129,7 @@ impl Client {
     pub fn stop(&self){
         if self.stopped.swap(true,Ordering::AcqRel){return;}
         fail_all(&self.shared);
-        if let Ok(mut child)=self.child.lock(){let _=child.kill();let _=child.wait();}
+        if let Ok(mut child)=self.child.lock(){crate::process::terminate(child.as_mut());}
     }
 }
 fn fail_all(shared:&Shared){
