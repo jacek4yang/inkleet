@@ -2,6 +2,8 @@ mod storage;
 mod leetcode;
 mod auth;
 mod cache;
+mod judge_transport;
+mod journal;
 use std::{path::PathBuf, sync::Mutex};
 use tauri::Manager;
 
