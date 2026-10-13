@@ -17,7 +17,9 @@ channel=tomllib.loads(get(f"https://static.rust-lang.org/dist/channel-rust-{RUST
 pins=[]
 for platform,triple in [("linux-x64","x86_64-unknown-linux-gnu"),("windows-x64","x86_64-pc-windows-msvc"),("macos-x64","x86_64-apple-darwin"),("macos-arm64","aarch64-apple-darwin")]:
     for package,entry in [("rustc","rustc/bin/rustc"),("cargo","cargo/bin/cargo"),("rust-std",f"rust-std-{triple}/manifest.in"),("rust-analyzer-preview","rust-analyzer-preview/bin/rust-analyzer")]:
-        record=channel["pkg"][package]["target"][triple]
+        component_triple="x86_64-pc-windows-gnu" if platform=="windows-x64" and package=="rust-std" else triple
+        if package=="rust-std": entry=f"rust-std-{component_triple}/manifest.in"
+        record=channel["pkg"][package]["target"][component_triple]
         assert record["available"]
         url=record["url"]
         prefix=urllib.parse.urlsplit(url).path.rsplit("/",1)[-1].removesuffix(".tar.gz")
