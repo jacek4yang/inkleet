@@ -250,3 +250,5 @@ mod tests {
         assert!(directory(&temp.path().join("link/nested")).is_err());
     }
 }
+
+pub mod rust_harness;
