@@ -67,6 +67,8 @@ pub fn prepare(manager:&Manager,root:&Path,language:&str)->Result<Launch>{
             std::fs::write(root.join("go.mod"),"module inkleet.local\n\ngo 1.27.0\n").map_err(|_|"无法准备 Go 模块")?;
             let mut command=Command::new(gopls);
             clean(&mut command,root,&[go.parent().ok_or("Go 目录无效")?.to_owned()])?;
+            let tool_temp=root.join(".tool-temp");std::fs::create_dir(&tool_temp).map_err(|_|"无法创建 Go 临时目录")?;
+            command.env("TMP",&tool_temp).env("TEMP",&tool_temp).env("TMPDIR",&tool_temp).env("APPDATA",&tool_temp).env("LOCALAPPDATA",&tool_temp);
             command.env("GOROOT",go_home).env("GOTOOLCHAIN","local").env("GOENV","off").env("GOWORK","off")
                 .env("CGO_ENABLED","0").env("GOPROXY","off").env("GOSUMDB","off").env("GOTELEMETRY","off")
                 .env("GOCACHE",root.join(".go-cache")).env("GOPATH",root.join(".go-path")).env("GOPLSCACHE",root.join(".gopls-cache"));

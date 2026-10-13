@@ -15,12 +15,14 @@ use std::{path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::{Dura
     let source=work.join("solution.go");std::fs::write(&source,doc).map_err(|e|e.to_string())?;
     let uri=reqwest::Url::from_file_path(&source).map_err(|_|"Go source URI")?.to_string();
     let root_uri=reqwest::Url::from_directory_path(&work).map_err(|_|"Go workspace URI")?.to_string();
+    let tool_temp=root.join("tool-temp");std::fs::create_dir(&tool_temp).map_err(|e|e.to_string())?;
+    let config_home=root.join("tool-config");std::fs::create_dir(&config_home).map_err(|e|e.to_string())?;
     let mut command=Command::new(&gopls);
     command.current_dir(&work).env_clear().env("PATH",go.parent().unwrap()).env("GOROOT",go_home)
         .env("GOTOOLCHAIN","local").env("GOENV","off").env("GOWORK","off").env("CGO_ENABLED","0")
         .env("GOPROXY","off").env("GOSUMDB","off").env("GOTELEMETRY","off")
         .env("GOCACHE",root.join("go-cache")).env("GOPATH",root.join("go-path")).env("GOPLSCACHE",root.join("gopls-cache"))
-        .env("HOME",&work).env("USERPROFILE",&work).env("TMP",&work).env("TEMP",&work);
+        .env("HOME",&work).env("USERPROFILE",&work).env("TMP",&tool_temp).env("TEMP",&tool_temp).env("TMPDIR",&tool_temp).env("APPDATA",&config_home).env("LOCALAPPDATA",&config_home);
     if let Some(system)=std::env::var_os("SystemRoot"){command.env("SystemRoot",system);}
     let settings=json!({"staticcheck":false,"usePlaceholders":false,"completeUnimported":true,"buildFlags":["-mod=readonly"]});
     let notices=Arc::new(std::sync::Mutex::new(Vec::<String>::new()));let observed=notices.clone();

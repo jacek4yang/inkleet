@@ -69,6 +69,7 @@ fn event(rx:&mpsc::Receiver<Value>,name:&str)->Result<Value,String>{
         }
         let completion=client.request("textDocument/completion",json!({"textDocument":{"uri":uri},"position":{"line":4,"character":7}}),Duration::from_secs(15))?;
         let items=completion.as_array().or_else(||completion.get("items").and_then(Value::as_array)).ok_or("C++ completion list")?;
+        println!("CPP_COMPLETION_DIAGNOSTIC {}",json!({"count":items.len(),"push":items.iter().filter(|item|item.get("label").and_then(Value::as_str).is_some_and(|s|s.contains("push_back"))).take(2).collect::<Vec<_>>()}));
         if !items.iter().any(|item|item.get("label").and_then(Value::as_str).is_some_and(|s|s.contains("push_back"))){return Err("Missing vector member completion".into());}
         let definition=client.request("textDocument/definition",json!({"textDocument":{"uri":uri},"position":{"line":2,"character":7}}),Duration::from_secs(15))?;
         if !definition.to_string().contains("file:"){return Err("C++ stdlib definition missing".into());}

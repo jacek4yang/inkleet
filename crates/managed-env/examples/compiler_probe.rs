@@ -107,10 +107,15 @@ async fn main()->Result<(),String>{
     let rust_source=work.join("check.rs");std::fs::write(&rust_source,"fn main(){let value=std::thread::spawn(||{let v=vec![1,2,3];v.iter().sum::<i32>()}).join().unwrap();assert!(std::panic::catch_unwind(||panic!(\"fixture\")).is_err());println!(\"{}\",value);}\n").map_err(|e|e.to_string())?;
     let output=work.join(format!("check-rust{extension}"));
     let mut command=clean(&rustc,&work,&paths);
-    command.arg(&rust_source).arg("--edition=2021").arg("--sysroot").arg(&stdroot)
-        .arg("-C").arg(format!("linker={}",std::env::current_exe().map_err(|e|e.to_string())?.display()))
-        .args(["-C","linker-flavor=gcc"]).arg("-o").arg(&output)
-        .env("INKLEET_LINKER_MODE","1").env("INKLEET_ZIG",&zig);
+    command.arg(&rust_source).arg("--edition=2021").arg("--sysroot").arg(&stdroot);
+    if cfg!(windows){
+        command.arg("-C").arg(format!("linker={}",install["rust-mingw"].display())).args(["-C","link-self-contained=yes"]);
+        command.arg("-C").arg(format!("link-arg=-B{}",install["rust-mingw"].parent().unwrap().display()));
+    }else{
+        command.arg("-C").arg(format!("linker={}",std::env::current_exe().map_err(|e|e.to_string())?.display()))
+            .env("INKLEET_LINKER_MODE","1").env("INKLEET_ZIG",&zig);
+    }
+    command.args(["-C","linker-flavor=gcc"]).arg("-o").arg(&output);
     if cfg!(windows){
         command.args(["--target","x86_64-pc-windows-gnu"]);
         let mingw_target=install["rust-mingw"].parent().and_then(Path::parent).and_then(Path::parent).ok_or("Rust MinGW layout")?;

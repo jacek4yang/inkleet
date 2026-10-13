@@ -102,8 +102,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           apply(target) { if (!closed && target.state.doc === doc) target.dispatch({ changes, selection: { anchor }, userEvent: "input.complete" }); },
         });
       }
+      if (!options.length && context.explicit) status(serverName + " 未找到匹配补全 · 服务返回 " + items.length + " 项");
       return options.length ? { from: word?.from ?? context.pos, options } : null;
-    } catch { return null; }
+    } catch (error) { if (context.explicit && !closed) status(serverName + " 补全暂不可用：" + String(error).slice(0, 300)); return null; }
   }
   async function hover(target: EditorView, pos: number): Promise<Tooltip | null> {
     const doc = target.state.doc;
