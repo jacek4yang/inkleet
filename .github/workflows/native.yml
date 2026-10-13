@@ -1,0 +1,48 @@
+name: Native Linux
+on:
+  push:
+    branches: [main, feat/first-workbench]
+    paths: ['src/**', 'src-tauri/**', 'package*.json', 'tests/native_smoke.py', '.github/workflows/native.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-linux-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Install native testing prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Build native test application
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run typecheck
+          npm run build
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          npm run tauri -- build --debug --no-bundle
+      - name: Verify native storage through the actual GUI
+        run: |
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-linux-verification
+          path: evidence/native/
+          if-no-files-found: warn
+          retention-days: 7
