@@ -13,11 +13,13 @@ fn copy_config(from:&Path,to:&Path)->Result<(),String>{
 }
 #[tokio::main]async fn main()->Result<(),String>{
     let temp=tempfile::Builder::new().prefix("inkleet java 语言 ").tempdir().map_err(|e|e.to_string())?;
-    let root=std::fs::canonicalize(temp.path()).map_err(|e|e.to_string())?;
+    let root=inkleet_managed_env::process::tool_path(&std::fs::canonicalize(temp.path()).map_err(|e|e.to_string())?);
     let manager=Manager::new(root.join("tools"));let report:Report=Arc::new(|_|{});
-    let java=manager.install("jdk",Arc::new(AtomicBool::new(false)),report.clone()).await?;
+    manager.install("jdk",Arc::new(AtomicBool::new(false)),report.clone()).await?;
+    #[cfg(windows)] manager.install("zig",Arc::new(AtomicBool::new(false)),report.clone()).await?;
+    let runtime=inkleet_managed_env::java_runtime::Runtime::prepare(&manager,Arc::new(AtomicBool::new(false)))?;
     let launcher=manager.install("jdtls",Arc::new(AtomicBool::new(false)),report).await?;
-    let java_home=java.parent().and_then(Path::parent).ok_or("Java root")?;
+    let java_home=&runtime.home;
     let jdt_home=launcher.parent().and_then(Path::parent).ok_or("JDTLS root")?;
     let config_name=if cfg!(target_os="macos"){"config_mac"}else if cfg!(windows){"config_win"}else{"config_linux"};
     let config=root.join("configuration");copy_config(&jdt_home.join(config_name),&config)?;
@@ -27,12 +29,10 @@ fn copy_config(from:&Path,to:&Path)->Result<(),String>{
     std::fs::write(&source,doc).map_err(|e|e.to_string())?;
     let uri=reqwest::Url::from_file_path(&source).map_err(|_|"source URI")?.to_string();
     let root_uri=reqwest::Url::from_directory_path(&work).map_err(|_|"workspace URI")?.to_string();
-    let mut command=Command::new(&java);
-    command.args(["-Xms64m","-Xmx512m","-Djava.awt.headless=true","-Dfile.encoding=UTF-8","-Declipse.application=org.eclipse.jdt.ls.core.id1","-Dosgi.bundles.defaultStartLevel=4","-Declipse.product=org.eclipse.jdt.ls.core.product","--add-modules=ALL-SYSTEM","--add-opens","java.base/java.util=ALL-UNNAMED","--add-opens","java.base/java.lang=ALL-UNNAMED"])
-        .arg("-jar").arg(&launcher).arg("-configuration").arg(&config).arg("-data").arg(root.join("jdt-data"))
-        .current_dir(&work).env_clear().env("PATH",java.parent().unwrap()).env("JAVA_HOME",java_home)
-        .env("HOME",&work).env("USERPROFILE",&work).env("TMP",&work).env("TEMP",&work).env("LANG","C.UTF-8").env("LC_ALL","C.UTF-8");
-    if let Some(system)=std::env::var_os("SystemRoot"){command.env("SystemRoot",system);}
+    let mut options=vec!["-Xms64m","-Xmx512m","-Djava.awt.headless=true","-Dfile.encoding=UTF-8","-Declipse.application=org.eclipse.jdt.ls.core.id1","-Dosgi.bundles.defaultStartLevel=4","-Declipse.product=org.eclipse.jdt.ls.core.product","--add-modules=ALL-SYSTEM","--add-opens=java.base/java.util=ALL-UNNAMED","--add-opens=java.base/java.lang=ALL-UNNAMED"].into_iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+    options.push(format!("-Djava.class.path={}",launcher.display()).into());
+    let mut command=runtime.command(&work,&options,"org.eclipse.equinox.launcher.Main")?;
+    command.arg("-configuration").arg(&config).arg("-data").arg(root.join("jdt-data"));
     let settings=json!({"java":{"home":java_home,"autobuild":{"enabled":false},"import":{"maven":{"enabled":false},"gradle":{"enabled":false}},"configuration":{"runtimes":[{"name":"JavaSE-25","path":java_home,"default":true}],"updateBuildConfiguration":"disabled"},"project":{"referencedLibraries":[]}}});
     let notices=Arc::new(Mutex::new(Vec::<String>::new()));let events=notices.clone();
     let client=Client::spawn(command,settings.clone(),Arc::new(move|event|{

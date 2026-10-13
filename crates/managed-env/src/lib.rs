@@ -255,3 +255,5 @@ mod tests {
 pub mod rust_harness;
 
 pub mod java_harness;
+
+pub mod java_runtime;
