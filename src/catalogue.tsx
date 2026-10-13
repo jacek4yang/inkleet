@@ -36,7 +36,7 @@ export function QuestionStatement({ question }: { question: RemoteQuestion }) {
 }
 
 export function Catalogue({ onChoose, onClose }: {
-  onChoose: (question: RemoteQuestion) => void; onClose: () => void;
+  onChoose: (question: RemoteQuestion, cacheWarning?: string | null) => void; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
@@ -66,11 +66,12 @@ export function Catalogue({ onChoose, onClose }: {
     const token = ++generation.current;
     setBusy(true); setError("");
     try {
-      const data = await invoke<RemoteQuestion>("get_question", { slug });
+      const fetched = await invoke<{ question: RemoteQuestion; cacheWarning: string | null }>("get_question", { slug });
+      const data = fetched.question;
       if (token !== generation.current) return;
       if (!/^[0-9]{1,20}$/.test(data.questionId)) throw new Error("题目标识格式变化，未创建本机文件");
       if (!data.translatedContent && !data.content) throw new Error("题面不可访问，可能需要会员权限");
-      onChoose(data); close();
+      onChoose(data, fetched.cacheWarning); close();
     } catch (e) { if (token === generation.current) setError(String(e)); }
     finally { if (token === generation.current) setBusy(false); }
   }

@@ -1,6 +1,7 @@
 mod storage;
 mod leetcode;
 mod auth;
+mod cache;
 use std::{path::PathBuf, sync::Mutex};
 use tauri::Manager;
 
@@ -61,9 +62,22 @@ async fn search_questions(window: tauri::WebviewWindow, keyword: String, offset:
     leetcode::Leetcode::new()?.search(&keyword, offset).await
 }
 #[tauri::command]
-async fn get_question(window: tauri::WebviewWindow, slug: String) -> Result<leetcode::Question, String> {
+async fn get_question(window: tauri::WebviewWindow, app: tauri::AppHandle, slug: String) -> Result<FetchedQuestion, String> {
     check_origin(&window)?;
-    leetcode::Leetcode::new()?.question(&slug).await
+    let question = leetcode::Leetcode::new()?.question(&slug).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let cache_warning = app.state::<cache::Cache>().save(&question).err();
+        FetchedQuestion { question, cache_warning }
+    }).await.map_err(|_| "题目缓存任务中断".into())
+}
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchedQuestion { question: leetcode::Question, cache_warning: Option<String> }
+#[tauri::command]
+async fn load_recent_questions(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<Vec<leetcode::Question>, String> {
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move || app.state::<cache::Cache>().load())
+        .await.map_err(|_| "题目缓存读取中断".to_string())?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -74,9 +88,10 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             app.manage(Store { root, gate: Mutex::new(()) });
             app.manage(auth::Auth::default());
+            app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question])
+        .invoke_handler(tauri::generate_handler![load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions])
         .run(tauri::generate_context!())
         .expect("InkLeet failed to start");
 }

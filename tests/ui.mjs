@@ -98,15 +98,16 @@ try {
     window.isTauri = true;
     window.__inkAuthTest = { pending: [], cancelled: 0 };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      if (command === "load_recent_questions") return [];
       if (command === "search_questions") return { total: 1, hasMore: false, questions: [{
         frontendQuestionId: "T1", title: "UI Test", titleCn: "题库测试样例", titleSlug: "fixture-test", difficulty: "Easy", paidOnly: false
       }] };
-      if (command === "get_question") return {
+      if (command === "get_question") return { question: {
         questionId: "999909", questionFrontendId: "T1", title: "UI Test", translatedTitle: "题库测试样例", titleSlug: args.slug,
         translatedContent: '<p>仅测试题面</p><img src="x" onerror="window.__unsafeExecuted=true"><script>window.__unsafeExecuted=true</script><a href="javascript:alert(1)">不可执行链接</a><iframe srcdoc="unsafe"></iframe>',
         content: null, isPaidOnly: false, difficulty: "Easy", sampleTestCase: "[]", exampleTestcases: "[]", metaData: "{}",
         codeSnippets: [{ langSlug: "rust", code: "// official-shaped test template" }, { langSlug: "python3", code: "# test template" }]
-      };
+      }, cacheWarning: null };
       if (command === "load_document") return { code: null, notes: null };
       if (command === "open_login" || command === "save_text") return;
       if (command === "cancel_login") { window.__inkAuthTest.cancelled++; return; }

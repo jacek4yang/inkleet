@@ -96,7 +96,33 @@ try:
         fill(code, "// live CN draft persistence")
         live_source = data / "top.jacek.inkleet/notebook/lc-1/solution.rs"
         wait_for(lambda: live_source.exists() and live_source.read_text() == "// live CN draft persistence", "real question local source saved")
-        (evidence/"LIVE_CN_RESULT.txt").write_text("PASS: real public CN search and question through native GUI, official Rust template, local source save. No authenticated login, run or submit.\\n")
+        stop()
+        # 重启后的题库恢复只读本机缓存；代理指向未监听端口，避免成功来自网络。
+        old_proxy = os.environ.get("HTTPS_PROXY")
+        old_no_proxy = os.environ.get("NO_PROXY")
+        os.environ["HTTPS_PROXY"] = "http://127.0.0.1:9"
+        os.environ["NO_PROXY"] = "127.0.0.1,localhost"
+        driver.terminate()
+        driver.wait(timeout=10)
+        driver = subprocess.Popen(["tauri-driver"], stdout=open(evidence/"driver-offline.log","w"), stderr=subprocess.STDOUT)
+        wait_for(lambda: request("GET","/status"), "offline driver ready")
+        start()
+        wait_for(lambda: element('[data-problem="lc-1"]'), "cached question restored without live search")
+        click('[data-problem="lc-1"]')
+        wait_for(lambda: "两数之和" in text("article h1"), "cached Chinese statement restored")
+        wait_for(lambda: text(code) == "// live CN draft persistence", "real question source restored offline")
+        screenshot("real-cn-offline-native.png")
+        click('[data-action="open-catalogue"]')
+        wait_for(lambda: element(search), "offline catalogue opened")
+        cmd("POST", f"/element/{element(search)}/value", {"text": "two sum", "value": list("two sum")})
+        click('dialog form button[type="submit"]')
+        wait_for(lambda: "无法连接中国站" in text('dialog [role="alert"]'), "network unavailable is explicit", seconds=30)
+        click(".catalogue-heading button")
+        if old_proxy is None: os.environ.pop("HTTPS_PROXY", None)
+        else: os.environ["HTTPS_PROXY"] = old_proxy
+        if old_no_proxy is None: os.environ.pop("NO_PROXY", None)
+        else: os.environ["NO_PROXY"] = old_no_proxy
+        (evidence/"LIVE_CN_RESULT.txt").write_text("PASS: real public CN search and question through native GUI, official Rust template, local source save and offline restart/cache recovery. No authenticated login, run or submit.\\n")
 except Exception:
     subprocess.run(["scrot", str(evidence / "desktop-failure.png")], check=False)
     (evidence / "test-files.json").write_text(json.dumps({str(p.relative_to(data)): p.read_text() for p in data.rglob("*") if p.is_file() and p.suffix in [".rs", ".md"]}, ensure_ascii=False))
