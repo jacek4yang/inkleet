@@ -1,0 +1,26 @@
+name: Prepare managed environment app lock
+on:
+  push:
+    branches: [feat/first-workbench]
+    paths: ['.github/workflows/managed-app-lock.yml']
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Resolve private environment dependency against existing app lock
+        run: |
+          printf '\ninkleet-managed-env = { path = "../crates/managed-env" }\n' >> src-tauri/Cargo.toml
+          cargo metadata --format-version 1 --manifest-path src-tauri/Cargo.toml > /dev/null
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: managed-app-lock
+          path: |
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+          retention-days: 7

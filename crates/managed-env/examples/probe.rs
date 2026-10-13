@@ -31,7 +31,7 @@ async fn main() -> Result<(), String> {
         let settings=json!({"pythonPath":python_path,"analysis":{"typeCheckingMode":"basic","autoSearchPaths":false,"useLibraryCodeForTypes":true}});
         let client=Client::spawn(command,settings.clone(),Arc::new(|_|{}))?;
         let uri=reqwest::Url::from_directory_path(&workspace).map_err(|_|"workspace URI")?.to_string();
-        let initialized=client.request("initialize",json!({"processId":null,"rootUri":uri,"capabilities":{"general":{"positionEncodings":["utf-16"]},"textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}}},"workspaceFolders":[{"uri":uri,"name":"InkLeet"}]}),Duration::from_secs(30))?;
+        let initialized=client.request("initialize",json!({"processId":null,"rootUri":uri,"capabilities":{"general":{"positionEncodings":["utf-16"]},"textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}}}},"workspaceFolders":[{"uri":uri,"name":"InkLeet"}]}),Duration::from_secs(30))?;
         assert!(initialized.pointer("/capabilities/hoverProvider").is_some());
         client.notify("initialized",json!({}))?;
         client.notify("workspace/didChangeConfiguration",json!({"settings":{"python":settings}}))?;
