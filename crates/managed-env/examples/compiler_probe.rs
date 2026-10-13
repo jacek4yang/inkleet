@@ -109,7 +109,7 @@ async fn main()->Result<(),String>{
     let mut command=clean(&rustc,&work,&paths);
     command.arg(&rust_source).arg("--edition=2021").arg("--sysroot").arg(&stdroot);
     if cfg!(windows){
-        let lld=rustc.parent().and_then(Path::parent).ok_or("Rust compiler root")?.join("lib/rustlib/x86_64-pc-windows-gnu/bin/rust-lld.exe");
+        let lld=rustc.parent().and_then(Path::parent).ok_or("Rust compiler root")?.join("lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe");
         if !lld.is_file(){return Err("Private Rust LLD missing".into());}
         command.arg("-C").arg(format!("linker={}",lld.display())).args(["-C","link-self-contained=yes","-C","linker-flavor=ld.lld"]);
     }else{

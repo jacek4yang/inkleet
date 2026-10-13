@@ -10,7 +10,7 @@ use std::{path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::Durat
     let mingw=manager.install("rust-mingw",Arc::new(AtomicBool::new(false)),report).await?;
     let stdroot=std_entry.parent().ok_or("std root")?;
     let rustroot=rustc.parent().and_then(Path::parent).ok_or("Rust root")?;
-    let lld=rustroot.join("lib/rustlib/x86_64-pc-windows-gnu/bin/rust-lld.exe");
+    let lld=rustroot.join("lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe");
     if !lld.is_file(){return Err(format!("Missing official LLD: {}",lld.display()));}
     let libraries=mingw.parent().and_then(Path::parent).and_then(Path::parent).ok_or("MinGW root")?.join("lib/self-contained");
     let source=root.join("solution.rs");let binary=root.join("solution.exe");
