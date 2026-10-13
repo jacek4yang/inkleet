@@ -67,15 +67,24 @@ async fn search_questions(window: tauri::WebviewWindow, keyword: String, offset:
 #[tauri::command]
 async fn get_question(window: tauri::WebviewWindow, app: tauri::AppHandle, slug: String) -> Result<FetchedQuestion, String> {
     check_origin(&window)?;
-    let question = leetcode::Leetcode::new()?.question(&slug).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let cache_warning = app.state::<cache::Cache>().save(&question).err();
-        FetchedQuestion { question, cache_warning }
-    }).await.map_err(|_| "题目缓存任务中断".into())
+    match leetcode::Leetcode::new()?.question(&slug).await {
+        Ok(question) => tauri::async_runtime::spawn_blocking(move || {
+            let cache_warning = app.state::<cache::Cache>().save(&question).err();
+            FetchedQuestion { question, cache_warning, from_cache: false }
+        }).await.map_err(|_| "题目缓存任务中断".into()),
+        Err(network_error) => tauri::async_runtime::spawn_blocking(move || {
+            let items = app.state::<cache::Cache>().load().map_err(|_| format!("{network_error}；本机题面缓存也不可用，未改动草稿"))?;
+            if let Some(question) = items.into_iter().find(|q| q.title_slug == slug) {
+                Ok(FetchedQuestion { question, cache_warning: Some(format!("无法更新题面，已打开本机公开缓存：{network_error}")), from_cache: true })
+            } else {
+                Err(network_error)
+            }
+        }).await.map_err(|_| "题目缓存读取任务中断".to_string())?,
+    }
 }
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FetchedQuestion { question: leetcode::Question, cache_warning: Option<String> }
+struct FetchedQuestion { question: leetcode::Question, cache_warning: Option<String>, from_cache: bool }
 #[tauri::command]
 async fn load_recent_questions(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<Vec<leetcode::Question>, String> {
     check_origin(&window)?;

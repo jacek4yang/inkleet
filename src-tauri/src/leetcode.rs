@@ -121,8 +121,13 @@ impl Leetcode {
     pub async fn question(&self, slug: &str) -> Result<Question, String> {
         validate_slug(slug)?;
         let data = self.query(QUESTION_QUERY, json!({"titleSlug":slug})).await?;
-        serde_json::from_value(data.get("question").cloned().unwrap_or(Value::Null))
-            .map_err(|_| "题目不存在、需要权限或接口格式已变化".into())
+        let question: Question = serde_json::from_value(data.get("question").cloned().unwrap_or(Value::Null))
+            .map_err(|_| "题目不存在、需要权限或接口格式已变化".to_string())?;
+        if question.title_slug != slug || question.question_id.is_empty() || question.question_id.len() > 20
+            || !question.question_id.bytes().all(|b| b.is_ascii_digit()) {
+            return Err("返回题目标识与请求不一致或格式已变化，未创建本机文件".into());
+        }
+        Ok(question)
     }
 }
 #[cfg(test)]

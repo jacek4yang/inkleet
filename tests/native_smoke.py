@@ -154,14 +154,22 @@ try:
         click('dialog form button[type="submit"]')
         wait_for(lambda: "无法连接中国站" in text('dialog [role="alert"]'), "network unavailable is explicit", seconds=30)
         click(".catalogue-heading button")
+        click('[data-action="open-link"]')
+        wait_for(lambda: element(link_input), "offline link input opened")
+        cmd("POST", f"/element/{element(link_input)}/value", {"text": linked, "value": list(linked)})
+        click('dialog form button[type="submit"]')
+        wait_for(lambda: len(cmd("POST", "/elements", {"using": "css selector", "value": "dialog.catalogue"})) == 0, "offline cached link opened", seconds=30)
+        wait_for(lambda: "已缓存题面" in text("article"), "offline fallback explicitly marked as cached")
+        wait_for(lambda: text(code) == "// live CN draft persistence", "offline link keeps restored draft")
+        assert live_source.read_text() == "// live CN draft persistence", "offline link overwrote source"
+        screenshot("question-link-offline-native.png")
         if old_proxy is None: os.environ.pop("HTTPS_PROXY", None)
         else: os.environ["HTTPS_PROXY"] = old_proxy
         if old_no_proxy is None: os.environ.pop("NO_PROXY", None)
         else: os.environ["NO_PROXY"] = old_no_proxy
-        (evidence/"LIVE_CN_RESULT.txt").write_text("PASS: real public CN search and question through native GUI, official Rust template, local source save and offline restart/cache recovery. No authenticated login, run or submit.\\n")
+        (evidence/"LIVE_CN_RESULT.txt").write_text("PASS: real public CN search and question through native GUI, official Rust template, local source save, normalized question-link opening, duplicate draft preservation and offline link/cache recovery. No authenticated login, run or submit.\\n")
 except Exception:
     subprocess.run(["scrot", str(evidence / "desktop-failure.png")], check=False)
-    (evidence / "test-files.json").write_text(json.dumps({str(p.relative_to(data)): p.read_text() for p in data.rglob("*") if p.is_file() and p.suffix in [".rs", ".md"]}, ensure_ascii=False))
     if session:
         try: screenshot("failure.png")
         except Exception: pass

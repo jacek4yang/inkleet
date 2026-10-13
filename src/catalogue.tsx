@@ -37,7 +37,7 @@ export function QuestionStatement({ question }: { question: RemoteQuestion }) {
 }
 
 export function Catalogue({ onChoose, onClose, initialMode = "search" }: {
-  onChoose: (question: RemoteQuestion, cacheWarning?: string | null) => void; onClose: () => void;
+  onChoose: (question: RemoteQuestion, cacheWarning?: string | null, fromCache?: boolean) => void; onClose: () => void;
   initialMode?: "search" | "link";
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -80,13 +80,13 @@ export function Catalogue({ onChoose, onClose, initialMode = "search" }: {
   async function choose(slug: string) {
     const token = beginRequest(); if (token === null) return;
     try {
-      const fetched = await invoke<{ question: RemoteQuestion; cacheWarning: string | null }>("get_question", { slug });
+      const fetched = await invoke<{ question: RemoteQuestion; cacheWarning: string | null; fromCache?: boolean }>("get_question", { slug });
       if (token !== generation.current) return;
       const data = fetched.question;
       if (!/^[0-9]{1,20}$/.test(data.questionId)) throw new Error("题目标识格式变化，未创建本机文件");
       if (data.titleSlug !== slug) throw new Error("返回的题目与链接不一致，未切换题目");
       if (!data.translatedContent && !data.content) throw new Error("题面不可访问，可能需要会员权限");
-      onChoose(data, fetched.cacheWarning); close();
+      onChoose(data, fetched.cacheWarning, fetched.fromCache ?? false); close();
     } catch (e) { if (token === generation.current) setError(String(e)); }
     finally { endRequest(token); }
   }

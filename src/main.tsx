@@ -113,8 +113,8 @@ function App() {
       if (selected.current === key && generation === sequence.current) setStatus("已保存到本机文件");
     }).catch(() => { if (selected.current === key) setStatus("保存失败 · 草稿仍在，请先导出"); });
   }
-  function chooseQuestion(question: RemoteQuestion, warning?: string | null) {
-    const entry: WorkbenchProblem = { id: "lc-" + question.questionId, number: question.questionFrontendId, title: question.translatedTitle || question.title, detail: "", input: "", output: "", official: question };
+  function chooseQuestion(question: RemoteQuestion, warning?: string | null, fromCache = false) {
+    const entry: WorkbenchProblem = { id: "lc-" + question.questionId, number: question.questionFrontendId, title: question.translatedTitle || question.title, detail: "", input: "", output: "", official: question, cached: fromCache };
     setCacheWarning(warning ?? "");
     setProblems(current => [...current.filter(p => p.id !== entry.id), entry]);
     setProblemId(entry.id); setTab("problem");
