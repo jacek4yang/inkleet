@@ -4,6 +4,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { languages, draftKey, type Language } from "./domain";
 import "./style.css";
 import { CodeEditor } from "./editor";
+import { FontInfo } from "./font-info";
 import { Login } from "./login";
 import { Catalogue, QuestionStatement, type RemoteQuestion } from "./catalogue";
 
@@ -27,6 +28,7 @@ function download(name: string, content: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function App() {
+  const [fontInfo, setFontInfo] = useState(false);
   const [problems, setProblems] = useState<WorkbenchProblem[]>(samples);
   const [cacheWarning, setCacheWarning] = useState("");
   const [catalogue, setCatalogue] = useState(false);
@@ -131,8 +133,9 @@ function App() {
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
       <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><button disabled title="中国站接入开发中">运行</button><button disabled className="primary" title="中国站接入开发中">提交</button></div></div>
       {loading ? <p className="loading">正在读取草稿…</p> : <CodeEditor key={activeKey} documentKey={activeKey} language={language} label="代码编辑器" value={doc.code} onChange={text => edit("code", text)} />}
-      <div className="editor-foot"><span>CodeMirror 6 · 本机编辑</span><button disabled={loading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
+      <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button disabled={loading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
     </section>
+    {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
     {catalogue && <Catalogue onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
     <footer className="statusbar" role="status"><span>{status}</span><span>仅本机 · 不上传私人解答</span></footer>
   </main>;

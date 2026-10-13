@@ -17,6 +17,13 @@ try {
   page.on("pageerror", e => errors.push(e.message));
   await page.goto("http://127.0.0.1:5173");
   const editor = page.getByRole("textbox", { name: "代码编辑器", exact: true });
+  await page.evaluate(() => document.fonts.ready);
+  const fontLoaded = await page.evaluate(() => document.fonts.check('14px "Intel One Mono"'));
+  assert.equal(fontLoaded, true, "必须实际加载内置 Intel One Mono");
+  assert.ok((await editor.evaluate(el => getComputedStyle(el).fontFamily)).includes("Intel One Mono"));
+  await page.getByRole("button", { name: "Intel One Mono", exact: true }).click();
+  await page.getByRole("heading", { name: "Intel One Mono", exact: true }).waitFor();
+  await page.getByRole("button", { name: "关闭字体说明", exact: true }).click();
   await editor.fill("// Rust 独立草稿");
   await page.getByRole("combobox", { name: "编程语言" }).selectOption("python3");
   await editor.fill("# Python 独立草稿");

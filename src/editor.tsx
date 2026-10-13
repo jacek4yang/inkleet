@@ -15,7 +15,7 @@ import type { Language } from "./domain";
 const sessions = new Map<string, { state: EditorState; scroll: number }>();
 const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "#fcfcfa", color: "#2b2621", fontSize: "14px" },
-  ".cm-scroller": { overflow: "auto", fontFamily: "inherit", lineHeight: "1.75" },
+  ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", lineHeight: "1.75" },
   ".cm-content": { padding: "20px 0", caretColor: "#bc6a3a" },
   ".cm-line": { padding: "0 16px" },
   ".cm-gutters": { backgroundColor: "#f5f2ec", color: "#9b8d7b", border: "none" },
