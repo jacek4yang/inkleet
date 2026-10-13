@@ -19,6 +19,12 @@
   https://github.com/jacek4yang/inkleet/actions/runs/38434539780 （a2267d5）。
   Windows x64 NSIS、Linux x64 DEB、macOS Intel/ARM DMG、Android ARM64 Debug APK。
   这些安装包尚不含后来接入的在线评测入口。
+  注意：该次旧 Linux DEB 的中文 Package 字段无效，不能安装，勿使用；其余目标也仅为构建通过。
+- Linux DEB 包名问题已修复为 ink-leet，界面仍显示“墨题 InkLeet”。
+  https://github.com/jacek4yang/inkleet/actions/runs/38439268539 （b225c66）。
+  已实际 apt 安装 /usr/bin/inkleet，并从安装位置运行 GUI 保存、重启恢复、外部冲突测试。
+  18 项 Rust 测试通过；1 项实时公开接口测试在该安装工作流中未运行。
+  CI Ubuntu 24.04 已预装开发依赖，不等于干净发行版兼容性验收。
 - 万行 438,889 字符前端受控输入测试，32 样本 P95 26.8ms：
   https://github.com/jacek4yang/inkleet/actions/runs/38427518348 （a411b9c）。
   GitHub Runner / Chromium / AMD EPYC 9V74 / 4 CPU。不是原生 IME 或手机真机结论。
@@ -49,5 +55,5 @@
 不以“完美”替代验收，不将模拟、预览或单平台结果扩展为全部通过。
 
 ## 下一步
-完成最新评测入口开发包与原生回归，进行用户控制的真实账号登录/运行/提交验证；
+Linux 最新评测入口开发包已完成安装和原生回归，继续进行用户控制的真实客户端账号登录/运行/提交验证；
 同时继续补齐安全会话恢复与笔记闭环。回到本任务时先读取最新分支、此状态文件和 Actions。
