@@ -134,8 +134,13 @@ try:
         wait_for(lambda: "只读" in text(".source-viewer header"), "source viewer is explicitly read-only")
         screenshot("python-stdlib-native.png")
         click(".source-viewer header button")
-        fill(code, "def add(left: int, right: int) -> int:\n    return left + right\nadd(")
-        wait_for(lambda: "left" in text(".lsp-signature") and "right" in text(".lsp-signature"), "real Pyright signature parameter help", seconds=30)
+        fill(code, "sum([1, 2])")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"signature-keyboard","actions":[
+            {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
+            {"type":"keyDown","value":"\ue012"},{"type":"keyUp","value":"\ue012"},
+            {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue008"},{"type":"keyUp","value":"\ue009"}
+        ]}]})
+        wait_for(lambda: "iterable" in text(".lsp-signature"), "real Pyright signature parameter help", seconds=30)
         screenshot("python-signature-native.png")
         fill(code, 'bad: int = "wrong"')
         wait_for(lambda: element(".cm-lintRange-error"), "real Pyright type diagnostic", seconds=30)

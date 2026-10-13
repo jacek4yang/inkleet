@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { languages, draftKey, type Language } from "./domain";
 import "./style.css";
+import { SaveQueue } from "./save-queue";
 import { CodeEditor } from "./editor";
 import { FontInfo } from "./font-info";
 import { Notes } from "./notes";
@@ -55,7 +56,7 @@ function App() {
   const persisted = useRef(new Map<string, string | null>());
   const sequence = useRef(0);
   const notes = useRef(new Map<string, string>());
-  const queue = useRef(Promise.resolve());
+  const queue = useRef(new SaveQueue());
   const activeKey = draftKey({ account: "local", problem: problemId, language });
   const selected = useRef(activeKey); selected.current = activeKey;
   const problem = problems.find(p => p.id === problemId)!;
@@ -68,7 +69,7 @@ function App() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    queue.current.then(async () => {
+    queue.current.idle.then(async () => {
       if (!documents.current.has(activeKey)) {
         if (isTauri()) {
           const loaded = await invoke<{code: string | null; notes: string | null}>("load_document", { problem: problemId, language });
@@ -113,12 +114,30 @@ function App() {
     const key = activeKey;
     const saveKey = kind === "notes" ? problemId + "/notes" : key;
     const generation = ++sequence.current;
-    // 串行保存保证旧请求不会在新请求之后覆盖正文；失败必须显式可见。
-    queue.current = queue.current.then(async () => {
-      await invoke("save_text", { problem: problemId, language, kind, text, expected: persisted.current.get(saveKey) ?? null });
-      persisted.current.set(saveKey, text);
-      if (selected.current === key && generation === sequence.current) setStatus("已保存到本机文件");
-    }).catch(() => { if (selected.current === key) setStatus("保存失败 · 草稿仍在，请先导出"); });
+    // 每个文件只保留最新待写快照；正在写入的版本仍完成原子保存。
+    // 外部冲突阻塞该文件，不能随下一次按键反复重试或覆盖外部正文。
+    queue.current.enqueue({
+      key: saveKey,
+      write: async () => {
+        await invoke("save_text", { problem: problemId, language, kind, text, expected: persisted.current.get(saveKey) ?? null });
+        persisted.current.set(saveKey, text);
+      },
+      saved: () => { if (selected.current === key && generation === sequence.current) setStatus("已保存到本机文件"); },
+      failed: () => { if (selected.current === key) setStatus("保存失败 · 草稿仍在，请先导出"); },
+    });
+    if (queue.current.failed(saveKey)) setStatus("保存失败 · 草稿仍在，请先导出");
+  }
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (queue.current.busy) { event.preventDefault(); event.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
+  function retrySave() {
+    setStatus("保存中");
+    queue.current.retry(activeKey);
+    queue.current.retry(problemId + "/notes");
   }
   function chooseQuestion(question: RemoteQuestion, warning?: string | null, fromCache = false) {
     const entry: WorkbenchProblem = { id: "lc-" + question.questionId, number: question.questionFrontendId, title: question.translatedTitle || question.title, detail: "", input: "", output: "", official: question, cached: fromCache };
@@ -154,7 +173,7 @@ function App() {
     {environments && <Environments onClose={() => setEnvironments(false)} />}
     {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
     {catalogue && <Catalogue initialMode={catalogueMode} onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
-    <footer className="statusbar" role="status"><span>{status}</span><span>源码和笔记本机保存 · 评测按需上传代码</span></footer>
+    <footer className="statusbar" role="status"><span>{status}{(queue.current.failed(activeKey) || queue.current.failed(problemId + "/notes")) && <button onClick={retrySave}>重试保存</button>}</span><span>源码和笔记本机保存 · 评测按需上传代码</span></footer>
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<App />);
