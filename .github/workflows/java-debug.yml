@@ -1,0 +1,39 @@
+name: Java debugger protocol
+on:
+  push:
+    branches: [feat/first-workbench, main]
+    paths: ['crates/managed-env/src/java_debug.rs', 'crates/managed-env/src/java_debug_bootstrap.java', 'crates/managed-env/src/java_runtime.rs', 'crates/managed-env/examples/java_debug_probe.rs', 'crates/managed-env/packages.json', '.github/workflows/java-debug.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: java-debug-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  isolated-tools:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15-intel, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: crates/managed-env
+      - name: Verify private stdio Java debugging and original source breakpoints
+        shell: bash
+        run: |
+          mkdir -p evidence
+          cargo run --locked --manifest-path crates/managed-env/Cargo.toml --example java_debug_probe 2>&1 | tee evidence/java-debug.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: java-debug-${{ matrix.os }}
+          path: |
+            evidence/
+            crates/managed-env/Cargo.lock
+          retention-days: 7

@@ -682,5 +682,17 @@
     "prefix": "rust-mingw-1.99.0-x86_64-pc-windows-gnu",
     "entry": "rust-mingw/lib/rustlib/x86_64-pc-windows-gnu/bin/self-contained/x86_64-w64-mingw32-gcc.exe",
     "license": "Rust MinGW bundled GCC/runtime licenses retained"
+  },
+  {
+    "id": "java-debug",
+    "platform": "any",
+    "version": "0.53.2 (VSIX 0.59.0)",
+    "url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/vscjava/vsextensions/vscode-java-debug/0.59.0/vspackage",
+    "sha256": "c49285824c4c91c8eb99d9b4a1b64e249aa7f3ab70f61daa494f871c4fa98727",
+    "size": 3527941,
+    "archive": "gzip-zip",
+    "prefix": "",
+    "entry": "extension/server/com.microsoft.java.debug.plugin-0.53.2.jar",
+    "license": "EPL-1.0 (plugin); MIT (extension wrapper)"
   }
 ]

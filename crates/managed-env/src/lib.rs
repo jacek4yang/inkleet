@@ -70,7 +70,7 @@ fn directory(path: &Path) -> Result<()> {
 fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.username().is_empty() && url.password().is_none()
         && url.port_or_known_default() == Some(443)
-        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org" | "go.dev" | "dl.google.com" | "download.eclipse.org" | "proxy.golang.org" | "storage.googleapis.com"))
+        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org" | "go.dev" | "dl.google.com" | "download.eclipse.org" | "proxy.golang.org" | "storage.googleapis.com" | "marketplace.visualstudio.com"))
 }
 impl Manager {
     pub fn new(root: PathBuf) -> Self { Self { root } }
@@ -124,6 +124,7 @@ impl Manager {
                 match p.archive.as_str() {
                     "tar-gz"=>archive::extract(&partial,stage.path(),&p.prefix,&verified_cancel),
                     "tar-xz"=>archive::extract_xz(&partial,stage.path(),&p.prefix,&verified_cancel),
+                    "gzip-zip"=>archive::extract_gzip_zip(&partial,stage.path(),&p.prefix,&verified_cancel),
                     "zip"=>archive::extract_zip(&partial,stage.path(),&p.prefix,&verified_cancel),
                     _=>Err("不支持的分发包格式".into()),
                 }.map_err(|e|format!("解压工具失败：{e}"))?;
@@ -226,7 +227,7 @@ mod tests {
             assert_eq!(p.sha256.len(), 64); assert!(p.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
             assert!(p.size > 0 && p.size < 512 * 1024 * 1024);
             assert!(host_allowed(&reqwest::Url::parse(&p.url).unwrap()));
-            assert!(matches!(p.archive.as_str(), "tar-gz" | "tar-xz" | "zip" | "raw"));
+            assert!(matches!(p.archive.as_str(), "tar-gz" | "tar-xz" | "zip" | "gzip-zip" | "raw"));
             archive::safe_path(&p.entry).unwrap();
         }
     }
@@ -257,3 +258,5 @@ pub mod rust_harness;
 pub mod java_harness;
 
 pub mod java_runtime;
+
+pub mod java_debug;

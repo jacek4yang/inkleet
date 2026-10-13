@@ -198,3 +198,31 @@ pub(crate) fn extract_zip(archive:&Path,root:&Path,prefix:&str,cancel:&AtomicBoo
     }
 
 }
+
+/// Marketplace transmits its immutable VSIX inside a gzip content encoding.
+/// Verify the pinned transport bytes before bounded decoding and ZIP extraction.
+pub(crate) fn extract_gzip_zip(archive:&Path,root:&Path,prefix:&str,cancel:&AtomicBool)->Result<()>{
+    let mut decoded=io(tempfile::NamedTempFile::new_in(root.parent().ok_or("缺少解压暂存目录")?))?;
+    let mut reader=flate2::read::GzDecoder::new(io(File::open(archive))?);let mut total=0u64;let mut buffer=[0u8;65536];
+    loop{
+        canceled(cancel)?;let n=io(reader.read(&mut buffer))?;if n==0{break;}
+        total+=n as u64;if total>MAX_FILE{return Err("gzip ZIP 分发包解码超过限制".into());}
+        io(decoded.write_all(&buffer[..n]))?;
+    }
+    io(decoded.flush())?;extract_zip(decoded.path(),root,prefix,cancel)
+}
+#[cfg(test)]mod gzip_zip_tests{
+    use super::*;
+    #[test]fn bounded_gzip_zip_uses_existing_path_validation(){
+        let root=tempfile::tempdir().unwrap();let mut writer=zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer.start_file("extension/server/test.jar",zip::write::SimpleFileOptions::default()).unwrap();writer.write_all(b"fixture").unwrap();
+        let bytes=writer.finish().unwrap().into_inner();
+        let mut encoder=flate2::write::GzEncoder::new(Vec::new(),flate2::Compression::default());encoder.write_all(&bytes).unwrap();
+        let archive=root.path().join("test.gz");fs::write(&archive,encoder.finish().unwrap()).unwrap();
+        let dest=root.path().join("out");fs::create_dir(&dest).unwrap();
+        extract_gzip_zip(&archive,&dest,"",&AtomicBool::new(false)).unwrap();
+        assert_eq!(fs::read(dest.join("extension/server/test.jar")).unwrap(),b"fixture");
+        let canceled=root.path().join("canceled");fs::create_dir(&canceled).unwrap();
+        assert!(extract_gzip_zip(&archive,&canceled,"",&AtomicBool::new(true)).is_err());
+    }
+}
