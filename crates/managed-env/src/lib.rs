@@ -67,7 +67,7 @@ fn directory(path: &Path) -> Result<()> {
 fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.username().is_empty() && url.password().is_none()
         && url.port_or_known_default() == Some(443)
-        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org"))
+        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org" | "go.dev" | "dl.google.com"))
 }
 impl Manager {
     pub fn new(root: PathBuf) -> Self { Self { root } }

@@ -59,7 +59,7 @@ async fn main()->Result<(),String>{
     let deadline=std::time::Instant::now()+Duration::from_secs(60);
     let hover=loop{
         let result=client.request("textDocument/hover",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":2,"character":8}}),Duration::from_secs(10))?;
-        if !result.is_null(){break result;}
+        if result.to_string().contains("Vec"){break result;}
         if std::time::Instant::now()>deadline{return Err(format!("Rust hover unavailable; adapter stderr bytes={}",client.stderr().len()));}
         std::thread::sleep(Duration::from_millis(300));
     };

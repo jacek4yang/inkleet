@@ -110,7 +110,18 @@ async fn main() -> Result<(), String> {
         let (events_tx,events_rx)=mpsc::sync_channel(128);
         let client=Arc::new(Client::spawn_dap(adapter,Arc::new(move|event|{if event.get("event").and_then(serde_json::Value::as_str)!=Some("output"){let _=events_tx.try_send(event);}}))?);
         println!("PROBE_STAGE DAP adapter spawned");
-        client.request("initialize",json!({"clientID":"inkleet","adapterID":"python","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsVariableType":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(15))?;
+        if let Err(error)=client.request("initialize",json!({"clientID":"inkleet","adapterID":"python","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsVariableType":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(15)){
+            // Synthetic fixture only: emit exception lines, never full adapter logs or access tokens.
+            std::thread::sleep(Duration::from_millis(100));
+            let mut texts=vec![client.stderr()];
+            for entry in std::fs::read_dir(&log_dir).map_err(|e|e.to_string())?.flatten(){
+                if let Ok(text)=std::fs::read_to_string(entry.path()){texts.push(text);}
+            }
+            for text in texts {for line in text.lines().filter(|line|line.contains("Error")||line.contains("Exception")||line.contains("No module")).take(20){
+                if !line.to_ascii_lowercase().contains("token"){println!("DAP_INITIALIZE_FAILURE {}",line.chars().take(500).collect::<String>());}
+            }}
+            return Err(format!("DAP initialize: {error}; stderr bytes={}",client.stderr().len()));
+        }
         println!("PROBE_STAGE DAP initialized");
         let launch_client=client.clone();let launch_python=runtime_python.clone();let launch_work=runtime_work.clone();let launch_script=script_path.clone();
         let launching=std::thread::spawn(move||launch_client.request("launch",json!({"name":"InkLeet fixture","type":"python","request":"launch","python":launch_python,"program":launch_script,"cwd":launch_work,"console":"internalConsole","justMyCode":false}),Duration::from_secs(30)));
