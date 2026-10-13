@@ -553,6 +553,14 @@ try {
   assert.equal(await runPanel.getByRole("button", { name: "本地执行", exact: true }).isDisabled(), true);
   await runPanel.getByRole("button", { name: "停止", exact: true }).click();
   await runPanel.getByText("已停止", { exact: true }).waitFor();
+  await runPage.getByRole("combobox", { name: "编程语言" }).selectOption("cpp");
+  assert.equal(await runPanel.locator('[data-local-tab="debug"]').isDisabled(), false);
+  await runPanel.getByRole("button", { name: "本地执行", exact: true }).click();
+  await runPage.waitForFunction(() => window.__runTest.starts.length === 4);
+  await runPage.evaluate(() => { window.__runTest.pending[3](); window.__runTest.result.phase = "compiling"; });
+  await runPanel.getByText("编译中…", { exact: true }).waitFor();
+  await runPanel.getByRole("button", { name: "停止", exact: true }).click();
+  await runPanel.getByText("已停止", { exact: true }).waitFor();
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");

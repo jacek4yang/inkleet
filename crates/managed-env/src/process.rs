@@ -48,6 +48,11 @@ fn drain(mut pipe:impl Read+Send+'static,used:Arc<AtomicUsize>,over:Arc<AtomicBo
 pub fn run(command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
     run_limited(command,cancel,timeout,output_limit,120)
 }
+/// Separate, cancelable compilation budget for a user's trusted source.
+/// This does not extend the ordinary execution deadline or provide a sandbox.
+pub fn compile(command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
+    run_limited(command,cancel,timeout,output_limit,300)
+}
 /// Only for hash-pinned tool provisioning and authored compiler readiness checks.
 /// Ordinary user-code execution must keep using run() and its 120-second ceiling.
 pub fn provision(command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{

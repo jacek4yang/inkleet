@@ -248,7 +248,7 @@ try:
             click(f'select[aria-label="开发环境语言"] option[value="{group}"]')
             click(".environment-summary button")
             wait_for(lambda: all("已安装" in text(f'[data-tool="{tool}"]') for tool in (
-                {"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"],"cpp":["zig","clangd"]}[group]
+                {"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"],"cpp":["zig","clangd","codelldb"]}[group]
             )),f"{group} managed installation",seconds=720)
             click("dialog.environments header button")
             click(f'select[aria-label="编程语言"] option[value="{language}"]')
@@ -270,42 +270,44 @@ try:
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
-            if group=="golang":
-                go_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
-                fill(code,go_solution)
+            if group in ("golang","cpp"):
+                local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
+                if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"
+                fill(code,local_solution)
                 if not cmd("POST","/elements",{"using":"css selector","value":".local-runner"}):
                     click(".pane-heading .actions button")
                 click('[data-local-tab="run"]')
                 fill('[aria-label="本地测试输入"]',"[3,-1,8]")
                 click('[data-action="local-execute"]')
-                wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),"Go private compilation and typed local result",seconds=160)
-                screenshot("golang-local-run-native.png")
-                assert text(code)==go_solution,"Go local run rewrote the editor"
-                (evidence/"GO_LOCAL_GUI_RESULT.txt").write_text("PASS: actual Linux GUI compiles a Go solution using its private downloaded toolchain, executes the bounded JSON harness and returns exact value 10. No online judge verdict.\n")
+                wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),f"{group} private compilation and typed local result",seconds=280)
+                screenshot(group+"-local-run-native.png")
+                saved_solution=data/("top.jacek.inkleet/notebook/sample-sum/solution."+("go" if group=="golang" else "cpp"))
+                wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
+                (evidence/(group.upper()+"_LOCAL_GUI_RESULT.txt")).write_text(f"PASS: actual Linux GUI compiles a {group} solution using its private downloaded toolchain, executes the bounded typed harness and returns exact value 10. No online judge verdict.\n")
                 click('[data-local-tab="debug"]')
                 click(code)
                 keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
                 for _ in range(2): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
                 keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
                 cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-breakpoint","actions":keys}]})
-                wait_for(lambda: "断点：3。" in text(".debug-panel"),"Go breakpoint uses original source line")
+                wait_for(lambda: "断点：3。" in text(".debug-panel"),f"{group} breakpoint uses original source line")
                 click(".debug-panel .local-actions button:first-of-type")
-                wait_for(lambda: "已暂停" in text(".debug-panel"),"Go debug compiler and real breakpoint",seconds=160)
-                wait_for(lambda: element(".cm-debug-stopped"),"Go original source pause highlight")
-                def go_total():
+                wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
+                wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
+                def local_total():
                     node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='total']]/code"})[EID]
                     return cmd("GET",f"/element/{node}/text")
-                wait_for(lambda: go_total()=="0","Go initial local variable value")
-                screenshot("golang-debug-native.png")
+                wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
+                screenshot(group+"-debug-native.png")
                 for _ in range(3):
                     click(code)
                     cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-step","actions":[{"type":"keyDown","value":"\ue03a"},{"type":"keyUp","value":"\ue03a"}]}]})
                     time.sleep(.7)
-                    if go_total()!="0": break
-                assert go_total()!="0","Go variables did not update after stepping"
+                    if local_total()!="0": break
+                assert local_total()!="0",f"{group} variables did not update after stepping"
                 cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-stop","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
-                wait_for(lambda: "调试结束" in text(".debug-panel"),"Go debugger stop")
-                (evidence/"GO_DEBUG_GUI_RESULT.txt").write_text("PASS: actual private Delve GUI launch, original source breakpoint line 3, paused source highlight, local total=0, real F10 variable update and Shift+F5 termination.\n")
+                wait_for(lambda: "调试结束" in text(".debug-panel"),f"{group} debugger stop")
+                (evidence/(group.upper()+"_DEBUG_GUI_RESULT.txt")).write_text(f"PASS: actual private {group} debugger GUI launch, original source breakpoint line 3, paused source highlight, local total=0, real F10 variable update and Shift+F5 termination.\n")
                 click(".local-runner header > button:last-child")
                 fill(code,code_text)
 

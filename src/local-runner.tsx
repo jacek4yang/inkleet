@@ -29,7 +29,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
     if (isTauri()) void poll();
     return () => { alive.current = false; clearTimeout(timer); };
   }, []);
-  useEffect(() => { if (!["python3", "golang"].includes(language)) setPane("run"); }, [language]);
+  useEffect(() => { if (!["python3", "golang", "cpp"].includes(language)) setPane("run"); }, [language]);
   async function run() {
     if (guard.current || busy(result)) return;
     guard.current = true; setPending(true); setError("");
@@ -53,11 +53,11 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
   }
   const stale = snapshot && (snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
   return <section className="local-runner" aria-label="本地运行">
-    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang"].includes(language)} title={["python3", "golang"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><button onClick={onClose}>收起</button></header>
-    <details className="local-safety"><summary>仅运行可信代码 · 本机执行，不上传 · 非安全沙箱</summary><p className="muted">使用应用独立工具链执行快照。Go 编译最多 120 秒；程序运行 10 秒超时，输出最多 64 KiB。以当前用户权限运行，尚无内存硬限制。</p></details>
+    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp"].includes(language)} title={["python3", "golang", "cpp"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><button onClick={onClose}>收起</button></header>
+    <details className="local-safety"><summary>仅运行可信代码 · 本机执行，不上传 · 非安全沙箱</summary><p className="muted">使用应用独立工具链执行快照。Go 编译最多 120 秒，C++ 首次准备标准库及编译最多 240 秒；程序运行 10 秒超时，输出最多 64 KiB。以当前用户权限运行，尚无内存硬限制。</p></details>
     <div hidden={pane !== "run"}>
     <label>测试输入<textarea aria-label="本地测试输入" value={input} onChange={e => setInput(e.target.value)} spellCheck={false} placeholder="每个参数填写一个 JSON 值；多组用例依次排列。" /></label>
-    <div className="local-actions"><button data-action="local-execute" onClick={run} disabled={!isTauri() || !["python3", "golang"].includes(language) || pending || busy(result)}>{pending ? "启动中…" : "本地执行"}</button>{busy(result) && <button onClick={cancel} disabled={result?.phase === "canceling"}>停止</button>}<span role="status">{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : result.phase === "compiling" ? "编译中…" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过时限，已终止" : result.phase === "error" || result.error ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
+    <div className="local-actions"><button data-action="local-execute" onClick={run} disabled={!isTauri() || !["python3", "golang", "cpp"].includes(language) || pending || busy(result)}>{pending ? "启动中…" : "本地执行"}</button>{busy(result) && <button onClick={cancel} disabled={result?.phase === "canceling"}>停止</button>}<span role="status">{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : result.phase === "compiling" ? "编译中…" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过时限，已终止" : result.phase === "error" || result.error ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
     {stale && <p className="cache-warning">当前代码或用例已改变，下面是上一次快照的结果。</p>}
     {!snapshot && result && <p className="muted">以下为先前运行的结果，不能视为当前草稿的结果。</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
