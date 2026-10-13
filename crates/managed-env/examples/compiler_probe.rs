@@ -109,13 +109,15 @@ async fn main()->Result<(),String>{
     let mut command=clean(&rustc,&work,&paths);
     command.arg(&rust_source).arg("--edition=2021").arg("--sysroot").arg(&stdroot);
     if cfg!(windows){
-        command.arg("-C").arg(format!("linker={}",install["rust-mingw"].display())).args(["-C","link-self-contained=yes"]);
-        command.arg("-C").arg(format!("link-arg=-B{}",install["rust-mingw"].parent().unwrap().display()));
+        let lld=rustc.parent().and_then(Path::parent).ok_or("Rust compiler root")?.join("lib/rustlib/x86_64-pc-windows-gnu/bin/rust-lld.exe");
+        if !lld.is_file(){return Err("Private Rust LLD missing".into());}
+        command.arg("-C").arg(format!("linker={}",lld.display())).args(["-C","link-self-contained=yes","-C","linker-flavor=ld.lld"]);
     }else{
         command.arg("-C").arg(format!("linker={}",std::env::current_exe().map_err(|e|e.to_string())?.display()))
             .env("INKLEET_LINKER_MODE","1").env("INKLEET_ZIG",&zig);
     }
-    command.args(["-C","linker-flavor=gcc"]).arg("-o").arg(&output);
+    if !cfg!(windows){command.args(["-C","linker-flavor=gcc"]);}
+    command.arg("-o").arg(&output);
     if cfg!(windows){
         command.args(["--target","x86_64-pc-windows-gnu"]);
         let mingw_target=install["rust-mingw"].parent().and_then(Path::parent).and_then(Path::parent).ok_or("Rust MinGW layout")?;
