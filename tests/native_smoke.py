@@ -45,7 +45,18 @@ def cmd(method, path, payload=None):
         return request(method, f"/session/{session}" + path, payload)
 def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
 def text(css): return cmd("GET",f"/element/{element(css)}/text")
-def click(css): return cmd("POST",f"/element/{element(css)}/click",{})
+def click(css):
+    try: return cmd("POST",f"/element/{element(css)}/click",{})
+    except http.client.RemoteDisconnected:
+        closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner header > button:last-child")
+        selection=css.startswith("select[") and " option[value=" in css
+        if not (closing or selection): raise
+        with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
+            log.write(f"Checking idempotent test UI operation after WebKit connection reset: {css}\n")
+        time.sleep(.3)
+        if closing and not cmd("POST","/elements",{"using":"css selector","value":css}): return
+        return cmd("POST",f"/element/{element(css)}/click",{})
+
 def fill(css, value):
     # Only authored test-field replacement is replayable. Never replay a judge,
     # login, submission, or arbitrary click after an uncertain transport result.

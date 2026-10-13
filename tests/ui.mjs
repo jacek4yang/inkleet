@@ -545,6 +545,7 @@ try {
   assert.equal(await runPage.evaluate(() => window.__runTest.debugStarts), 1);
   await runPage.getByRole("combobox", { name: "编程语言" }).selectOption("golang");
   assert.equal(await runPanel.locator('[data-local-tab="debug"]').isDisabled(), false);
+  await runPanel.locator('[data-local-tab="run"]').click();
   await runPanel.getByRole("button", { name: "本地执行", exact: true }).click();
   await runPage.waitForFunction(() => window.__runTest.starts.length === 3);
   await runPage.evaluate(() => { window.__runTest.pending[2](); window.__runTest.result.phase = "compiling"; });
