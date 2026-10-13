@@ -404,6 +404,7 @@ try {
       if (command === "language_request") {
         state.requests.push(args);
         if (args.kind === "completion") return { items: [{ label: "popleft", kind: 2, documentation: "<img src=x onerror=alert(1)>plain documentation" }] };
+        if (args.kind === "signatureHelp") return { signatures: [{ label: "popleft(index: int) -> int", documentation: "<img src=x onerror=alert(1)>signature docs", parameters: [{ label: "index" }] }], activeSignature: 0, activeParameter: 0 };
         if (args.kind === "hover") return { contents: { kind: "plaintext", value: "deque.popleft() -> int" } };
         if (args.kind === "definition") return [{ uri: "file:///fixture/stdlib/collections.pyi", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } } }];
       }
@@ -421,6 +422,12 @@ try {
   await lspPage.getByRole("option", { name: /popleft/ }).click();
   assert.equal(await lspEditor.innerText(), "items.popleft");
   assert.equal(await lspPage.locator(".cm-tooltip img").count(), 0);
+  await lspEditor.press("Control+Shift+Space");
+  await lspPage.locator(".lsp-signature").waitFor();
+  assert.match(await lspPage.locator(".lsp-signature").innerText(), /当前参数：1 \/ 1/);
+  assert.equal(await lspPage.locator(".lsp-signature img").count(), 0);
+  await lspEditor.press("Escape");
+  await lspPage.locator(".lsp-signature").waitFor({ state: "hidden" });
   await lspEditor.press("F12");
   const sourceDialog = lspPage.getByRole("dialog", { name: "collections.pyi", exact: true });
   await sourceDialog.waitFor();

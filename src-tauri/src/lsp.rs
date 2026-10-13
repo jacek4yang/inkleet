@@ -39,7 +39,7 @@ impl Services {
         Ok(())
     }
     pub fn request(&self,id:u64,version:u32,kind:&str,line:u32,character:u32)->Result<Value>{
-        let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition",_=>return Err("不支持此语言服务请求".into())};
+        let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition","signatureHelp"=>"textDocument/signatureHelp",_=>return Err("不支持此语言服务请求".into())};
         let session=self.session(id)?;
         {
             let document=session.document.lock().map_err(|_|"文档状态不可用")?;

@@ -76,3 +76,6 @@
 .local-runner .debug-panel { margin-top: 0; border-top: none; padding-top: 8px; }
 .local-safety { font-size: 11px; color: #72695e; margin: 6px 0 10px; line-height: 1.6; }
 .local-safety summary { cursor: pointer; }
+
+.lsp-signature{max-width:min(580px,85vw);max-height:230px;overflow:auto;padding:10px 14px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 var(--font-mono)}
+.lsp-signature-label{font-weight:600;margin-bottom:6px}

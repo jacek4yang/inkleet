@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { EditorView, hoverTooltip, keymap, type Tooltip } from "@codemirror/view";
-import { type Extension, type Text } from "@codemirror/state";
+import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
+import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
 import { autocompletion, type Completion, type CompletionContext } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
@@ -25,6 +25,17 @@ function content(value: unknown): string {
   return object(value) && typeof value.value === "string" ? value.value.slice(0, 32768) : "";
 }
 export function pythonIntelligence(status: (text: string) => void, showSource: (source: Source) => void) {
+  const signatureEffect = StateEffect.define<Tooltip | null>();
+  const signatureField = StateField.define<Tooltip | null>({
+    create: () => null,
+    update(value, transaction) {
+      if (transaction.docChanged || transaction.selection) value = null;
+      for (const effect of transaction.effects) if (effect.is(signatureEffect)) value = effect.value;
+      return value;
+    },
+    provide: field => showTooltip.from(field),
+  });
+  let signatureTimer: ReturnType<typeof setTimeout> | undefined;
   let view: EditorView | null = null, session: Started | null = null, closed = false;
   let version = 1, sent: Text | null = null, synchronization = Promise.resolve();
   let changeTimer: ReturnType<typeof setTimeout> | undefined, pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -98,6 +109,34 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
       }};
     } catch { return null; }
   }
+  async function signatureHelp() {
+    if (!view || closed || view.composing) return;
+    const target = view, doc = target.state.doc, pos = target.state.selection.main.head;
+    try {
+      const result = await request("signatureHelp", pos, doc);
+      if (closed || view !== target || target.state.doc !== doc || target.state.selection.main.head !== pos || target.composing) return;
+      if (!object(result) || !Array.isArray(result.signatures) || !result.signatures.length) {
+        target.dispatch({ effects: signatureEffect.of(null) }); return;
+      }
+      const index = Number.isInteger(result.activeSignature) ? Math.max(0, Math.min(result.signatures.length - 1, result.activeSignature)) : 0;
+      const signature = result.signatures[index];
+      if (!object(signature) || typeof signature.label !== "string") return;
+      const parameter = Number.isInteger(signature.activeParameter) ? signature.activeParameter : result.activeParameter;
+      const parameters = Array.isArray(signature.parameters) ? signature.parameters : [];
+      const current = Number.isInteger(parameter) && parameter >= 0 ? parameters[parameter] : null;
+      const label = signature.label.slice(0, 4096);
+      const documentation = [content(signature.documentation), object(current) ? content(current.documentation) : ""].filter(Boolean).join("\n\n").slice(0, 8192);
+      target.dispatch({ effects: signatureEffect.of({ pos, above: true, create() {
+        const dom = document.createElement("div"); dom.className = "lsp-signature"; dom.setAttribute("role", "status");
+        const heading = document.createElement("div"); heading.className = "lsp-signature-label"; heading.textContent = label; dom.append(heading);
+        if (Number.isInteger(parameter) && parameter >= 0 && parameter < parameters.length) {
+          const active = document.createElement("div"); active.textContent = "当前参数：" + (parameter + 1) + " / " + parameters.length; dom.append(active);
+        }
+        if (documentation) { const details = document.createElement("div"); details.textContent = documentation; dom.append(details); }
+        return { dom };
+      } }) });
+    } catch { if (!closed && view === target && target.state.doc === doc) target.dispatch({ effects: signatureEffect.of(null) }); }
+  }
   async function definition(pos: number) {
     if (!view) return;
     const doc = view.state.doc;
@@ -136,9 +175,10 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
   const extensions: Extension[] = [
+    signatureField,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([{ key: "F12", run(target) { void definition(target.state.selection.main.head); return true; } }]),
+    keymap.of([{ key: "Ctrl-Shift-Space", run() { void signatureHelp(); return true; } }, { key: "Escape", run(target) { if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }, { key: "F12", run(target) { void definition(target.state.selection.main.head); return true; } }]),
     EditorView.domEventHandlers({ mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
@@ -146,6 +186,8 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
       event.preventDefault(); void definition(pos); return true;
     }}),
     EditorView.updateListener.of(update => {
+      if (update.docChanged || update.selectionSet) clearTimeout(signatureTimer);
+      if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
       if (update.docChanged && !closed) {
         clearTimeout(changeTimer);
         changeTimer = setTimeout(() => { void flush().catch(e => { if (!closed) status(String(e)); }); }, 150);
@@ -168,7 +210,7 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      closed = true; clearTimeout(changeTimer); clearTimeout(pollTimer);
+      closed = true; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },
