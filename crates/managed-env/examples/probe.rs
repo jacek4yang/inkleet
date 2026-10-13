@@ -44,6 +44,16 @@ async fn main() -> Result<(), String> {
         assert!(items.iter().any(|v|v.get("label").and_then(serde_json::Value::as_str)==Some("popleft")),"real deque completion missing");
         let definition=client.request("textDocument/definition",json!({"textDocument":{"uri":document},"position":{"line":0,"character":25}}),Duration::from_secs(30))?;
         assert!(!definition.is_null() && definition.as_array().is_none_or(|a|!a.is_empty()),"stdlib declaration missing");
+        let original="\"\"\"owner module docstring\"\"\"\nfrom __future__ import annotations\nclass Solution:\n    def f(self, head: Optional[ListNode]) -> Optional[TreeNode]:\n        return None\nnode = ListNode(1)\nnode.\n";
+        let context=inkleet_managed_env::lsp_scaffold::Context::parse(Some(r#"{"params":[{"type":"ListNode"},{"type":"TreeNode"}]}"#))?;
+        let (virtual_source,prefix)=context.python_source(original).ok_or("Python judge scaffold")?;
+        client.notify("textDocument/didChange",json!({"textDocument":{"uri":document,"version":2},"contentChanges":[{"text":virtual_source}]}))?;
+        let completion=client.request("textDocument/completion",json!({"textDocument":{"uri":document},"position":{"line":prefix+6,"character":5}}),Duration::from_secs(30))?;
+        let items=completion.as_array().or_else(||completion.get("items").and_then(serde_json::Value::as_array)).ok_or("Python judge completion")?;
+        for member in ["val","next"]{assert!(items.iter().any(|v|v["label"]==member),"implicit Python {member} missing: {completion}");}
+        let hover=client.request("textDocument/hover",json!({"textDocument":{"uri":document},"position":{"line":prefix+3,"character":38}}),Duration::from_secs(30))?;
+        assert!(hover.to_string().contains("ListNode"),"Python annotated judge type hover missing: {hover}");
+        println!("PYTHON_JUDGE_TYPES_RESULT {}",json!({"listNodeCompletion":true,"futureAnnotations":true,"typedHover":true,"sourceLinesPreserved":true}));
         client.request("shutdown",json!(null),Duration::from_secs(5))?;
         let _=client.notify("exit",json!(null));client.stop();
         Ok(json!({"initialize":true,"hover":true,"completion":true,"stdlibDeclaration":true,"managedNode":true}))

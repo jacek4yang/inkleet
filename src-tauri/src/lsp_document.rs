@@ -2,6 +2,7 @@
 use serde_json::Value;
 use inkleet_managed_env::lsp_scaffold::Context;
 pub fn contextual_source(language:&str,text:&str,context:&Context)->(String,u32){
+    if language=="python3"{if let Some(wrapped)=context.python_source(text){return wrapped;}}
     let (base,prefix)=source(language,text);
     let (before,after)=context.fragments(language,text);
     let extra=before.lines().count() as u32;

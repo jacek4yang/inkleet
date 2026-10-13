@@ -22,6 +22,21 @@ impl Context {
         }
         Ok(result)
     }
+    /// Python's future imports must remain before ordinary imports. Move only
+    /// leading future statements into the virtual prefix, leaving blank source
+    /// lines behind so diagnostics still map to the owner's original positions.
+    pub fn python_source(&self,source:&str)->Option<(String,u32)>{
+        if !self.enabled{return None;}
+        let (future,body)=python_futures(source);
+        let mut prefix=future;
+        prefix.push_str("from typing import *\n");
+        // Python allows user classes to shadow imported/default judge names.
+        // These are isolated type-checker declarations, never saved or executed.
+        if self.list{prefix.push_str("class ListNode:\n    def __init__(self, val: int = 0, next: Optional['ListNode'] = None):\n        self.val: int = val\n        self.next: Optional['ListNode'] = next\n");}
+        if self.tree{prefix.push_str("class TreeNode:\n    def __init__(self, val: int = 0, left: Optional['TreeNode'] = None, right: Optional['TreeNode'] = None):\n        self.val: int = val\n        self.left: Optional['TreeNode'] = left\n        self.right: Optional['TreeNode'] = right\n");}
+        let lines=prefix.lines().count() as u32;
+        Some((prefix+&body,lines))
+    }
     /// Only fixed snippets are injected: metadata is never interpolated as code.
     pub fn fragments(&self,language:&str,source:&str)->(String,String){
         if !self.enabled{return (String::new(),String::new());}
@@ -148,5 +163,78 @@ impl Solution { fn f<'a>(v:&'a str) {} }
         assert!(context().fragments("java","package foo; class Solution{}").0.is_empty());
         let c=Context::parse(Some(r#"{"inkleetFunctionStyle":"free","params":[]}"#)).unwrap();
         assert!(c.fragments("rust","fn solve(){}").1.is_empty());
+    }
+}
+
+/// Return logical statement boundaries, respecting Python strings, brackets,
+/// comments and line continuations. No Python interpreter or user code runs.
+fn python_statement(bytes:&[u8],start:usize)->usize{
+    let mut i=start;let mut depth=0usize;
+    while i<bytes.len(){
+        if bytes[i]==b'#'{while i<bytes.len()&&bytes[i]!=b'\n'{i+=1;}continue;}
+        if bytes[i]==b'\''||bytes[i]==b'"'{
+            let quote=bytes[i];let triple=bytes.get(i..i+3).is_some_and(|v|v==[quote,quote,quote]);i+=if triple{3}else{1};
+            while i<bytes.len(){
+                if bytes[i]==b'\\'{i=(i+2).min(bytes.len());}
+                else if triple&&bytes.get(i..i+3).is_some_and(|v|v==[quote,quote,quote]){i+=3;break;}
+                else if !triple&&bytes[i]==quote{i+=1;break;}
+                else{i+=1;}
+            }
+            continue;
+        }
+        match bytes[i]{
+            b'('|b'['|b'{'=>depth+=1,
+            b')'|b']'|b'}'=>depth=depth.saturating_sub(1),
+            b'\\' if bytes.get(i+1)==Some(&b'\n')=>{i+=2;continue;},
+            b'\\' if bytes.get(i+1..i+3)==Some(b"\r\n")=>{i+=3;continue;},
+            b'\n' if depth==0=>return i+1,
+            _=>{},
+        }i+=1;
+    }
+    i
+}
+fn python_futures(source:&str)->(String,String){
+    let mut prefix=String::new();let mut body=source.to_owned();let mut ranges=Vec::new();
+    let mut start=0;let mut may_docstring=true;
+    while start<source.len(){
+        let end=python_statement(source.as_bytes(),start);let statement=&source[start..end];
+        let trimmed=statement.trim_start_matches('\u{feff}').trim();
+        if trimmed.is_empty()||trimmed.starts_with('#'){start=end;continue;}
+        let docstring=trimmed.starts_with('"')||trimmed.starts_with('\'')||["r\"","r'","u\"","u'","R\"","R'","U\"","U'"].iter().any(|s|trimmed.starts_with(s));
+        if may_docstring&&docstring{may_docstring=false;start=end;continue;}
+        may_docstring=false;
+        let words=trimmed.split(|c:char|!c.is_ascii_alphanumeric()&&c!='_').filter(|v|!v.is_empty()).take(3).collect::<Vec<_>>();
+        if words!=["from","__future__","import"]{break;}
+        // Semicolon compound statements are kept intact and unsupported here;
+        // moving other executable code would hide real errors.
+        if statement.contains(';'){break;}
+        prefix.push_str(statement);if !statement.ends_with('\n'){prefix.push('\n');}
+        ranges.push((start,end));start=end;
+    }
+    for (start,end) in ranges.into_iter().rev(){
+        let blank=source[start..end].chars().map(|c|if c=='\r'||c=='\n'{c}else{' '}).collect::<String>();
+        body.replace_range(start..end,&blank);
+    }
+    if body.starts_with('\u{feff}'){body.replace_range(..3," ");}
+    (prefix,body)
+}
+#[cfg(test)]mod python_tests{
+    use super::*;
+    fn context()->Context{Context::parse(Some(r#"{"params":[{"type":"ListNode"},{"type":"TreeNode"}]}"#)).unwrap()}
+    #[test]fn python_future_imports_and_line_positions_are_preserved(){
+        let src="# coding: utf-8\n\"\"\"module 文档\"\"\"\nfrom __future__ import (\n    annotations,\n)\nclass Solution:\n    def f(self, head: Optional[ListNode]) -> Optional[TreeNode]:\n        return None\n";
+        let (wrapped,prefix)=context().python_source(src).unwrap();
+        assert!(wrapped.starts_with("from __future__ import (\n"));
+        let lines=wrapped.lines().skip(prefix as usize).collect::<Vec<_>>();
+        assert_eq!(lines.len(),src.lines().count());assert_eq!(lines[5],"class Solution:");
+        assert_eq!(lines[6],src.lines().nth(6).unwrap());assert!(lines[2].trim().is_empty());
+        assert!(wrapped.contains("self.next: Optional['ListNode']"));
+    }
+    #[test]fn ordinary_programs_are_not_reordered(){
+        let src="x=1\nfrom __future__ import annotations\n";
+        let (future,body)=python_futures(src);assert!(future.is_empty());assert_eq!(body,src);
+        let src="from __future__ import annotations; x=1\n";
+        let (future,body)=python_futures(src);assert!(future.is_empty());assert_eq!(body,src);
+        assert!(Context::default().python_source("x=1").is_none());
     }
 }
