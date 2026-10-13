@@ -54,3 +54,66 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
         assert!(configuration(&META.replace("integer[]","integer[][][][][]"),"[]\n0").is_err());
     }
 }
+
+
+pub const GO_HARNESS:&str=include_str!("go_harness.go");
+fn go_tokens(source:&str)->Vec<&str>{
+    let bytes=source.as_bytes();let mut tokens=Vec::new();let mut i=0;
+    while i<bytes.len(){
+        if bytes[i].is_ascii_whitespace(){i+=1;continue;}
+        if bytes.get(i..i+2)==Some(b"//"){i+=2;while i<bytes.len()&&bytes[i]!=b'\n'{i+=1;}continue;}
+        if bytes.get(i..i+2)==Some(b"/*"){i+=2;while i+1<bytes.len()&&&bytes[i..i+2]!=b"*/"{i+=1;}i=(i+2).min(bytes.len());continue;}
+        if matches!(bytes[i],b'"'|b'\''|b'\x60'){
+            let quote=bytes[i];i+=1;
+            while i<bytes.len(){if bytes[i]==quote{i+=1;break;}if quote!=b'\x60'&&bytes[i]==b'\\'{i=(i+2).min(bytes.len());}else{i+=1;}}
+            continue;
+        }
+        if bytes[i].is_ascii_alphabetic()||bytes[i]==b'_'{
+            let start=i;i+=1;while i<bytes.len()&&(bytes[i].is_ascii_alphanumeric()||bytes[i]==b'_'){i+=1;}
+            tokens.push(&source[start..i]);continue;
+        }
+        if bytes[i].is_ascii(){tokens.push(&source[i..i+1]);}i+=1;
+    }
+    tokens
+}
+pub fn prepare_go(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),String>{
+    if source.len()>2*1024*1024{return Err("源码超过 2 MiB".into());}
+    let configuration=configuration(metadata,input)?;
+    let source=source.trim_start_matches('\u{feff}');
+    let tokens=go_tokens(source);
+    let has_package=tokens.first()==Some(&"package");
+    if has_package&&tokens.get(1)!=Some(&"main"){return Err("本地 Go 驱动需要无 package 声明的力扣函数，或 package main".into());}
+    if tokens.windows(2).any(|pair|pair==["func","main"]){return Err("请保留题目函数；本地 Go 驱动会提供 main 入口".into());}
+    let source=source.trim_start_matches('\u{feff}');
+    let solution=if has_package{source.to_owned()}else{format!("package main\n{source}")};
+    let mut definitions=String::from("package main\n");
+    let metadata_text=configuration["metadata"].to_string();
+    for (name,definition) in [("ListNode","type ListNode struct { Val int; Next *ListNode }\n"),("TreeNode","type TreeNode struct { Val int; Left, Right *TreeNode }\n")]{
+        let declared=tokens.windows(2).any(|pair|pair==["type",name]);
+        if metadata_text.contains(name)&&!declared{definitions.push_str(definition);}
+    }
+    let function=configuration["metadata"]["name"].as_str().ok_or("Go 函数名缺失")?;
+    fs::write(root.join("solution.go"),solution).map_err(|_|"无法写入 Go 源码快照")?;
+    fs::write(root.join("nodes.go"),definitions).map_err(|_|"无法写入 Go 节点类型")?;
+    fs::write(root.join("harness.go"),GO_HARNESS.replace("__INKLEET_FUNCTION__",function)).map_err(|_|"无法写入 Go 本地驱动")?;
+    fs::write(root.join("input.json"),serde_json::to_vec(&configuration).map_err(|_|"Go 用例编码失败")?).map_err(|_|"无法写入 Go 用例")?;
+    Ok(())
+}
+#[cfg(test)]mod go_tests{
+    use super::*;
+    #[test]fn go_tokens_ignore_comments_and_literals(){
+        assert_eq!(go_tokens("// type ListNode\n/* func main */ package main\nvar s=\"type TreeNode\""),vec!["package","main","var","s","="]);
+        assert_eq!(go_tokens("type ListNode struct { Val int }")[..2],["type","ListNode"]);
+    }
+    #[test]fn go_driver_preserves_snapshot_and_rejects_other_entrypoints(){
+        let temp=tempfile::tempdir().unwrap();
+        let metadata=r#"{"name":"identity","params":[{"name":"value","type":"ListNode"}],"return":{"type":"ListNode"}}"#;
+        let source="// type ListNode is supplied by the harness\nfunc identity(value *ListNode) *ListNode { return value }";
+        prepare_go(temp.path(),source,metadata,"[1,2]").unwrap();
+        assert!(fs::read_to_string(temp.path().join("nodes.go")).unwrap().contains("type ListNode struct"));
+        assert_eq!(fs::read_to_string(temp.path().join("solution.go")).unwrap(),format!("package main\n{source}"));
+        assert!(!fs::read_to_string(temp.path().join("harness.go")).unwrap().contains("__INKLEET_FUNCTION__"));
+        assert!(prepare_go(temp.path(),"package other\nfunc identity(){}",metadata,"[]").is_err());
+        assert!(prepare_go(temp.path(),"func main(){}",metadata,"[]").is_err());
+    }
+}
