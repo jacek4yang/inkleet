@@ -437,5 +437,54 @@ try {
   await lspPage.close();
   await writeFile("evidence/LSP_UI_RESULT.txt", "PASS: mocked IPC integration; completion applied, unsafe completion docs remain text, F12 opens explicit read-only declaration, source draft preserved and session stopped on language switch. Native real-server check is separate.\n");
 
+
+  const runPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const runErrors = []; runPage.on("pageerror", error => runErrors.push(error.message));
+  await runPage.addInitScript(() => {
+    window.isTauri = true;
+    window.__runTest = { starts: [], result: null, pending: [] };
+    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      const state = window.__runTest;
+      if (command === "load_recent_questions") return [];
+      if (command === "load_document") return { code: null, notes: null };
+      if (command === "save_text" || command === "stop_language_service") return;
+      if (command === "login_status") return null;
+      if (command === "start_language_service") throw new Error("Language service intentionally absent in runner UI fixture");
+      if (command === "local_run_status") return state.result ? JSON.parse(JSON.stringify(state.result)) : null;
+      if (command === "start_local_run") {
+        state.starts.push(JSON.parse(JSON.stringify(args.snapshot)));
+        state.result = { id: state.starts.length, phase: "running", title: args.snapshot.title, stdout: "", stderr: "", results: [], exitCode: null, timedOut: false, canceled: false, truncated: false, elapsedMs: 0, error: "" };
+        return new Promise(resolve => state.pending.push(() => resolve(state.result.id)));
+      }
+      if (command === "cancel_local_run") { state.result.phase = "finished"; state.result.canceled = true; return; }
+      throw new Error("Unexpected local run fixture: " + command);
+    }};
+  });
+  await runPage.goto("http://127.0.0.1:5173");
+  await runPage.getByRole("combobox", { name: "编程语言" }).selectOption("python3");
+  await runPage.getByRole("button", { name: "本地", exact: true }).click();
+  const runPanel = runPage.getByRole("region", { name: "本地运行", exact: true });
+  await runPanel.getByRole("button", { name: "本地执行", exact: true }).evaluate(button => { button.click(); button.click(); });
+  await runPage.waitForFunction(() => window.__runTest.starts.length === 1);
+  await runPage.evaluate(() => window.__runTest.pending[0]());
+  await runPanel.getByRole("button", { name: "停止", exact: true }).waitFor();
+  await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).fill("def solve(values): return sum(values)");
+  await runPanel.getByText("当前代码或用例已改变，下面是上一次快照的结果。", { exact: true }).waitFor();
+  await runPanel.getByRole("button", { name: "收起", exact: true }).click();
+  await runPage.getByRole("button", { name: "本地", exact: true }).click();
+  await runPanel.getByRole("button", { name: "停止", exact: true }).click();
+  await runPanel.getByText("已停止", { exact: true }).waitFor();
+  assert.equal(await runPage.evaluate(() => window.__runTest.starts.length), 1);
+  await runPanel.getByRole("button", { name: "本地执行", exact: true }).click();
+  await runPage.waitForFunction(() => window.__runTest.starts.length === 2);
+  await runPage.evaluate(() => window.__runTest.pending[1]());
+  await runPage.evaluate(() => Object.assign(window.__runTest.result, { phase: "finished", exitCode: 0, results: [{ case: 1, ok: true, value: 10 }], stdout: "<img src=x onerror=alert(1)>", elapsedMs: 12 }));
+  await runPanel.getByText(/"value": 10/).waitFor();
+  assert.equal(await runPanel.locator("img").count(), 0);
+  assert.match(await runPanel.innerText(), /不代表通过力扣判题/);
+  assert.deepEqual(runErrors, []);
+  await runPage.close();
+  await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

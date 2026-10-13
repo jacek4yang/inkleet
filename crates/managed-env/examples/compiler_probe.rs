@@ -5,6 +5,7 @@ fn clean(program:&Path,work:&Path,paths:&[PathBuf])->Command{
     command.current_dir(work).env_clear().env("HOME",work).env("USERPROFILE",work)
         .env("TMP",work).env("TEMP",work).env("PATH",std::env::join_paths(paths).unwrap())
         .env("ZIG_GLOBAL_CACHE_DIR",work.join("zig-cache")).env("ZIG_LOCAL_CACHE_DIR",work.join("zig-local"));
+    if let Some(rust_lib)=paths.get(1){command.env("LD_LIBRARY_PATH",rust_lib).env("DYLD_LIBRARY_PATH",rust_lib);}
     if let Some(root)=std::env::var_os("SystemRoot"){command.env("SystemRoot",root);}
     command
 }
@@ -31,7 +32,8 @@ async fn main()->Result<(),String>{
     let work=root.join("work");std::fs::create_dir(&work).map_err(|e|e.to_string())?;
     let rustc=install["rustc"].clone();let cargo=install["cargo"].clone();let zig=install["zig"].clone();
     let stdroot=install["rust-std"].parent().unwrap().to_path_buf();
-    let paths=vec![rustc.parent().unwrap().to_owned(),cargo.parent().unwrap().to_owned(),zig.parent().unwrap().to_owned()];
+    let rust_lib=rustc.parent().unwrap().parent().unwrap().join("lib");
+    let paths=vec![rustc.parent().unwrap().to_owned(),rust_lib,cargo.parent().unwrap().to_owned(),zig.parent().unwrap().to_owned()];
     let version={let mut c=clean(&rustc,&work,&paths);c.arg("--version");checked(c)?};
     let cargo_version={let mut c=clean(&cargo,&work,&paths);c.arg("--version");checked(c)?};
     let ra_version={let mut c=clean(&install["rust-analyzer-preview"],&work,&paths);c.arg("--version");checked(c)?};

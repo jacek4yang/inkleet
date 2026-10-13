@@ -115,8 +115,14 @@ try:
         ]}]})
         wait_for(lambda: "popleft" in text(".cm-tooltip-autocomplete"), "real stdlib member completion", seconds=30)
         screenshot("python-completion-native.png")
-        option=cmd("POST","/element",{"using":"xpath","value":"//li[@role='option'][contains(.,'popleft')]"})[EID]
-        cmd("POST",f"/element/{option}/click",{})
+        def choose_completion():
+            option=cmd("POST","/element",{"using":"xpath","value":"//li[@role='option'][contains(.,'popleft')]"})[EID]
+            try: cmd("POST",f"/element/{option}/click",{})
+            except RuntimeError as error:
+                if "stale element reference" in str(error): return False
+                raise
+            return True
+        wait_for(choose_completion, "apply freshly located completion")
         wait_for(lambda: "items.popleft" in text(code), "completion applied to document")
         click(code)
         cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
@@ -130,6 +136,15 @@ try:
         fill(code, 'bad: int = "wrong"')
         wait_for(lambda: element(".cm-lintRange-error"), "real Pyright type diagnostic", seconds=30)
         screenshot("python-diagnostics-native.png")
+        fill(code, "def solve(values): return sum(values)")
+        click(".actions button:first-child")
+        wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
+        click(".local-actions button:first-child")
+        wait_for(lambda: '"value": 10' in text(".local-result"), "real private Python harness result", seconds=30)
+        assert "不代表通过力扣判题" in text(".local-runner")
+        screenshot("python-local-run-native.png")
+        (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
+        click(".local-runner header button")
         click('select[aria-label="编程语言"] option[value="rust"]')
         wait_for(lambda: text(code) == marker, "switching away preserves Rust draft and stops Python session")
         (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")

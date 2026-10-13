@@ -62,6 +62,27 @@ async fn main() -> Result<(), String> {
             if let Some(root)=std::env::var_os("SystemRoot"){command.env("SystemRoot",root);}
             command
         }
+        
+        {
+            use inkleet_managed_env::harness;
+            fn check(python:&std::path::Path,root:&std::path::Path,source:&str,metadata:&str,input:&str,expected:serde_json::Value)->Result<(),String>{
+                let work=tempfile::Builder::new().prefix("harness-").tempdir_in(root).map_err(|e|e.to_string())?;
+                harness::prepare(work.path(),source,metadata,input)?;
+                let mut cmd=Command::new(python);cmd.arg("-I").arg(work.path().join("harness.py")).current_dir(work.path()).env_clear()
+                    .env("PATH",python.parent().unwrap()).env("HOME",work.path()).env("USERPROFILE",work.path()).env("TMP",work.path()).env("TEMP",work.path());
+                if let Some(system)=std::env::var_os("SystemRoot"){cmd.env("SystemRoot",system);}
+                let output=process::run(cmd,Arc::new(AtomicBool::new(false)),Duration::from_secs(10),65536)?;
+                assert_eq!(output.exit_code,Some(0),"{:?}",output);
+                let text=std::fs::read_to_string(work.path().join("results.jsonl")).map_err(|e|e.to_string())?;
+                let result:serde_json::Value=serde_json::from_str(text.trim()).map_err(|e|e.to_string())?;
+                assert_eq!(result["ok"],true,"{result}");assert_eq!(result["value"],expected,"{result}");
+                Ok(())
+            }
+            check(&runtime_python,&runtime_work,"class Solution:\n    def twoSum(self, nums: List[int], target: int) -> List[int]:\n        seen = {}\n        for i, n in enumerate(nums):\n            if target-n in seen: return [seen[target-n],i]\n            seen[n]=i\n",r#"{"name":"twoSum","params":[{"name":"nums","type":"integer[]"},{"name":"target","type":"integer"}],"return":{"type":"integer[]"}}"#,"[2,7,11,15]\n9",json!([0,1]))?;
+            check(&runtime_python,&runtime_work,"class Solution:\n    def identity(self, head: Optional[ListNode]) -> Optional[ListNode]:\n        return head\n",r#"{"name":"identity","params":[{"name":"head","type":"ListNode"}]}"#,"[1,2,3]",json!([1,2,3]))?;
+            check(&runtime_python,&runtime_work,"class Solution:\n    def identity(self, root: Optional[TreeNode]) -> Optional[TreeNode]:\n        return root\n",r#"{"name":"identity","params":[{"name":"root","type":"TreeNode"}]}"#,"[1,null,2,3]",json!([1,null,2,3]))?;
+        }
+
         let normal=process::run(command(&runtime_python,&runtime_work,"print(42)"),Arc::new(AtomicBool::new(false)),Duration::from_secs(5),4096)?;
         assert_eq!(normal.exit_code,Some(0));assert_eq!(normal.stdout.trim(),"42");
         let timeout=process::run(command(&runtime_python,&runtime_work,"while True: pass"),Arc::new(AtomicBool::new(false)),Duration::from_millis(200),4096)?;
@@ -111,7 +132,7 @@ async fn main() -> Result<(), String> {
         client.request("continue",json!({"threadId":thread_id}),Duration::from_secs(10))?;
         event(&events_rx,"terminated")?;
         let _=client.request("disconnect",json!({"terminateDebuggee":true}),Duration::from_secs(5));client.stop();
-        Ok(json!({"normalRun":true,"timeout":true,"outputLimit":true,"cancel":true,"processTreeCleanup":true,"dap":{"breakpoint":true,"stack":true,"variables":true,"stepOver":true,"continue":true,"termination":true}}))
+        Ok(json!({"normalRun":true,"typedHarness":true,"timeout":true,"outputLimit":true,"cancel":true,"processTreeCleanup":true,"dap":{"breakpoint":true,"stack":true,"variables":true,"stepOver":true,"continue":true,"termination":true}}))
     }).await.map_err(|_|"runtime probe failed")??;
     println!("MANAGED_ENV_RESULT {}",serde_json::json!({"platform":platform(),"python":serde_json::from_slice::<serde_json::Value>(&result.stdout).map_err(|e|e.to_string())?,"pyrightPackage":true,"lsp":lsp,"runtime":runtime,"systemPathUsed":false,"reinstallIdempotent":true}));
     Ok(())

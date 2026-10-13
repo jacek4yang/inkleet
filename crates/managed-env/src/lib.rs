@@ -4,6 +4,7 @@ mod archive;
 pub mod protocol;
 pub mod rpc;
 pub mod process;
+pub mod harness;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf},

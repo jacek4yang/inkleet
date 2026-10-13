@@ -1,6 +1,7 @@
 mod storage;
 mod managed;
 mod lsp;
+mod local_run;
 mod leetcode;
 mod auth;
 mod cache;
@@ -157,6 +158,19 @@ async fn read_language_source(window:tauri::WebviewWindow,app:tauri::AppHandle,i
     tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().read_source(id,&uri)).await.map_err(|_|"源码读取任务中断".to_owned())?
 }
 
+#[tauri::command]
+async fn start_local_run(window:tauri::WebviewWindow,app:tauri::AppHandle,snapshot:local_run::Snapshot)->Result<u64,String>{
+    check_origin(&window)?;local_run::start(app,snapshot).await
+}
+#[tauri::command]
+async fn local_run_status(window:tauri::WebviewWindow,app:tauri::AppHandle)->Result<Option<local_run::View>,String>{
+    check_origin(&window)?;app.state::<local_run::Runner>().status()
+}
+#[tauri::command]
+async fn cancel_local_run(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64)->Result<(),String>{
+    check_origin(&window)?;app.state::<local_run::Runner>().cancel(id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -165,6 +179,7 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             app.manage(Store { root, gate: Mutex::new(()) });
             app.manage(auth::Auth::default());
+            app.manage(local_run::Runner::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("local-runs")));
             app.manage(lsp::Services::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("language-workspaces")));
             app.manage(managed::Environments::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("tools")));
             app.manage(journal::Journal::new(app.path().app_data_dir()?));
@@ -172,7 +187,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .run(tauri::generate_context!())
         .expect("InkLeet failed to start");
 }

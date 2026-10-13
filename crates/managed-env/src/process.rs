@@ -6,7 +6,9 @@ pub fn spawn(command:Command)->std::io::Result<Box<dyn ChildWrapper>>{
     let mut command=CommandWrap::from(command);
     #[cfg(unix)] command.wrap(process_wrap::std::ProcessGroup::leader());
     #[cfg(windows)] {
-        command.wrap(process_wrap::std::CreationFlags(0x08000000));
+        let mut flags=process_wrap::std::CreationFlags(Default::default());
+        flags.0.0=0x08000000;
+        command.wrap(flags);
         command.wrap(process_wrap::std::JobObject);
     }
     command.spawn()

@@ -51,3 +51,13 @@
 .lsp-hover{white-space:pre-wrap;font-family:var(--font-mono);font-size:12px;line-height:1.6;padding:12px;max-width:min(560px,85vw);max-height:40dvh;overflow:auto;overflow-wrap:anywhere}
 .source-viewer{width:min(960px,96vw);height:85dvh;padding:0;border:1px solid #ddd5ca;border-radius:8px;background:#faf9f5;color:#2b2621;overflow:hidden}
 .source-viewer::backdrop{background:#2b26214a}.source-viewer header{height:80px;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid #ddd5ca}.source-viewer h2{font-size:16px;margin:0;overflow-wrap:anywhere}.source-viewer p{font-size:11px;color:#72695e;margin:6px 0 0}.source-editor{height:calc(100% - 80px)}
+
+.local-runner { border-top: 1px solid var(--line, #ddd5ca); padding: 12px 16px; max-height: 48vh; overflow: auto; background: #faf9f5; }
+.local-runner header, .local-actions { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.local-runner p { font-size: 12px; line-height: 1.6; margin: 8px 0; }
+.local-runner label { display: block; font-size: 12px; }
+.local-runner textarea { display: block; width: 100%; box-sizing: border-box; min-height: 70px; max-height: 180px; resize: vertical; margin: 6px 0; padding: 8px; font: 12px/1.6 var(--font-mono); color: inherit; background: #fcfcfa; border: 1px solid #ddd5ca; border-radius: 4px; }
+.local-runner pre { font: 12px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+.local-runner h4 { font-size: 12px; margin: 8px 0; }
+.local-actions { justify-content: flex-start; flex-wrap: wrap; }
+.local-actions span { font-size: 12px; }
