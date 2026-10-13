@@ -35,7 +35,12 @@ def click(css): return cmd("POST",f"/element/{element(css)}/click",{})
 def fill(css, value):
     node = element(css)
     cmd("POST",f"/element/{node}/click",{})
-    cmd("POST",f"/element/{node}/value",{"text":"\ue009a\ue000" + value})
+    cmd("POST","/actions",{"actions":[{"type":"key","id":"keyboard","actions":[
+        {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"a"},
+        {"type":"keyUp","value":"a"},{"type":"keyUp","value":"\ue009"}
+    ]}]})
+    cmd("POST",f"/element/{node}/value",{"text":value,"value":list(value)})
+    wait_for(lambda: text(css) == value, "GUI text matches typed text")
 def screenshot(name):
     (evidence / name).write_bytes(base64.b64decode(cmd("GET","/screenshot")))
 def start():
@@ -79,6 +84,7 @@ try:
     (evidence/"RESULT.txt").write_text("PASS: real Linux Tauri/WebKitGTK launch, native IPC, plain source and notes save, process restart restore, external conflict preserving both texts. No LeetCode verification.\n")
 except Exception:
     subprocess.run(["scrot", str(evidence / "desktop-failure.png")], check=False)
+    (evidence / "test-files.json").write_text(json.dumps({str(p.relative_to(data)): p.read_text() for p in data.rglob("*") if p.is_file() and p.suffix in [".rs", ".md"]}, ensure_ascii=False))
     if session:
         try: screenshot("failure.png")
         except Exception: pass
