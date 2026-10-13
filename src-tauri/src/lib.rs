@@ -55,6 +55,17 @@ async fn login_status(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Re
     check_origin(&window)?; auth::status(&app)
 }
 
+#[tauri::command]
+async fn search_questions(window: tauri::WebviewWindow, keyword: String, offset: u32) -> Result<leetcode::QuestionList, String> {
+    check_origin(&window)?;
+    leetcode::Leetcode::new()?.search(&keyword, offset).await
+}
+#[tauri::command]
+async fn get_question(window: tauri::WebviewWindow, slug: String) -> Result<leetcode::Question, String> {
+    check_origin(&window)?;
+    leetcode::Leetcode::new()?.question(&slug).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -65,7 +76,7 @@ pub fn run() {
             app.manage(auth::Auth::default());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_document, save_text, open_login, verify_login, cancel_login, login_status])
+        .invoke_handler(tauri::generate_handler![load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question])
         .run(tauri::generate_context!())
         .expect("InkLeet failed to start");
 }

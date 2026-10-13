@@ -3,3 +3,15 @@
 .editor-host{flex:1;min-height:0;overflow:hidden;min-width:0}.code-pane,.reading{min-width:0}.loading{padding:24px;color:#72695e}@media(max-width:760px){.cm-editor{font-size:16px!important}}
 
 .login-area{position:relative}.login-panel{position:absolute;right:0;top:40px;width:min(370px,88vw);padding:14px;background:#faf9f5;border:1px solid #ddd5ca;box-shadow:0 5px 20px #2b262118;z-index:20;font-size:12px;line-height:1.65}.login-panel p{margin:0 0 10px}.login-panel>div{display:flex;gap:8px}.error{color:#a34030}@media(max-width:760px){.topbar>div{gap:8px}.topbar small{display:none}}
+
+.catalogue{width:min(760px,94vw);max-height:86dvh;border:1px solid #ddd5ca;border-radius:9px;padding:22px;background:#faf9f5;color:#2b2621}
+.catalogue::backdrop{background:#2b26214a}.catalogue-heading,.catalogue-footer{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.catalogue h2{font-size:18px;margin:0 0 14px}.catalogue form{display:flex;gap:10px;margin-top:10px}
+.catalogue input{flex:1;min-width:0;border:1px solid #ddd5ca;background:#fcfcfa;padding:10px;border-radius:5px}
+.catalogue .muted,.catalogue-footer{font-size:11px;line-height:1.7}.catalogue-results{max-height:52dvh;overflow:auto}
+.catalogue-results>button{display:grid;grid-template-columns:50px 1fr auto;align-items:center;gap:12px;width:100%;text-align:left;margin:5px 0;padding:12px}
+.catalogue-results strong{font-weight:500}.catalogue-footer{margin-top:16px}.catalogue-footer>div{display:flex;gap:8px}
+.question-content{overflow-wrap:anywhere}.question-content table{border-collapse:collapse;max-width:100%}.question-content td,.question-content th{padding:5px;border:1px solid #ddd5ca}
+.question-source{font-size:10px;color:#72695e;overflow-wrap:anywhere;margin-top:30px}
+.sidebar{overflow:auto}.sidebar-foot{position:static;margin-top:40px}
+@media(max-width:760px){.catalogue{padding:14px}.catalogue-results>button{grid-template-columns:40px 1fr;gap:6px}.catalogue-results small{grid-column:2}.catalogue-footer{flex-wrap:wrap}.topbar>strong{white-space:nowrap;font-size:12px}.topbar .brand{font-size:22px}.topbar>div{gap:5px}.topbar button{font-size:11px;padding:5px 6px}}

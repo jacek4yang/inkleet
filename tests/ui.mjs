@@ -89,5 +89,70 @@ try {
   await writeFile("evidence/PERFORMANCE.json", JSON.stringify(report, null, 2));
   assert.ok(report.inputToRafP95Ms < 100, "受控测试输入响应 P95 不应超过 100ms");
   assert.deepEqual(errors, []);
+
+  // 仅模拟 IPC 的登录 UI 竞态测试；不冒充真实账号或原生登录验收。
+  const authPage = await browser.newPage();
+  const authErrors = [];
+  authPage.on("pageerror", error => authErrors.push(error.message));
+  await authPage.addInitScript(() => {
+    window.isTauri = true;
+    window.__inkAuthTest = { pending: [], cancelled: 0 };
+    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      if (command === "search_questions") return { total: 1, hasMore: false, questions: [{
+        frontendQuestionId: "T1", title: "UI Test", titleCn: "题库测试样例", titleSlug: "fixture-test", difficulty: "Easy", paidOnly: false
+      }] };
+      if (command === "get_question") return {
+        questionId: "999909", questionFrontendId: "T1", title: "UI Test", translatedTitle: "题库测试样例", titleSlug: args.slug,
+        translatedContent: '<p>仅测试题面</p><img src="x" onerror="window.__unsafeExecuted=true"><script>window.__unsafeExecuted=true</script><a href="javascript:alert(1)">不可执行链接</a><iframe srcdoc="unsafe"></iframe>',
+        content: null, isPaidOnly: false, difficulty: "Easy", sampleTestCase: "[]", exampleTestcases: "[]", metaData: "{}",
+        codeSnippets: [{ langSlug: "rust", code: "// official-shaped test template" }, { langSlug: "python3", code: "# test template" }]
+      };
+      if (command === "load_document") return { code: null, notes: null };
+      if (command === "open_login" || command === "save_text") return;
+      if (command === "cancel_login") { window.__inkAuthTest.cancelled++; return; }
+      if (command === "verify_login") return new Promise((resolve, reject) => window.__inkAuthTest.pending.push({ resolve, reject }));
+      throw new Error("Unexpected test IPC command: " + command);
+    }};
+  });
+  await authPage.goto("http://127.0.0.1:5173");
+  await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
+  await authPage.getByRole("button", { name: "已完成登录，校验会话", exact: true }).click();
+  await authPage.waitForFunction(() => window.__inkAuthTest.pending.length === 1);
+  const cancel = authPage.getByRole("button", { name: "取消登录", exact: true });
+  assert.equal(await cancel.isEnabled(), true, "校验中仍必须可以取消");
+  await cancel.click();
+  await cancel.waitFor({ state: "hidden" });
+  // 新登录开始后，旧校验的成功不能改变当前账号或关闭当前登录。
+  await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
+  await authPage.evaluate(() => window.__inkAuthTest.pending[0].resolve({ username: "stale-test-user", account: "stale", persistence: "memory-only" }));
+  await authPage.getByRole("button", { name: "已完成登录，校验会话", exact: true }).waitFor();
+  assert.equal(await authPage.getByText("stale-test-user", { exact: false }).count(), 0);
+  await authPage.getByRole("button", { name: "已完成登录，校验会话", exact: true }).click();
+  await authPage.waitForFunction(() => window.__inkAuthTest.pending.length === 2);
+  await authPage.evaluate(() => window.__inkAuthTest.pending[1].reject(new Error("测试网络失败")));
+  await authPage.getByText("Error: 测试网络失败", { exact: true }).waitFor();
+  assert.equal(await cancel.isEnabled(), true);
+  await cancel.click();
+  await authPage.getByRole("button", { name: "中国站题库", exact: true }).click();
+  await authPage.getByRole("textbox", { name: "搜索中国站题目" }).fill("test");
+  await authPage.getByRole("button", { name: "搜索", exact: true }).click();
+  await authPage.getByRole("button", { name: /T1 题库测试样例/ }).click();
+  await authPage.getByRole("heading", { name: "题库测试样例", exact: true }).waitFor();
+  assert.equal(await authPage.locator(".question-content script, .question-content img, .question-content iframe, .question-content a").count(), 0);
+  assert.equal(await authPage.evaluate(() => !!window.__unsafeExecuted), false);
+  const fixtureEditor = authPage.getByRole("textbox", { name: "代码编辑器", exact: true });
+  await fixtureEditor.waitFor();
+  assert.equal(await fixtureEditor.innerText(), "// official-shaped test template");
+  await fixtureEditor.fill("// preserved fixture draft");
+  await authPage.getByRole("combobox", { name: "编程语言" }).selectOption("python3");
+  await fixtureEditor.waitFor();
+  assert.equal(await fixtureEditor.innerText(), "# test template");
+  await authPage.getByRole("combobox", { name: "编程语言" }).selectOption("rust");
+  await fixtureEditor.waitFor();
+  assert.equal(await fixtureEditor.innerText(), "// preserved fixture draft");
+  assert.deepEqual(authErrors, []);
+  await authPage.close();
+  await writeFile("evidence/AUTH_UI_RESULT.txt", "PASS: mocked IPC only; cancel during verification, ignore stale success, explicit failure and recovery. NOT real login validation.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

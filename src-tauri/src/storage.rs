@@ -1,4 +1,4 @@
-use std::{fs, io::Write, path::{Path, PathBuf}};
+use std::{fs, io::{Read, Write}, path::{Path, PathBuf}};
 
 pub fn file_path(root: &Path, problem: &str, language: &str, kind: &str) -> Result<PathBuf, String> {
     if problem.is_empty() || problem.len() > 120 ||
@@ -21,17 +21,25 @@ pub fn file_path(root: &Path, problem: &str, language: &str, kind: &str) -> Resu
     Ok(path)
 }
 
+const MAX_BYTES: usize = 2 * 1024 * 1024;
 pub fn read(path: &Path) -> Result<Option<String>, String> {
-    match fs::read_to_string(path) {
-        Ok(text) if text.len() <= 2 * 1024 * 1024 => Ok(Some(text)),
-        Ok(_) => Err("文件超过 2 MiB 限制".into()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err("无法读取本机文件".into()),
+    // 限制实际读取量，不能先读完整个异常大文件再检查大小。
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("无法读取本机文件".into()),
+    };
+    if !file.metadata().map_err(|_| "无法检查本机文件")?.is_file() {
+        return Err("拒绝读取非普通文件".into());
     }
+    let mut bytes = Vec::new();
+    file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|_| "无法读取本机文件")?;
+    if bytes.len() > MAX_BYTES { return Err("文件超过 2 MiB 限制".into()); }
+    String::from_utf8(bytes).map(Some).map_err(|_| "文件不是有效 UTF-8 文本".into())
 }
 
 pub fn save(path: &Path, expected: Option<&str>, text: &str) -> Result<(), String> {
-    if text.len() > 2 * 1024 * 1024 { return Err("正文超过 2 MiB 限制".into()); }
+    if text.len() > MAX_BYTES { return Err("正文超过 2 MiB 限制".into()); }
     if read(path)?.as_deref() != expected { return Err("外部文件已变化，保留两份内容后再处理".into()); }
     let parent = path.parent().ok_or("无效目录")?;
     fs::create_dir_all(parent).map_err(|_| "无法创建目录")?;
@@ -64,6 +72,18 @@ mod tests {
         save(&p, Some("# 中文笔记"), "second").unwrap();
         assert!(save(&p, Some("# 中文笔记"), "stale overwrite").is_err());
         assert_eq!(read(&p).unwrap().as_deref(), Some("second"));
+    }
+    #[test]
+    fn bounded_reader_rejects_oversize_and_invalid_utf8() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("large.txt");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(64 * 1024 * 1024).unwrap();
+        assert_eq!(read(&path).unwrap_err(), "文件超过 2 MiB 限制");
+        fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert_eq!(read(&path).unwrap_err(), "文件不是有效 UTF-8 文本");
+        fs::write(&path, "边界文本").unwrap();
+        assert_eq!(read(&path).unwrap().as_deref(), Some("边界文本"));
     }
     #[test]
     fn six_languages_have_distinct_files_but_shared_notes() {

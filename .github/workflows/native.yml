@@ -47,6 +47,8 @@ jobs:
           printf '%s\n' "$result" > evidence/protocol/exit-code.txt
           exit "$result"
       - name: Verify native storage through the actual GUI
+        env:
+          INKLEET_LIVE_CN: ${{ steps.public-probe.outcome == 'success' && '1' || '0' }}
         run: |
           export XDG_DATA_HOME="$(mktemp -d)"
           export XDG_CONFIG_HOME="$(mktemp -d)"

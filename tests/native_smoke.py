@@ -82,6 +82,21 @@ try:
     assert text(note) == "# Pending local edit", "pending draft lost"
     screenshot("conflict-native.png")
     (evidence/"RESULT.txt").write_text("PASS: real Linux Tauri/WebKitGTK launch, native IPC, plain source and notes save, process restart restore, external conflict preserving both texts. No LeetCode verification.\n")
+    if os.environ.get("INKLEET_LIVE_CN") == "1":
+        click('[data-action="open-catalogue"]')
+        search = '[aria-label="搜索中国站题目"]'
+        wait_for(lambda: element(search), "catalogue opened")
+        cmd("POST", f"/element/{element(search)}/value", {"text": "two sum", "value": list("two sum")})
+        click('dialog form button[type="submit"]')
+        wait_for(lambda: element('dialog button[data-slug="two-sum"]'), "live Chinese search result", seconds=30)
+        click('dialog button[data-slug="two-sum"]')
+        wait_for(lambda: "两数之和" in text("article h1"), "real Chinese question rendered", seconds=30)
+        wait_for(lambda: "impl Solution" in text(code), "official Rust template loaded")
+        screenshot("real-cn-question-native.png")
+        fill(code, "// live CN draft persistence")
+        live_source = data / "top.jacek.inkleet/notebook/lc-1/solution.rs"
+        wait_for(lambda: live_source.exists() and live_source.read_text() == "// live CN draft persistence", "real question local source saved")
+        (evidence/"LIVE_CN_RESULT.txt").write_text("PASS: real public CN search and question through native GUI, official Rust template, local source save. No authenticated login, run or submit.\\n")
 except Exception:
     subprocess.run(["scrot", str(evidence / "desktop-failure.png")], check=False)
     (evidence / "test-files.json").write_text(json.dumps({str(p.relative_to(data)): p.read_text() for p in data.rglob("*") if p.is_file() and p.suffix in [".rs", ".md"]}, ensure_ascii=False))
