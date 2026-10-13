@@ -70,6 +70,12 @@ try:
     notes = source.with_name("notes.md")
     wait_for(lambda: notes.exists() and notes.read_text() == "# Native note", "notes persisted")
     screenshot("desktop-notes-native.png")
+    click(".notes-heading button:first-child")
+    wait_for(lambda: text(".notes-rendered h1") == "Native note", "bundled native Worker Markdown preview")
+    screenshot("notes-preview-native.png")
+    click(".notes-heading button:first-child")
+    wait_for(lambda: text(note) == "# Native note", "return from preview preserves original Markdown")
+
     stop()
     start()
     wait_for(lambda: text(code) == marker, "restart restored Rust source")

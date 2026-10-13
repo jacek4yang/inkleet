@@ -5,6 +5,7 @@ import { languages, draftKey, type Language } from "./domain";
 import "./style.css";
 import { CodeEditor } from "./editor";
 import { FontInfo } from "./font-info";
+import { Notes } from "./notes";
 import { Login, type Identity } from "./login";
 import { useOnlineJudge } from "./online-judge";
 import { Catalogue, QuestionStatement, type RemoteQuestion } from "./catalogue";
@@ -132,7 +133,7 @@ function App() {
     </aside>
     <nav className="tabs" aria-label="工作区">{[["problem","题目"],["code","代码"],["notes","笔记"]].map(([id,label]) => <button key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>)}</nav>
     <section className={"reading " + (tab === "code" ? "mobile-hidden" : "")}>
-      {tab === "notes" ? <><div className="pane-heading"><strong>解题笔记</strong><button disabled={editorLoading} onClick={() => download("notes.md",notes.current.get(problemId) ?? "")}>导出 Markdown</button></div>{editorLoading ? <p className="loading">正在读取笔记…</p> : <CodeEditor key={problemId + "/notes"} documentKey={problemId + "/notes"} language="markdown" label="Markdown 笔记" value={notes.current.get(problemId) ?? ""} onChange={text => edit("notes", text)} />}</> :
+      {tab === "notes" ? <Notes key={problemId} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
       <article>{problem.official ? <>{problem.cached && <p className="cache-warning">已缓存题面 · 可离线编辑；重新搜索可更新题面。</p>}<QuestionStatement question={problem.official} /></> : <><p className="eyebrow">练习 {problem.number} <span className="badge">自编样例</span></p><h1>{problem.title}</h1><p className="description">{problem.detail}</p><h3>示例</h3><pre>输入：{problem.input}{"\n"}输出：{problem.output}</pre><h3>写下你的第一种思路</h3><p className="muted">先想清楚边界，再开始写代码。笔记和每种语言的草稿相互独立。</p></>}</article>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>

@@ -45,6 +45,47 @@ try {
   await page.getByRole("button", { name: "笔记", exact: true }).click();
   await page.getByRole("textbox", { name: "Markdown 笔记" }).fill("# 推导\n\n- 检查空数组\n- 时间复杂度 O(n)\n\n自编样例，非私人笔记。");
   await page.screenshot({ path: "evidence/desktop-notes.png", fullPage: true });
+  // 真实 Worker 渲染 + DOMPurify；仅自编测试数据，原文与撤销历史不得因预览丢失。
+  const notesEditor = page.getByRole("textbox", { name: "Markdown 笔记", exact: true });
+  const originalNotes = await notesEditor.innerText();
+  await page.getByRole("button", { name: "预览笔记", exact: true }).click();
+  await page.locator(".notes-rendered h1").waitFor();
+  assert.equal(await page.locator(".notes-rendered h1").innerText(), "推导");
+  await page.screenshot({ path: "evidence/desktop-notes-preview.png", fullPage: true });
+  await page.getByRole("button", { name: "返回编辑", exact: true }).click();
+  assert.equal(await notesEditor.innerText(), originalNotes);
+  const hostileNotes = "# 安全预览\n\n**粗体** 与 `code`\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n<script>window.__notesXss = true</script>\n<img src=\"https://example.invalid/secret\" onerror=\"window.__notesXss=true\">\n<a href=\"javascript:alert(1)\">保留文字</a><iframe src=\"https://example.invalid/frame\"></iframe><form><input autofocus></form>";
+  const unexpectedRequests = [];
+  page.on("request", request => { if (request.url().includes("example.invalid")) unexpectedRequests.push(request.url()); });
+  await notesEditor.fill(hostileNotes);
+  await page.getByRole("button", { name: "预览笔记", exact: true }).click();
+  await page.locator(".notes-rendered table").waitFor();
+  assert.equal(await page.locator(".notes-rendered strong").innerText(), "粗体");
+  assert.equal(await page.locator(".notes-rendered script,.notes-rendered img,.notes-rendered a,.notes-rendered iframe,.notes-rendered input,.notes-rendered form").count(), 0);
+  assert.equal(await page.evaluate(() => window.__notesXss), undefined);
+  assert.deepEqual(unexpectedRequests, []);
+  await page.getByRole("button", { name: "返回编辑", exact: true }).click();
+  assert.equal(await notesEditor.innerText(), hostileNotes);
+  const notesDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出 Markdown", exact: true }).click();
+  const notesDownload = await notesDownloadPromise;
+  assert.equal(await readFile(await notesDownload.path(), "utf8"), hostileNotes);
+  await notesEditor.press("Control+End");
+  await notesEditor.pressSequentially("UNDO-PROBE");
+  await page.getByRole("button", { name: "预览笔记", exact: true }).click();
+  await page.locator(".notes-rendered table").waitFor();
+  await page.getByRole("button", { name: "返回编辑", exact: true }).click();
+  await notesEditor.press("Control+z");
+  assert.equal(await notesEditor.innerText(), hostileNotes, "切换预览保留同一笔记的撤销历史");
+  // 超限只停预览，不截断草稿。
+  const longNotes = "x".repeat(256 * 1024 + 1);
+  await notesEditor.fill(longNotes);
+  await page.getByRole("button", { name: "预览笔记", exact: true }).click();
+  await page.getByText("笔记过长，已暂停预览；原文仍可编辑和导出。", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "返回编辑", exact: true }).click();
+  assert.equal((await notesEditor.innerText()).length, longNotes.length);
+  await notesEditor.fill(originalNotes);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "代码", exact: true }).click();
   await page.screenshot({ path: "evidence/mobile-code.png", fullPage: true });

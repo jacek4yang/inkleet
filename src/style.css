@@ -26,3 +26,13 @@
 
 .judge-toggle{border-top:1px solid #ddd5ca;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 12px;font-size:10px;color:#72695e}.judge-toggle button{font-size:11px;padding:4px 7px}
 .judge-panel{max-height:38dvh;overflow:auto;flex-shrink:0;padding:12px 16px;border-top:1px solid #ddd5ca;font-size:12px;line-height:1.7}.judge-panel label{display:block}.judge-panel textarea{display:block;border:1px solid #ddd5ca;border-radius:4px;padding:8px;margin-top:5px;width:100%;height:75px;font-family:var(--font-mono);background:#faf9f5}.judge-panel pre{max-height:220px;overflow:auto;font-size:11px}.judge-result{padding-top:10px}.judge-result summary{cursor:pointer;color:#72695e}.judge-result button{font-size:11px}.judge-confirm{width:min(480px,92vw);border:1px solid #ddd5ca;border-radius:7px;background:#faf9f5;color:#2b2621;padding:22px;line-height:1.8}.judge-confirm::backdrop{background:#2b26214a}.judge-confirm h2{font-size:17px}.judge-confirm>div{display:flex;justify-content:flex-end;gap:10px}.judge-confirm p{overflow-wrap:anywhere}@media(max-width:760px){.judge-toggle>span{display:none}.judge-panel textarea{font-size:16px}}
+
+.notes-heading{flex-wrap:wrap}.notes-heading>div{display:flex;gap:6px;flex-wrap:wrap}.notes-heading button{font-size:11px}
+.notes-preview{padding:18px 24px;line-height:1.8;overflow:auto;overflow-wrap:anywhere;min-width:0}
+.notes-preview-hint{font-size:10px;color:#72695e;border-bottom:1px solid #ddd5ca;padding-bottom:12px;margin-top:0}
+.notes-rendered h1{font-size:23px;margin:20px 0}.notes-rendered h2{font-size:19px}.notes-rendered h3{font-size:16px}
+.notes-rendered pre{overflow:auto;white-space:pre;font-size:12px}.notes-rendered code{font-family:var(--font-mono)}
+.notes-rendered blockquote{margin-left:0;border-left:3px solid #bc6a3a;padding-left:16px;color:#72695e}
+.notes-rendered table{border-collapse:collapse;display:block;overflow:auto;max-width:100%}.notes-rendered td,.notes-rendered th{border:1px solid #ddd5ca;padding:6px 10px}
+.notes-rendered hr{border:0;border-top:1px solid #ddd5ca}
+@media(max-width:760px){.notes-preview{padding:15px 18px}.notes-heading{gap:6px;padding:7px 10px}}
