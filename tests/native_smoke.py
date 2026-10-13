@@ -214,7 +214,7 @@ try:
         wait_for(lambda: element('select[aria-label="开发环境语言"]'), "language-specific tool groups")
         click('select[aria-label="开发环境语言"] option[value="java"]')
         click(".environment-summary button")
-        wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["jdk","jdtls"]), "verified private JDK and JDTLS installed", seconds=300)
+        wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["jdk","jdtls","java-debug"]), "verified private JDK and JDTLS installed", seconds=300)
         screenshot("java-environment-native.png")
         click(".environments header button")
         click('select[aria-label="编程语言"] option[value="java"]')
@@ -235,7 +235,7 @@ try:
         wait_for(lambda: "ArrayList.java" in text(".source-viewer header"), "real ArrayList source name")
         screenshot("java-stdlib-native.png")
         click(".source-viewer header button")
-        java_solution="class Solution {\n public int solve(int[] values) {\n int total=0;for(int value:values){total+=value;}\n return total;\n }\n}"
+        java_solution="class Solution {\n public int solve(int[] values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n }\n}"
         fill(code,java_solution)
         click(".pane-heading .actions button")
         click('[data-local-tab="run"]')
@@ -246,6 +246,30 @@ try:
         java_saved=data/"top.jacek.inkleet/notebook/sample-sum/solution.java"
         wait_for(lambda: java_saved.exists() and java_saved.read_text()==java_solution,"Java run preserves original saved source")
         (evidence/"JAVA_LOCAL_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK compiles the typed Java Solution harness, computes exact value 10 and preserves original draft. No debugger or online verdict.\n")
+        click('[data-local-tab="debug"]')
+        click(code)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(3): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+        keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-breakpoint","actions":keys}]})
+        wait_for(lambda: "断点：4。" in text(".debug-panel"),"Java original source breakpoint")
+        click(".debug-panel .local-actions button:first-of-type")
+        wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
+        wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
+        def java_total():
+            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='total']]/code"})[EID]
+            return cmd("GET",f"/element/{node}/text")
+        wait_for(lambda: java_total()=="0","Java initial total")
+        screenshot("java-debug-native.png")
+        for _ in range(3):
+            click(code)
+            cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-step","actions":[{"type":"keyDown","value":"\ue03a"},{"type":"keyUp","value":"\ue03a"}]}]})
+            time.sleep(.7)
+            if java_total()!="0": break
+        assert java_total()!="0","Java variables did not change after stepping"
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-stop","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
+        wait_for(lambda: "调试结束" in text(".debug-panel"),"Java debug stop")
+        (evidence/"JAVA_DEBUG_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private Java debug core over stdio, original line 4 breakpoint, paused source highlight, total=0, real F10 variable update and Shift+F5 termination.\n")
         click(".local-runner header > button:last-child")
         (evidence/"JAVA_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK/JDTLS install, ArrayList member completion and F12 read-only standard library source. Separate three-platform protocol checks compare returned source byte-for-byte with private JDK src.zip.\n")
         click('select[aria-label="编程语言"] option[value="rust"]')

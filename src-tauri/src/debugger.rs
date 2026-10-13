@@ -64,7 +64,7 @@ impl Debugger{
     }
 }
 pub async fn start(app:tauri::AppHandle,snapshot:crate::local_run::Snapshot,lines:Vec<u32>)->Result<u64>{
-    if !matches!(snapshot.language.as_str(),"python3"|"golang"|"cpp"|"c"|"rust")||snapshot.code.len()>2*1024*1024||snapshot.title.len()>512{return Err("当前调试支持有限大小的 Python / Go / C / C++ / Rust 源码".into());}
+    if !matches!(snapshot.language.as_str(),"python3"|"golang"|"cpp"|"c"|"rust"|"java")||snapshot.code.len()>2*1024*1024||snapshot.title.len()>512{return Err("当前调试支持有限大小的 Python / Go / C / C++ / Rust / Java 源码".into());}
     harness::configuration(&snapshot.metadata,&snapshot.input)?;
     validate_breakpoints(&snapshot.code,&lines)?;
     let state=app.state::<Debugger>();
@@ -79,7 +79,7 @@ pub async fn start(app:tauri::AppHandle,snapshot:crate::local_run::Snapshot,line
         std::fs::create_dir_all(&state.root).map_err(|_|"无法创建调试目录")?;
         let work=tempfile::Builder::new().prefix("debug-").tempdir_in(&state.root).map_err(|_|"无法创建调试工作区")?;
         let root=inkleet_managed_env::process::tool_path(&std::fs::canonicalize(work.path()).map_err(|_|"无法解析调试目录")?);
-        let source=root.join(match snapshot.language.as_str(){"golang"=>"solution.go","cpp"=>"solution.cpp","c"=>"solution.c","rust"=>"solution.rs",_=>"solution.py"});
+        let source=root.join(match snapshot.language.as_str(){"golang"=>"solution.go","cpp"=>"solution.cpp","c"=>"solution.c","rust"=>"solution.rs","java"=>"Solution.java",_=>"solution.py"});
         let id=state.next.fetch_add(1,Ordering::Relaxed);
         let session=Arc::new(Session{
             client:Mutex::new(None),view:Arc::new(Mutex::new(View{id,phase:if snapshot.language!="python3"{"compiling"}else{"starting"}.into(),title:snapshot.title.clone(),thread_id:None,epoch:0,output:String::new(),truncated:false,reason:String::new(),error:String::new(),breakpoints:Vec::new()})),

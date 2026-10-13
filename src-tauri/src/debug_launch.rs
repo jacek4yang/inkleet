@@ -48,5 +48,11 @@ pub fn prepare(manager:&Manager,root:&Path,snapshot:&crate::local_run::Snapshot,
         let mut command=Command::new(&adapter);crate::compiled_runtime::clean_runtime(&mut command,root)?;
         command.env("PATH",adapter.parent().ok_or("调试器路径无效")?);
         Ok(Launch{command,adapter:"lldb",arguments:json!({"name":"InkLeet local snapshot","type":"lldb","request":"launch","program":binary,"cwd":root,"terminal":"console","stopOnEntry":false})})
+    }else if snapshot.language=="java"{
+        let (_,output)=crate::compiled_runtime::java(manager,root,snapshot,cancel.clone())?;
+        if output.canceled{return Err("调试编译已停止".into());}
+        if output.exit_code!=Some(0)||output.timed_out||output.truncated{return Err(format!("Java 调试编译未完成：{}",output.stderr));}
+        let (command,home)=inkleet_managed_env::java_debug::prepare(manager,root,cancel)?;
+        Ok(Launch{command,adapter:"java",arguments:json!({"name":"InkLeet local snapshot","type":"java","request":"launch","mainClass":"InkLeetHarness","javaExec":home.join(if cfg!(windows){"bin/java.exe"}else{"bin/java"}),"classPaths":[root],"sourcePaths":[root],"cwd":root,"console":"internalConsole","encoding":"UTF-8","vmArgs":"-Xmx256m","stopOnEntry":false})})
     }else{Err("此语言的调试尚未接入".into())}
 }

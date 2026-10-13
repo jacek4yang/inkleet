@@ -53,7 +53,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, brea
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => {
     const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource) : null;
-    const debug = ["python3", "golang", "cpp", "c", "rust"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
+    const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const extensions = [
       basicSetup, syntax(language), theme, ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),

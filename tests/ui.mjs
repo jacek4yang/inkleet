@@ -578,7 +578,7 @@ try {
   await runPanel.getByRole("button", { name: "停止", exact: true }).click();
   await runPanel.getByText("已停止", { exact: true }).waitFor();
   await runPage.getByRole("combobox", { name: "编程语言" }).selectOption("java");
-  assert.equal(await runPanel.locator('[data-local-tab="debug"]').isDisabled(), true);
+  assert.equal(await runPanel.locator('[data-local-tab="debug"]').isDisabled(), false);
   await runPanel.getByRole("button", { name: "本地执行", exact: true }).click();
   await runPage.waitForFunction(() => window.__runTest.starts.length === 7);
   await runPage.evaluate(() => { window.__runTest.pending[6](); window.__runTest.result.phase = "compiling"; });

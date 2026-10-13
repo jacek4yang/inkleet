@@ -29,7 +29,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
     if (isTauri()) void poll();
     return () => { alive.current = false; clearTimeout(timer); };
   }, []);
-  useEffect(() => { if (!["python3", "golang", "cpp", "c", "rust"].includes(language)) setPane("run"); }, [language]);
+  useEffect(() => { if (!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)) setPane("run"); }, [language]);
   async function run() {
     if (guard.current || busy(result)) return;
     guard.current = true; setPending(true); setError("");
@@ -53,7 +53,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
   }
   const stale = snapshot && (snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
   return <section className="local-runner" aria-label="本地运行">
-    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust"].includes(language)} title={["python3", "golang", "cpp", "c", "rust"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><button onClick={onClose}>收起</button></header>
+    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><button onClick={onClose}>收起</button></header>
     <details className="local-safety"><summary>仅运行可信代码 · 本机执行，不上传 · 非安全沙箱</summary><p className="muted">使用应用独立工具链执行快照。Java / Go / C 源码编译最多 120 秒，Rust / C/C++ 首次准备标准库及链接最多 240 秒；程序运行 10 秒超时，输出最多 64 KiB。以当前用户权限运行，Java 堆内存上限 256 MiB，其他语言尚无内存硬限制。</p></details>
     <div hidden={pane !== "run"}>
     <label>测试输入<textarea aria-label="本地测试输入" value={input} onChange={e => setInput(e.target.value)} spellCheck={false} placeholder="每个参数填写一个 JSON 值；多组用例依次排列。" /></label>
