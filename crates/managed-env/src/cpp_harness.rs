@@ -1,7 +1,7 @@
 //! Typed C++ literals come only from validated JSON metadata, never expressions.
 use serde_json::Value;
 use std::{fs,path::Path};
-const HEADER:&str=include_str!("cpp_harness.hpp");
+pub(crate) const HEADER:&str=include_str!("cpp_harness.hpp");
 fn cpp_type(kind:&str)->Result<String,String>{
     if let Some(inner)=kind.strip_suffix("[]"){return Ok(format!("std::vector<{}>",cpp_type(inner)?));}
     Ok(match kind{"integer"=>"int","long"=>"long long","double"=>"double","boolean"=>"bool","string"=>"std::string","character"=>"char","ListNode"=>"ListNode*","TreeNode"=>"TreeNode*",_=>return Err("此 C++ 参数类型尚未支持".into())}.into())
@@ -11,7 +11,7 @@ fn string_literal(value:&str)->String{
     format!("std::string(\"{bytes}\",{})",value.len())
 }
 fn integer(value:&Value)->Result<i32,String>{value.as_i64().and_then(|n|i32::try_from(n).ok()).ok_or("integer 超出 C++ 32 位整数范围".into())}
-fn literal(value:&Value,kind:&str,budget:&mut usize)->Result<String,String>{
+pub(crate) fn literal(value:&Value,kind:&str,budget:&mut usize)->Result<String,String>{
     *budget=budget.checked_sub(1).ok_or("用例超过 10000 个节点")?;
     if let Some(inner)=kind.strip_suffix("[]"){
         let values=value.as_array().ok_or("数组参数必须是 JSON 数组")?;

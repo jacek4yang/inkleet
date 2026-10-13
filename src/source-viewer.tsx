@@ -10,6 +10,7 @@ import { java } from "@codemirror/lang-java";
 import type { Source } from "./intelligence";
 export function SourceViewer({ source, onClose }: { source: Source; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null), host = useRef<HTMLDivElement>(null);
+  const close = () => { dialog.current?.close(); onClose(); };
   useLayoutEffect(() => {
     dialog.current?.showModal();
     const state = EditorState.create({ doc: source.text, extensions: [
@@ -20,10 +21,10 @@ export function SourceViewer({ source, onClose }: { source: Source; onClose: () 
     const view = new EditorView({ state, parent: host.current! });
     const line = state.doc.line(Math.min(state.doc.lines, Math.max(1, source.line + 1)));
     view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "center" }) });
-    return () => view.destroy();
+    return () => { dialog.current?.close(); view.destroy(); };
   }, [source]);
-  return <dialog className="source-viewer" ref={dialog} aria-labelledby="source-title" onCancel={e => { e.preventDefault(); onClose(); }}>
-    <header><div><h2 id="source-title">{source.name}</h2><p>{source.declaration ? "标准库类型声明 · .pyi 不是运行时实现源码" : source.language === "java" ? "Java 语言服务源码视图" : "标准库实现源码"} · 只读</p></div><button onClick={onClose}>返回代码</button></header>
+  return <dialog className="source-viewer" ref={dialog} aria-labelledby="source-title" onCancel={e => { e.preventDefault(); close(); }}>
+    <header><div><h2 id="source-title">{source.name}</h2><p>{source.declaration ? "标准库类型声明 · .pyi 不是运行时实现源码" : source.language === "java" ? "Java 语言服务源码视图" : "标准库实现源码"} · 只读</p></div><button onClick={close}>返回代码</button></header>
     <div className="source-editor" ref={host} />
   </dialog>;
 }
