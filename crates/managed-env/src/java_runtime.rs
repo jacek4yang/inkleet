@@ -58,6 +58,7 @@ impl Runtime{
         fs::rename(stage.path(),&destination).map_err(|_|"无法完成 Java 启动器安装")?;
         Ok(Self{home,executable:process::tool_path(&executable),embedded:true})
     }
+    pub fn private_launcher(&self)->Option<&Path>{if self.embedded{Some(&self.executable)}else{None}}
     pub fn command(&self,root:&Path,options:&[OsString],main_class:&str)->Result<Command,String>{
         let mut command=Command::new(&self.executable);clean(&mut command,root,&self.home)?;
         if self.embedded{command.arg(&self.home).arg("--vmopts").arg(options.len().to_string()).args(options).arg(main_class);}

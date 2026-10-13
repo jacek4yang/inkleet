@@ -31,5 +31,6 @@ pub fn prepare(manager:&Manager,root:&Path,cancel:Arc<AtomicBool>)->Result<(Comm
     let mut class_option=std::ffi::OsString::from("-Djava.class.path=");class_option.push(classpath);
     let mut command=runtime.command(root,&[class_option,"-Xmx256m".into(),"-Djava.net.preferIPv4Stack=true".into()],"InkLeetJavaAdapter")?;
     command.arg(root);
+    if let Some(launcher)=runtime.private_launcher(){command.env("INKLEET_PRIVATE_JAVA",launcher);}
     Ok((command,runtime.home))
 }

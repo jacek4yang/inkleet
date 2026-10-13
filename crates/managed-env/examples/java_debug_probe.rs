@@ -12,6 +12,7 @@ fn event(rx:&mpsc::Receiver<Value>,name:&str)->Result<Value,String>{
     let root=process::tool_path(&fs::canonicalize(temp.path()).map_err(|e|e.to_string())?);
     let manager=Manager::new(root.join("tools"));let report:Report=Arc::new(|_|{});
     for id in ["jdk","jdtls","java-debug"]{manager.install(id,Arc::new(AtomicBool::new(false)),report.clone()).await?;}
+    #[cfg(windows)] manager.install("zig",Arc::new(AtomicBool::new(false)),report).await?;
     let runtime=Runtime::prepare(&manager,Arc::new(AtomicBool::new(false)))?;
     let work=root.join("workspace");fs::create_dir(&work).map_err(|e|e.to_string())?;
     let source=work.join("Solution.java");
