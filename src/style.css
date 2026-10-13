@@ -36,3 +36,6 @@
 .notes-rendered table{border-collapse:collapse;display:block;overflow:auto;max-width:100%}.notes-rendered td,.notes-rendered th{border:1px solid #ddd5ca;padding:6px 10px}
 .notes-rendered hr{border:0;border-top:1px solid #ddd5ca}
 @media(max-width:760px){.notes-preview{padding:15px 18px}.notes-heading{gap:6px;padding:7px 10px}}
+
+.catalogue-modes{display:flex;gap:8px;margin:8px 0}.catalogue-modes button{font-size:12px}.catalogue-modes button[aria-pressed=true]{background:#e8ddd0;color:#906442}
+@media(max-width:420px){.topbar{padding:0 8px}.topbar>div{gap:3px}.topbar .brand{font-size:18px}.topbar button{font-size:10px;padding:5px}.topbar>strong{font-size:11px}}

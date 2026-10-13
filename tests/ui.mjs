@@ -85,7 +85,10 @@ try {
   await page.getByRole("button", { name: "预览笔记", exact: true }).click();
   await page.getByText("笔记过长，已暂停预览；原文仍可编辑和导出。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "返回编辑", exact: true }).click();
-  assert.equal((await notesEditor.innerText()).length, longNotes.length);
+  const longDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出 Markdown", exact: true }).click();
+  const longDownload = await longDownloadPromise;
+  assert.equal(await readFile(await longDownload.path(), "utf8"), longNotes, "检查完整导出，不把 CodeMirror 可见视口当作完整长文档");
   await notesEditor.fill(originalNotes);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -256,6 +259,85 @@ try {
   assert.deepEqual(authErrors, []);
   await authPage.close();
   await writeFile("evidence/AUTH_UI_RESULT.txt", "PASS: mocked IPC only; cancel during verification, ignore stale success, explicit failure and recovery. NOT real login validation.\n");
+
+
+  // 链接入口协议 fixture：测试竞态与草稿保护，不冒充真实中国站请求。
+  const linkPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const linkErrors = [];
+  linkPage.on("pageerror", error => linkErrors.push(error.message));
+  await linkPage.addInitScript(() => {
+    window.isTauri = true;
+    window.__linkTest = { pending: [], saves: [] };
+    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      if (command === "load_recent_questions") return [];
+      if (command === "load_document") return { code: null, notes: null };
+      if (command === "save_text") { window.__linkTest.saves.push(args); return; }
+      if (command === "get_question") return new Promise((resolve, reject) => {
+        const slug = args.slug;
+        const question = { questionId: slug === "alpha" ? "991" : "992", questionFrontendId: slug === "alpha" ? "L1" : "L2",
+          title: slug, titleSlug: slug, translatedTitle: slug, content: "<p>链接测试样例</p>", translatedContent: null,
+          isPaidOnly: false, difficulty: "Easy", sampleTestCase: "", exampleTestcases: "", metaData: "{}",
+          codeSnippets: [{ langSlug: "rust", code: "// link fixture template" }] };
+        window.__linkTest.pending.push({ slug, question, resolve, reject });
+      });
+      throw new Error("Unexpected link-test IPC command: " + command);
+    }};
+  });
+  await linkPage.goto("http://127.0.0.1:5173");
+  await linkPage.getByRole("button", { name: "链接打开", exact: true }).click();
+  const linkField = linkPage.getByRole("textbox", { name: "力扣题目链接", exact: true });
+  await linkField.fill("https://leetcode.cn.evil.example/problems/alpha/");
+  await linkPage.getByRole("button", { name: "打开题目", exact: true }).click();
+  await linkPage.getByRole("alert").waitFor();
+  assert.equal(await linkPage.evaluate(() => window.__linkTest.pending.length), 0, "错误域名不得发起 IPC 请求");
+  await linkField.fill("https://leetcode.cn/problems/alpha/solutions/123/?share=discarded#ignored");
+  await linkPage.locator("dialog form").evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
+  await linkPage.waitForFunction(() => window.__linkTest.pending.length === 1);
+  assert.equal(await linkPage.evaluate(() => window.__linkTest.pending[0].slug), "alpha");
+  await linkField.fill("https://leetcode.cn/problems/beta/submissions/456/");
+  await linkPage.getByRole("button", { name: "打开题目", exact: true }).click();
+  await linkPage.waitForFunction(() => window.__linkTest.pending.length === 2);
+  await linkPage.evaluate(() => { const p = window.__linkTest.pending[1]; p.resolve({ question: p.question, cacheWarning: null }); });
+  await linkPage.locator("dialog.catalogue").waitFor({ state: "hidden" });
+  await linkPage.getByRole("heading", { name: "beta", exact: true }).waitFor();
+  await linkPage.evaluate(() => { const p = window.__linkTest.pending[0]; p.resolve({ question: p.question, cacheWarning: null }); });
+  assert.equal(await linkPage.getByRole("heading", { name: "alpha", exact: true }).count(), 0, "迟到的旧请求不得切回旧题");
+  await linkPage.getByRole("button", { name: "代码", exact: true }).click();
+  const linkEditor = linkPage.getByRole("textbox", { name: "代码编辑器", exact: true });
+  await linkEditor.fill("// preserved link draft");
+  await linkPage.getByRole("button", { name: "链接打开", exact: true }).click();
+  await linkField.fill("leetcode.cn/problems/beta/description/?new=ignored");
+  await linkPage.getByRole("button", { name: "打开题目", exact: true }).click();
+  await linkPage.waitForFunction(() => window.__linkTest.pending.length === 3);
+  await linkPage.evaluate(() => { const p = window.__linkTest.pending[2]; p.resolve({ question: p.question, cacheWarning: null }); });
+  await linkPage.locator("dialog.catalogue").waitFor({ state: "hidden" });
+  await linkPage.getByRole("heading", { name: "beta", exact: true }).waitFor();
+  await linkPage.getByRole("button", { name: "代码", exact: true }).click();
+  assert.equal(await linkEditor.innerText(), "// preserved link draft", "重复链接不能用模板覆盖草稿");
+  await linkPage.getByRole("button", { name: "链接打开", exact: true }).click();
+  await linkField.fill("https://leetcode.cn/problems/alpha/");
+  await linkPage.getByRole("button", { name: "打开题目", exact: true }).click();
+  await linkPage.waitForFunction(() => window.__linkTest.pending.length === 4);
+  await linkPage.evaluate(() => window.__linkTest.pending[3].reject(new Error("链接请求网络失败")));
+  await linkPage.getByRole("alert").waitFor();
+  await linkPage.getByRole("button", { name: "打开题目", exact: true }).click();
+  await linkPage.waitForFunction(() => window.__linkTest.pending.length === 5);
+  await linkPage.getByRole("button", { name: "关闭题库", exact: true }).click();
+  await linkPage.evaluate(() => { const p = window.__linkTest.pending[4]; p.resolve({ question: p.question, cacheWarning: null }); });
+  assert.equal(await linkEditor.innerText(), "// preserved link draft", "关闭后迟到成功不能切题或改动草稿");
+  await linkPage.getByRole("button", { name: "链接打开", exact: true }).click();
+  await linkField.fill("https://leetcode.cn/problems/alpha/");
+  await linkPage.getByRole("button", { name: "打开题目", exact: true }).click();
+  await linkPage.waitForFunction(() => window.__linkTest.pending.length === 6);
+  await linkPage.evaluate(() => { const p = window.__linkTest.pending[5]; p.resolve({ question: { ...p.question, titleSlug: "wrong" }, cacheWarning: null }); });
+  await linkPage.getByText("Error: 返回的题目与链接不一致，未切换题目", { exact: true }).waitFor();
+  assert.equal(await linkPage.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "手机链接入口不能横向溢出");
+  await linkPage.screenshot({ path: "evidence/mobile-link-validation.png", fullPage: true });
+  await linkPage.getByRole("button", { name: "关闭题库", exact: true }).click();
+  assert.equal(await linkEditor.innerText(), "// preserved link draft");
+  assert.deepEqual(linkErrors, []);
+  await linkPage.close();
+  await writeFile("evidence/LINK_UI_RESULT.txt", "PASS: mock IPC only; invalid host no request, duplicate guard, stale request ignored, duplicate question preserves draft, explicit network failure/manual retry, cancel, mismatched response, mobile layout.\n");
 
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

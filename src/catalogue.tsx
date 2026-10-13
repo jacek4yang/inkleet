@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import DOMPurify from "dompurify";
+import { parseQuestionLink } from "./question-link";
 
 export type RemoteQuestion = {
   questionId: string; questionFrontendId: string; title: string; titleSlug: string;
@@ -35,12 +36,16 @@ export function QuestionStatement({ question }: { question: RemoteQuestion }) {
   </>;
 }
 
-export function Catalogue({ onChoose, onClose }: {
+export function Catalogue({ onChoose, onClose, initialMode = "search" }: {
   onChoose: (question: RemoteQuestion, cacheWarning?: string | null) => void; onClose: () => void;
+  initialMode?: "search" | "link";
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
+  const inFlight = useRef<number | null>(null);
+  const [mode, setMode] = useState(initialMode);
   const [keyword, setKeyword] = useState("");
+  const [link, setLink] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [offset, setOffset] = useState(0);
   const [lastKeyword, setLastKeyword] = useState("");
@@ -48,50 +53,73 @@ export function Catalogue({ onChoose, onClose }: {
   const [error, setError] = useState("");
   useEffect(() => {
     dialog.current?.showModal();
-    return () => { generation.current++; };
+    return () => { generation.current++; inFlight.current = null; };
   }, []);
-  function close() { generation.current++; onClose(); }
-  async function search(next = 0) {
+  function invalidate() { generation.current++; inFlight.current = null; setBusy(false); setError(""); }
+  function close() { generation.current++; inFlight.current = null; onClose(); }
+  function beginRequest(): number | null {
+    if (inFlight.current !== null) return null;
     const token = ++generation.current;
+    inFlight.current = token; setBusy(true); setError("");
+    return token;
+  }
+  function endRequest(token: number) {
+    if (token !== generation.current) return;
+    inFlight.current = null; setBusy(false);
+  }
+  async function search(next = 0) {
+    const token = beginRequest(); if (token === null) return;
     const term = next === 0 ? keyword : lastKeyword;
-    setBusy(true); setError("");
     try {
       const data = await invoke<Result>("search_questions", { keyword: term, offset: next });
       if (token !== generation.current) return;
       setResult(data); setOffset(next); setLastKeyword(term);
     } catch (e) { if (token === generation.current) setError(String(e)); }
-    finally { if (token === generation.current) setBusy(false); }
+    finally { endRequest(token); }
   }
   async function choose(slug: string) {
-    const token = ++generation.current;
-    setBusy(true); setError("");
+    const token = beginRequest(); if (token === null) return;
     try {
       const fetched = await invoke<{ question: RemoteQuestion; cacheWarning: string | null }>("get_question", { slug });
-      const data = fetched.question;
       if (token !== generation.current) return;
+      const data = fetched.question;
       if (!/^[0-9]{1,20}$/.test(data.questionId)) throw new Error("题目标识格式变化，未创建本机文件");
+      if (data.titleSlug !== slug) throw new Error("返回的题目与链接不一致，未切换题目");
       if (!data.translatedContent && !data.content) throw new Error("题面不可访问，可能需要会员权限");
       onChoose(data, fetched.cacheWarning); close();
     } catch (e) { if (token === generation.current) setError(String(e)); }
-    finally { if (token === generation.current) setBusy(false); }
+    finally { endRequest(token); }
   }
+  function openLink() {
+    if (inFlight.current !== null) return;
+    try { const parsed = parseQuestionLink(link); void choose(parsed.slug); }
+    catch (e) { setError(e instanceof Error ? e.message : "无法解析题目链接"); }
+  }
+  function changeMode(next: "search" | "link") { invalidate(); setMode(next); }
   return <dialog className="catalogue" ref={dialog} onCancel={e => { e.preventDefault(); close(); }} aria-labelledby="catalogue-title">
     <div className="catalogue-heading"><h2 id="catalogue-title">中国站题库</h2><button onClick={close}>关闭题库</button></div>
-    <form onSubmit={e => { e.preventDefault(); void search(); }}>
-      <input autoFocus aria-label="搜索中国站题目" placeholder="题号、名称或关键词" maxLength={100} value={keyword} onChange={e => setKeyword(e.target.value)} />
-      <button disabled={busy} type="submit">{busy ? "读取中…" : "搜索"}</button>
-    </form>
-    <p className="muted">按需从 leetcode.cn 读取公开题目，不上传代码或笔记。空关键词可浏览题库。</p>
-    {error && <p role="alert" className="error">{error}</p>}
-    <div className="catalogue-results" aria-busy={busy}>
-      {result?.questions.map(q => <button data-slug={q.titleSlug} key={q.titleSlug} disabled={busy || q.paidOnly} onClick={() => choose(q.titleSlug)}>
-        <span>{q.frontendQuestionId}</span><strong>{q.titleCn || q.title}</strong><small>{q.paidOnly ? "会员题暂未开放" : q.difficulty}</small>
-      </button>)}
-      {result && !result.questions.length && <p>没有匹配题目，换个关键词试试。</p>}
+    <div className="catalogue-modes" aria-label="打开题目的方式">
+      <button aria-pressed={mode === "search"} onClick={() => changeMode("search")}>按关键词</button>
+      <button aria-pressed={mode === "link"} onClick={() => changeMode("link")}>粘贴链接</button>
     </div>
-    {result && <div className="catalogue-footer"><span>共 {result.total} 题 · 当前第 {Math.floor(offset / 25) + 1} 页</span><div>
-      <button disabled={busy || offset === 0} onClick={() => search(Math.max(0, offset - 25))}>上一页</button>
-      <button disabled={busy || !result.hasMore} onClick={() => search(offset + 25)}>下一页</button>
-    </div></div>}
+    <form onSubmit={e => { e.preventDefault(); if (mode === "link") openLink(); else void search(); }}>
+      {mode === "link" ? <input key="link" autoFocus type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-label="力扣题目链接" placeholder="https://leetcode.cn/problems/two-sum/" maxLength={4096} value={link} onChange={e => { invalidate(); setLink(e.target.value); }} /> :
+        <input key="search" autoFocus aria-label="搜索中国站题目" placeholder="题号、名称或关键词" maxLength={100} value={keyword} onChange={e => { invalidate(); setKeyword(e.target.value); }} />}
+      <button disabled={busy} type="submit">{busy ? "读取中…" : mode === "link" ? "打开题目" : "搜索"}</button>
+    </form>
+    <p className="muted">{mode === "link" ? "支持中国站题面、题解、该题提交记录和竞赛题目链接。只取题目标识，忽略分享参数；不打开网页、不上传代码或笔记。" : "按需从 leetcode.cn 读取公开题目，不上传代码或笔记。空关键词可浏览题库。"}</p>
+    {error && <p role="alert" className="error">{error}</p>}
+    {mode === "search" && <>
+      <div className="catalogue-results" aria-busy={busy}>
+        {result?.questions.map(q => <button data-slug={q.titleSlug} key={q.titleSlug} disabled={busy || q.paidOnly} onClick={() => choose(q.titleSlug)}>
+          <span>{q.frontendQuestionId}</span><strong>{q.titleCn || q.title}</strong><small>{q.paidOnly ? "会员题暂未开放" : q.difficulty}</small>
+        </button>)}
+        {result && !result.questions.length && <p>没有匹配题目，换个关键词试试。</p>}
+      </div>
+      {result && <div className="catalogue-footer"><span>共 {result.total} 题 · 当前第 {Math.floor(offset / 25) + 1} 页</span><div>
+        <button disabled={busy || offset === 0} onClick={() => search(Math.max(0, offset - 25))}>上一页</button>
+        <button disabled={busy || !result.hasMore} onClick={() => search(offset + 25)}>下一页</button>
+      </div></>}
+    </>}
   </dialog>;
 }

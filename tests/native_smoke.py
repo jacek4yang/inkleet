@@ -102,6 +102,18 @@ try:
         fill(code, "// live CN draft persistence")
         live_source = data / "top.jacek.inkleet/notebook/lc-1/solution.rs"
         wait_for(lambda: live_source.exists() and live_source.read_text() == "// live CN draft persistence", "real question local source saved")
+        click('[data-action="open-link"]')
+        link_input = '[aria-label="力扣题目链接"]'
+        wait_for(lambda: element(link_input), "link input opened")
+        linked = "https://leetcode.cn/problems/two-sum/solutions/123/?envType=study-plan-v2#example"
+        cmd("POST", f"/element/{element(link_input)}/value", {"text": linked, "value": list(linked)})
+        screenshot("question-link-native.png")
+        click('dialog form button[type="submit"]')
+        wait_for(lambda: len(cmd("POST", "/elements", {"using": "css selector", "value": "dialog.catalogue"})) == 0, "link dialog closed after success", seconds=30)
+        wait_for(lambda: "两数之和" in text("article h1"), "real question opened from normalized link", seconds=30)
+        wait_for(lambda: text(code) == "// live CN draft persistence", "duplicate link keeps current draft")
+        assert live_source.read_text() == "// live CN draft persistence", "link opening overwrote local source"
+
         # 只验证匿名官方登录页面的原生窗口，不输入账号、不解验证码、不读取凭据。
         main_handle = cmd("GET", "/window")
         try:

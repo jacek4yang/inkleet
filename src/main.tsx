@@ -35,6 +35,7 @@ function App() {
   const [problems, setProblems] = useState<WorkbenchProblem[]>(samples);
   const [cacheWarning, setCacheWarning] = useState("");
   const [catalogue, setCatalogue] = useState(false);
+  const [catalogueMode, setCatalogueMode] = useState<"search" | "link">("search");
   const [problemId, setProblemId] = useState(samples[0].id);
   const [language, setLanguage] = useState<Language>("rust");
   const [tab, setTab] = useState("problem");
@@ -121,7 +122,7 @@ function App() {
   const visible = problems.filter(p => (p.number + p.title).includes(query));
   return <main className={focus ? "workbench focus" : "workbench"}>
     <header className="topbar"><strong><span className="brand">墨</span> 墨题 <small>InkLeet</small></strong>
-      <div><Login onIdentity={setIdentity} /><button disabled={!isTauri()} data-action="open-catalogue" onClick={() => setCatalogue(true)} title={isTauri() ? "读取中国站公开题目" : "请在原生客户端使用"}>中国站题库</button><span className="preview">开发预览</span><button onClick={() => setFocus(!focus)}>{focus ? "退出专注" : "专注"}</button></div>
+      <div><Login onIdentity={setIdentity} /><button disabled={!isTauri()} data-action="open-catalogue" onClick={() => { setCatalogueMode("search"); setCatalogue(true); }} title={isTauri() ? "读取中国站公开题目" : "请在原生客户端使用"}>中国站题库</button><button disabled={!isTauri()} data-action="open-link" onClick={() => { setCatalogueMode("link"); setCatalogue(true); }}>链接打开</button><span className="preview">开发预览</span><button onClick={() => setFocus(!focus)}>{focus ? "退出专注" : "专注"}</button></div>
     </header>
     <aside className="sidebar">
       <label className="search"><span>找题</span><input aria-label="搜索题目" placeholder="题号或名称" value={query} onChange={e => setQuery(e.target.value)} /></label>
@@ -143,7 +144,7 @@ function App() {
       {judge.panel}
     </section>
     {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
-    {catalogue && <Catalogue onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
+    {catalogue && <Catalogue initialMode={catalogueMode} onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
     <footer className="statusbar" role="status"><span>{status}</span><span>源码和笔记本机保存 · 评测按需上传代码</span></footer>
   </main>;
 }
