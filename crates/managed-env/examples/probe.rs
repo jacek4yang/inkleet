@@ -105,7 +105,17 @@ async fn main() -> Result<(), String> {
         let script_path=runtime_work.join("debug_subject.py");
         std::fs::write(&script_path,"total = 1\ntotal += 2\nresult = total * 2\nprint(result)\n").map_err(|e|e.to_string())?;
         let log_dir=runtime_work.join("adapter-logs");std::fs::create_dir(&log_dir).map_err(|e|e.to_string())?;
-        let mut adapter=command(&runtime_python,&runtime_work,"import sys,runpy;sys.path.insert(0,sys.argv[1]);sys.argv=['debugpy.adapter','--log-dir',sys.argv[2]];runpy.run_module('debugpy.adapter',run_name='__main__')");
+        let mut adapter=command(&runtime_python,&runtime_work,r#"import sys,runpy,os,traceback
+original_stderr=sys.stderr
+sys.path.insert(0,sys.argv[1])
+sys.argv=['debugpy.adapter','--log-dir',sys.argv[2]]
+try:
+    runpy.run_module('debugpy.adapter',run_name='__main__')
+except BaseException:
+    traceback.print_exc(file=original_stderr)
+    sys.stderr=original_stderr
+    raise
+"#);
         adapter.arg(&debug_root).arg(&log_dir);
         let (events_tx,events_rx)=mpsc::sync_channel(128);
         let client=Arc::new(Client::spawn_dap(adapter,Arc::new(move|event|{if event.get("event").and_then(serde_json::Value::as_str)!=Some("output"){let _=events_tx.try_send(event);}}))?);
@@ -117,7 +127,7 @@ async fn main() -> Result<(), String> {
             for entry in std::fs::read_dir(&log_dir).map_err(|e|e.to_string())?.flatten(){
                 if let Ok(text)=std::fs::read_to_string(entry.path()){texts.push(text);}
             }
-            for text in texts {for line in text.lines().filter(|line|line.contains("Error")||line.contains("Exception")||line.contains("No module")).take(20){
+            for text in texts {for line in text.lines().filter(|line|line.contains("Error")||line.contains("Exception")||line.contains("No module")||line.trim_start().starts_with("File ")).take(20){
                 if !line.to_ascii_lowercase().contains("token"){println!("DAP_INITIALIZE_FAILURE {}",line.chars().take(500).collect::<String>());}
             }}
             return Err(format!("DAP initialize: {error}; stderr bytes={}",client.stderr().len()));

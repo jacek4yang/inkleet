@@ -39,6 +39,7 @@ async fn main()->Result<(),String>{
     let cargo_version={let mut c=clean(&cargo,&work,&paths);c.arg("--version");checked(c)?};
     let ra_version={let mut c=clean(&install["rust-analyzer-preview"],&work,&paths);c.arg("--version");checked(c)?};
     
+    let lsp_result=(|| -> Result<(),String> {
     let lsp_work=root.join("language-service");std::fs::create_dir(&lsp_work).map_err(|e|e.to_string())?;
     let cargo_manifest="[package]\nname=\"inkleet_fixture\"\nversion=\"0.0.0\"\nedition=\"2021\"\n[lib]\npath=\"solution.rs\"\n";
     std::fs::write(lsp_work.join("Cargo.toml"),cargo_manifest).map_err(|e|e.to_string())?;
@@ -60,7 +61,7 @@ async fn main()->Result<(),String>{
     let hover=loop{
         let result=client.request("textDocument/hover",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":2,"character":8}}),Duration::from_secs(10))?;
         if result.to_string().contains("Vec"){break result;}
-        if std::time::Instant::now()>deadline{return Err(format!("Rust hover unavailable; adapter stderr bytes={}",client.stderr().len()));}
+        if std::time::Instant::now()>deadline{return Err(format!("Rust hover unavailable; diagnostic={}",client.stderr()));}
         std::thread::sleep(Duration::from_millis(300));
     };
     assert!(hover.to_string().contains("Vec"),"unexpected Rust hover: {hover}");
@@ -71,6 +72,10 @@ async fn main()->Result<(),String>{
     assert!(definition.to_string().contains("file:"),"missing real Rust source definition");
     let _=client.request("shutdown",serde_json::Value::Null,Duration::from_secs(5));client.stop();
     println!("RUST_LSP_RESULT {}",serde_json::json!({"platform":inkleet_managed_env::platform(),"hover":true,"completion":true,"stdlibDefinition":true,"systemPathUsed":false}));
+
+    Ok(())
+    })();
+    if let Err(error)=&lsp_result{println!("RUST_LSP_FAILURE {error}");}
 
     let extension=if cfg!(windows){".exe"}else{""};
     for (filename,source,driver) in [
@@ -94,5 +99,5 @@ async fn main()->Result<(),String>{
     checked(command)?;
     assert_eq!(checked(clean(&output,&work,&paths))?.trim(),"6");
     println!("COMPILER_RESULT {}",serde_json::json!({"platform":inkleet_managed_env::platform(),"rust":version.trim(),"cargo":cargo_version.trim(),"rustAnalyzer":ra_version.trim(),"rustCompileRun":true,"cCompileRun":true,"cppCompileRun":true,"systemPathUsed":false,"stdlibSource":install["rust-src"].is_file()}));
-    Ok(())
+    lsp_result
 }
