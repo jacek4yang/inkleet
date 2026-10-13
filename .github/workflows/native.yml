@@ -56,6 +56,12 @@ jobs:
           export XDG_CACHE_HOME="$(mktemp -d)"
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - name: Capture native crash diagnostics
+        if: failure()
+        run: |
+          mkdir -p evidence/native
+          { sudo dmesg --ctime 2>/dev/null || true; } | grep -Ei 'segfault|out of memory|killed process|inkleet|webkit' | tail -80 > evidence/native/kernel-errors.txt || true
+          free -m > evidence/native/memory.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
