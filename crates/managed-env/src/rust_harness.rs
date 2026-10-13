@@ -52,6 +52,7 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     if source.len()>2*1024*1024{return Err("Rust 源码超过 2 MiB".into());}
     let config=crate::harness::configuration(metadata,input)?;
     let meta:Value=serde_json::from_str(metadata).map_err(|_|"Rust 元数据无效")?;
+    if meta.get("inkleetRustSignatureError").is_some(){return Err("官方 Rust 函数签名暂无法解析，请使用力扣运行".into());}
     let base=config["metadata"]["name"].as_str().ok_or("Rust 函数名缺失")?;
     let name=meta["inkleetRustName"].as_str().map(str::to_owned).unwrap_or_else(||snake(base));
     if !identifier(&name){return Err("Rust 函数名无效".into());}

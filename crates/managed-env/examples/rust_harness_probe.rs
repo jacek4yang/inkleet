@@ -27,6 +27,8 @@ fn case(install:&std::collections::HashMap<&str,PathBuf>,root:&Path,index:usize,
     let output=work.join(if cfg!(windows){"solution.exe"}else{"solution"});
     let mut command=clean(&rustc,&work,&paths);
     command.arg(work.join("harness.rs")).args(["--edition=2021","-g","-C","opt-level=0"]).arg("--sysroot").arg(&stdroot).arg("-o").arg(&output);
+    // Keep per-object DWARF in the private workspace; no system dsymutil.
+    #[cfg(target_os="macos")] command.args(["-C","split-debuginfo=unpacked"]);
     if cfg!(windows){
         let lld=rustc.parent().unwrap().parent().unwrap().join("lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe");
         command.arg("-C").arg(format!("linker={}",lld.display())).args(["-C","link-self-contained=yes","-C","linker-flavor=ld.lld","--target","x86_64-pc-windows-gnu"]);

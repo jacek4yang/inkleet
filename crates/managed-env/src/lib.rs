@@ -74,6 +74,7 @@ fn host_allowed(url: &reqwest::Url) -> bool {
 }
 impl Manager {
     pub fn new(root: PathBuf) -> Self { Self { root } }
+    pub fn root(&self) -> &Path { &self.root }
     fn destination(&self, p: &Package) -> PathBuf { self.root.join("packages").join(format!("{}-{}", p.id, p.sha256)) }
     pub fn installed(&self, id: &str) -> Result<Option<PathBuf>> {
         let p = package(id)?; let dest = self.destination(&p);

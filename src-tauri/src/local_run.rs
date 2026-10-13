@@ -27,7 +27,7 @@ impl Runner{
     }
 }
 pub async fn start(app:tauri::AppHandle,snapshot:Snapshot)->Result<u64,String>{
-    if !matches!(snapshot.language.as_str(),"python3"|"golang"|"cpp"|"c"){return Err("此版本本地运行支持 Python、Go、C 和 C++；其他语言可使用力扣运行".into());}
+    if !matches!(snapshot.language.as_str(),"python3"|"golang"|"cpp"|"c"|"rust"){return Err("此版本本地运行支持 Python、Go、C、C++ 和 Rust；其他语言可使用力扣运行".into());}
     if snapshot.code.len()>2*1024*1024||snapshot.title.len()>512{return Err("运行快照超过大小限制".into());}
     harness::configuration(&snapshot.metadata,&snapshot.input)?;
     let state=app.state::<Runner>();
@@ -45,19 +45,19 @@ pub async fn start(app:tauri::AppHandle,snapshot:Snapshot)->Result<u64,String>{
     tauri::async_runtime::spawn_blocking(move||{
         let execute=||->Result<(process::Output,Vec<String>),String>{
             let state=app.state::<Runner>();let tools=app.state::<crate::managed::Environments>();
-            let tool_id=match snapshot.language.as_str(){"golang"=>"go","cpp"|"c"=>"zig",_=>"python"};
+            let tool_id=match snapshot.language.as_str(){"rust"=>"rustc","golang"=>"go","cpp"|"c"=>"zig",_=>"python"};
             let tool=process::tool_path(&tools.manager.installed(tool_id)?.ok_or("请先在开发环境中安装当前语言工具链")?);
             if state.root.exists()&&fs::symlink_metadata(&state.root).map_err(|_|"运行目录不可用")?.file_type().is_symlink(){return Err("运行目录不能是符号链接".into());}
             fs::create_dir_all(&state.root).map_err(|_|"无法创建运行目录")?;
             let work=tempfile::Builder::new().prefix("run-").tempdir_in(&state.root).map_err(|_|"无法创建独立运行目录")?;
             let root=process::tool_path(&fs::canonicalize(work.path()).map_err(|_|"无法解析运行目录")?);
             let mut command;
-            if matches!(snapshot.language.as_str(),"cpp"|"c"){
+            if matches!(snapshot.language.as_str(),"cpp"|"c"|"rust"){
                 if job.cancel.load(Ordering::Acquire){return Err("运行已取消".into());}
                 if let Ok(mut view)=job.view.lock(){view.phase="compiling".into();}
-                let (binary,output)=crate::compiled_runtime::cpp(&tools.manager,&root,&process::tool_path(&state.root),&snapshot,job.cancel.clone())?;
+                let (binary,output)=if snapshot.language=="rust"{crate::compiled_runtime::rust(&tools.manager,&root,&process::tool_path(&state.root),&snapshot,job.cancel.clone())?}else{crate::compiled_runtime::cpp(&tools.manager,&root,&process::tool_path(&state.root),&snapshot,job.cancel.clone())?};
                 if output.exit_code!=Some(0)||output.canceled||output.timed_out||output.truncated{
-                    if let Ok(mut view)=job.view.lock(){view.error=if output.timed_out{"C/C++ 编译超过阶段时限，已终止"}else if output.canceled{"编译已停止"}else{"C/C++ 编译未完成，请查看错误输出"}.into();}
+                    if let Ok(mut view)=job.view.lock(){view.error=if output.timed_out{"编译超过阶段时限，已终止"}else if output.canceled{"编译已停止"}else{"编译未完成，请查看错误输出"}.into();}
                     return Ok((output,Vec::new()));
                 }
                 command=Command::new(binary);crate::compiled_runtime::clean_runtime(&mut command,&root)?;

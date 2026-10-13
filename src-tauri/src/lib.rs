@@ -200,6 +200,9 @@ async fn debug_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,e
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(result)=compiled_runtime::linker_entry(){
+        if let Err(error)=result{eprintln!("{error}");std::process::exit(1);}return;
+    }
     tauri::Builder::default()
         .setup(|app| {
             let root = app.path().app_data_dir()?.join("notebook");

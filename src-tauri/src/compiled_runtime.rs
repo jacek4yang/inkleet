@@ -39,3 +39,52 @@ pub fn clean_runtime(command:&mut Command,root:&Path)->Result<(),String>{
     if let Some(system)=std::env::var_os("SystemRoot"){command.env("SystemRoot",system);}
     Ok(())
 }
+
+pub fn rust(manager:&Manager,root:&Path,cache_root:&Path,snapshot:&crate::local_run::Snapshot,cancel:Arc<AtomicBool>)->Result<(PathBuf,process::Output),String>{
+    let rustc=process::tool_path(&manager.installed("rustc")?.ok_or("请先安装 Rust 编译器")?);
+    let stdentry=manager.installed("rust-std")?.ok_or("请先安装 Rust 标准库")?;
+    let stdroot=process::tool_path(stdentry.parent().ok_or("Rust 标准库目录无效")?);
+    let zig=process::tool_path(&manager.installed("zig")?.ok_or("请先安装私有 Zig 链接器")?);
+    inkleet_managed_env::rust_harness::prepare(root,&snapshot.code,&snapshot.metadata,&snapshot.input)?;
+    let binary=root.join(if cfg!(windows){"solution.exe"}else{"solution"});
+    let rustlib=rustc.parent().and_then(Path::parent).ok_or("Rust 编译器路径无效")?.join("lib");
+    let mut command=Command::new(&rustc);clean_runtime(&mut command,root)?;
+    command.env("PATH",std::env::join_paths([rustc.parent().ok_or("Rust 路径无效")?,zig.parent().ok_or("Zig 路径无效")?]).map_err(|_|"编译路径无效")?)
+        .env("LD_LIBRARY_PATH",&rustlib).env("DYLD_LIBRARY_PATH",&rustlib)
+        .env("ZIG_GLOBAL_CACHE_DIR",cache_root.join("zig-cache")).env("ZIG_LOCAL_CACHE_DIR",root.join("zig-local"))
+        .arg(root.join("harness.rs")).args(["--edition=2021","-g","-C","opt-level=0"]).arg("--sysroot").arg(&stdroot).arg("-o").arg(&binary);
+    // Keep per-object DWARF in the private workspace; no system dsymutil.
+    #[cfg(target_os="macos")] command.args(["-C","split-debuginfo=unpacked"]);
+    if cfg!(windows){
+        let lld=rustlib.join("rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe");
+        if !lld.is_file(){return Err("Rust 私有 LLD 缺失，请修复工具链".into());}
+        let mingw=manager.installed("rust-mingw")?.ok_or("请先安装 Rust Windows 链接库")?;
+        let target=process::tool_path(mingw.parent().and_then(Path::parent).and_then(Path::parent).ok_or("Rust 链接库路径无效")?);
+        command.arg("-C").arg(format!("linker={}",lld.display())).args(["-C","link-self-contained=yes","-C","linker-flavor=ld.lld","--target","x86_64-pc-windows-gnu"])
+            .arg("-L").arg(format!("native={}",target.join("lib/self-contained").display()));
+    }else{
+        command.arg("-C").arg(format!("linker={}",std::env::current_exe().map_err(|_|"无法定位应用链接入口")?.display()))
+            .args(["-C","linker-flavor=gcc"]).env("INKLEET_MANAGED_LINKER_ROOT",manager.root());
+    }
+    let output=process::compile(command,cancel,Duration::from_secs(240),64*1024)?;
+    Ok((binary,output))
+}
+/// An internal rustc linker entry, before initializing GUI state. Only a verified
+/// built-in Zig package can be launched; no shell, URL, or arbitrary executable.
+pub fn linker_entry()->Option<Result<(),String>>{
+    let root=std::env::var_os("INKLEET_MANAGED_LINKER_ROOT")?;
+    Some((||{
+        let manager=Manager::new(PathBuf::from(root));
+        let zig=manager.installed("zig")?.ok_or("应用私有链接器缺失")?;
+        let mut command=Command::new(zig);
+        command.arg("cc").args(std::env::args_os().skip(1)).env_remove("INKLEET_MANAGED_LINKER_ROOT");
+        #[cfg(unix)]{
+            use std::os::unix::process::CommandExt;
+            Err(format!("无法启动私有链接器：{}",command.exec()))
+        }
+        #[cfg(not(unix))]{
+            let status=command.status().map_err(|e|e.to_string())?;
+            if status.success(){Ok(())}else{Err(format!("私有链接器退出：{status}"))}
+        }
+    })())
+}

@@ -252,7 +252,7 @@ try:
             click(f'select[aria-label="开发环境语言"] option[value="{environment_group}"]')
             click(".environment-summary button")
             wait_for(lambda: all("已安装" in text(f'[data-tool="{tool}"]') for tool in (
-                {"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"],"cpp":["zig","clangd","codelldb"],"c":["zig","clangd","codelldb"]}[group]
+                {"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview","zig","codelldb"],"cpp":["zig","clangd","codelldb"],"c":["zig","clangd","codelldb"]}[group]
             )),f"{group} managed installation",seconds=720)
             click("dialog.environments header button")
             click(f'select[aria-label="编程语言"] option[value="{language}"]')
@@ -274,10 +274,11 @@ try:
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
-            if group in ("golang","cpp","c"):
+            if group in ("golang","cpp","c","rust"):
                 local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
                 if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
+                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
                 if not cmd("POST","/elements",{"using":"css selector","value":".local-runner"}):
                     click(".pane-heading .actions button")
@@ -286,7 +287,7 @@ try:
                 click('[data-action="local-execute"]')
                 wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),f"{group} private compilation and typed local result",seconds=280)
                 screenshot(group+"-local-run-native.png")
-                saved_solution=data/("top.jacek.inkleet/notebook/sample-sum/solution."+({"golang":"go","cpp":"cpp","c":"c"}[group]))
+                saved_solution=data/("top.jacek.inkleet/notebook/sample-sum/solution."+({"golang":"go","cpp":"cpp","c":"c","rust":"rs"}[group]))
                 wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
                 (evidence/(group.upper()+"_LOCAL_GUI_RESULT.txt")).write_text(f"PASS: actual Linux GUI compiles a {group} solution using its private downloaded toolchain, executes the bounded typed harness and returns exact value 10. No online judge verdict.\n")
                 click('[data-local-tab="debug"]')
