@@ -4,6 +4,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { languages, draftKey, type Language } from "./domain";
 import "./style.css";
 import { CodeEditor } from "./editor";
+import { Login } from "./login";
 
 const samples = [
   { id: "sample-sum", number: "01", title: "整数数组求和", detail: "给定整数数组 values，返回所有元素的和。\n\n这是 InkLeet 自编的界面与存储测试题，不是来自力扣的真实题目。", input: "[3, -1, 8]", output: "10" },
@@ -82,7 +83,7 @@ function App() {
   const visible = samples.filter(p => (p.number + p.title).includes(query));
   return <main className={focus ? "workbench focus" : "workbench"}>
     <header className="topbar"><strong><span className="brand">墨</span> 墨题 <small>InkLeet</small></strong>
-      <div><span className="preview">开发预览 · 自编样例</span><button onClick={() => setFocus(!focus)}>{focus ? "退出专注" : "专注"}</button></div>
+      <div><Login /><span className="preview">开发预览 · 自编样例</span><button onClick={() => setFocus(!focus)}>{focus ? "退出专注" : "专注"}</button></div>
     </header>
     <aside className="sidebar">
       <label className="search"><span>找题</span><input aria-label="搜索题目" placeholder="题号或名称" value={query} onChange={e => setQuery(e.target.value)} /></label>
