@@ -7,6 +7,31 @@
 - Draft PR：https://github.com/jacek4yang/inkleet/pull/1
 - 主分支仍为最初检查点，尚未合并或发布正式 Release。
 
+## 最新验收（2026-10-13 22:30 UTC）
+以下更新优先于后文的历史检查点。当前仍为开发分支，不是完整 IDE 或稳定版本。
+- 六种桌面语言服务已接入：Pyright、JDT LS、gopls、rust-analyzer、clangd（C / C++ 独立文档模式）。虚拟 package / 头文件不改动保存或提交的解答；本文件定义跳转也映射回原始行号。
+- Java 的真实 Linux 安装、成员补全和 JDK 源码浏览通过；Linux / Mac Intel / ARM 的返回源码与 JDK src.zip 比较通过。Windows Java 仍未开放：上游 JDK 原生库加载在不兼容系统代码页的路径上失败，短路径别名也未解决。
+- Go LSP 四平台协议通过（包括 Windows 私有 TEMP / 配置目录修复）：
+  https://github.com/jacek4yang/inkleet/actions/runs/38474190971
+- Go 类型驱动四平台全部通过，覆盖数组、链表、树、字符、大整数、溢出、panic 和循环结构：
+  https://github.com/jacek4yang/inkleet/actions/runs/38474520258
+- Go 本地运行已在真实 Linux GUI 得到结果 10；同一次验证还通过 Java / Go 源码查看和 Python 本地运行 / 调试，但之后 Rust 冷启动补全失败，因此整次工作流不能标成通过：
+  https://github.com/jacek4yang/inkleet/actions/runs/38475942120
+- Rust 曾在真实 Linux GUI 通过安装、成员补全和标准库源码查看；后续冷启动再次出现服务已连接但首次返回空补全，4446884 加入仅针对未改变请求上下文的有界重试，待最新原生回归。
+- Go Delve 真实 DAP 四平台通过。后续带生成驱动的协议回归，也确认原始解答第 3 行断点和单步后 total 从 1 变 3：
+  https://github.com/jacek4yang/inkleet/actions/runs/38477220783
+  Go 调试 UI、可取消编译 / 启动已接入，原生 GUI 正在验收，不能将协议通过当成 UI 通过。
+- C/C++ 的私有标准库 LSP 和 CodeLLDB 断点 / 栈 / 变量 / 单步四平台通过：
+  https://github.com/jacek4yang/inkleet/actions/runs/38467212784
+  C/C++ GUI 语义补全仍在回归；Runner 和调试 UI 尚未接入。
+- Windows Rust 的完整私有链接组件已补齐。使用编译器自带 MSVC-host LLD 驱动 GNU-target 链接，中文及空格路径下的线程、panic unwind 和运行结果已通过独立测试：
+  https://github.com/jacek4yang/inkleet/actions/runs/38477381027
+  全工具链矩阵仍在回归，Rust 本地题目驱动和调试 UI 未完成。
+- Python 的 Windows DAP、其他桌面平台协议已通过。原生测试中偶有 WebKit WebDriver 连接重置；截图显示应用仍在运行，尚不能据此归因于应用崩溃。测试只对可验证、可重放的本地字段替换 / 绝对定位查询 / 关闭窗口做一次恢复，并记录证据；不会重放在线运行、提交或调试单步。
+- 最新前端模拟回归通过：
+  https://github.com/jacek4yang/inkleet/actions/runs/38477771390
+- 已构建安装包仍停留在历史 9daa959，未包含本节全部功能。需在功能整合和回归完成后重新打包。
+
 ## 已实现并验证
 - CodeMirror 6：Python 3 / Rust / Go / C / C++ / Java 与 Markdown；独立草稿、撤销、光标与滚动状态。
 - 源码及 notes.md 原生原子保存；进程重启恢复；检测外部版本冲突并保留两份正文。
@@ -106,6 +131,6 @@
 不以“完美”替代验收，不将模拟、预览或单平台结果扩展为全部通过。
 
 ## 下一步
-先完成 Python 原生运行 / 调试纵向验收，并修复 Windows 与 Mac 独立工具链问题，再接入 Rust LSP 与本地驱动。
+继续 Go 调试 UI 与六语言补全原生回归；补 C/C++ / Rust / Java 类型驱动与调试，修复 Windows Java 路径兼容。随后继续安全会话恢复、外部笔记、移动端与打包验收。
 账号登录和签名等必须由用户参与的验证单独保留，不阻塞其余开发。用户要求持续推进全部既定功能，无须反复请求继续。
 回到本任务时先读取最新分支、此状态文件和 Actions；上文只对列出的具体提交和 job 作证。

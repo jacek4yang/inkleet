@@ -69,24 +69,23 @@ def fill(css, value):
             cmd("DELETE","/actions")  # release any modifier whose key-up was uncertain
             time.sleep(.3)
 def fill_once(css, value):
-    node = element(css)
+    node=element(css)
     cmd("POST",f"/element/{node}/click",{})
-    cmd("POST","/actions",{"actions":[{"type":"key","id":"keyboard","actions":[
-        {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"a"},
-        {"type":"keyUp","value":"a"},{"type":"keyUp","value":"\ue009"}
-    ]}]})
-    # WebKitGTK WebDriver strips literal LF from sendKeys. Use actual Escape/Enter keys between lines.
-    for index, line in enumerate(value.split("\n")):
-        if index:
-            cmd("POST","/actions",{"actions":[{"type":"key","id":"multiline-keyboard","actions":[
-                {"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},
-                {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}
-            ]}]})
-        if line: cmd("POST",f"/element/{node}/value",{"text":line,"value":list(line)})
+    # Paste exercises the real OS clipboard path. Sending each line through
+    # Enter would intentionally trigger editor indentation and bracket pairing.
+    if value: subprocess.run(["xclip","-selection","clipboard"],input=value.encode("utf-8"),check=True)
+    actions=[
+        {"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},
+        {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"a"},{"type":"keyUp","value":"a"},{"type":"keyUp","value":"\ue009"}
+    ]
+    if value:
+        actions += [{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"v"},{"type":"keyUp","value":"v"},{"type":"keyUp","value":"\ue009"}]
+    else: actions += [{"type":"keyDown","value":"\ue003"},{"type":"keyUp","value":"\ue003"}]
+    cmd("POST","/actions",{"actions":[{"type":"key","id":"keyboard","actions":actions}]})
     def editor_text():
         lines=cmd("POST",f"/element/{node}/elements",{"using":"css selector","value":".cm-line"})
         return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else cmd("GET",f"/element/{node}/property/value")
-    wait_for(lambda: editor_text() == value, "GUI line texts match typed text")
+    wait_for(lambda: editor_text()==value,"GUI paste exactly preserves source")
 def screenshot(name):
     (evidence / name).write_bytes(base64.b64decode(cmd("GET","/screenshot")))
 def start():
