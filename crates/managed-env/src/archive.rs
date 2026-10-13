@@ -124,7 +124,8 @@ pub(crate) fn extract_zip(archive:&Path,root:&Path,prefix:&str,cancel:&AtomicBoo
     for index in 0..zip.len(){
         canceled(cancel)?;
         let mut entry=zip.by_index(index).map_err(|_|"ZIP 条目不可读取")?;
-        let path=if prefix.is_empty(){safe_path(entry.name())?}else{stripped(entry.name(),prefix)?};
+        let name=entry.name().map_err(|_|"ZIP 路径编码无效")?;
+        let path=if prefix.is_empty(){safe_path(&name)?}else{stripped(&name,prefix)?};
         if path.as_os_str().is_empty()&&entry.is_dir(){continue;}
         if path.as_os_str().is_empty(){return Err("ZIP 根条目类型无效".into());}
         let mode=entry.unix_mode().unwrap_or(0o644);
