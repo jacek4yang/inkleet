@@ -119,7 +119,7 @@ export function Catalogue({ onChoose, onClose, initialMode = "search" }: {
       {result && <div className="catalogue-footer"><span>共 {result.total} 题 · 当前第 {Math.floor(offset / 25) + 1} 页</span><div>
         <button disabled={busy || offset === 0} onClick={() => search(Math.max(0, offset - 25))}>上一页</button>
         <button disabled={busy || !result.hasMore} onClick={() => search(offset + 25)}>下一页</button>
-      </div></>}
+      </div></div>}
     </>}
   </dialog>;
 }
