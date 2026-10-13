@@ -115,7 +115,7 @@ try {
         content: null, isPaidOnly: false, difficulty: "Easy", sampleTestCase: "[]", exampleTestcases: "[]", metaData: "{}",
         codeSnippets: [{ langSlug: "rust", code: "// official-shaped test template" }, { langSlug: "python3", code: "# test template" }]
       }, cacheWarning: null };
-      if (command === "load_document") return { code: null, notes: null };
+      if (command === "load_document") return { code: args.language === "java" ? "// restored Java draft" : null, notes: null };
       if (command === "open_login" || command === "save_text") return;
       if (command === "cancel_login") { window.__inkAuthTest.cancelled++; return; }
       if (command === "verify_login") return new Promise((resolve, reject) => window.__inkAuthTest.pending.push({ resolve, reject }));
@@ -165,6 +165,9 @@ try {
   await authPage.getByRole("combobox", { name: "编程语言" }).selectOption("golang");
   await sharedNote.waitFor();
   assert.equal(await sharedNote.innerText(), "# shared pending note");
+  await authPage.getByRole("combobox", { name: "编程语言" }).selectOption("java");
+  await fixtureEditor.waitFor();
+  assert.equal(await fixtureEditor.innerText(), "// restored Java draft", "读取完成前不能挂载空模板并忽略恢复内容");
   assert.deepEqual(authErrors, []);
   await authPage.close();
   await writeFile("evidence/AUTH_UI_RESULT.txt", "PASS: mocked IPC only; cancel during verification, ignore stale success, explicit failure and recovery. NOT real login validation.\n");

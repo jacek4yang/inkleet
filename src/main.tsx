@@ -51,6 +51,8 @@ function App() {
   const baseCode = problem.official ? (problem.official.codeSnippets?.find(s => s.langSlug === language)?.code ?? "") : templates[language];
   const doc = documents.current.get(activeKey) ?? { code: baseCode, notes: notes.current.get(problemId) ?? "" };
 
+  const editorLoading = loading || !documents.current.has(activeKey);
+
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -127,13 +129,13 @@ function App() {
     </aside>
     <nav className="tabs" aria-label="工作区">{[["problem","题目"],["code","代码"],["notes","笔记"]].map(([id,label]) => <button key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>)}</nav>
     <section className={"reading " + (tab === "code" ? "mobile-hidden" : "")}>
-      {tab === "notes" ? <><div className="pane-heading"><strong>解题笔记</strong><button disabled={loading} onClick={() => download("notes.md",notes.current.get(problemId) ?? "")}>导出 Markdown</button></div>{loading ? <p className="loading">正在读取笔记…</p> : <CodeEditor key={problemId + "/notes"} documentKey={problemId + "/notes"} language="markdown" label="Markdown 笔记" value={notes.current.get(problemId) ?? ""} onChange={text => edit("notes", text)} />}</> :
+      {tab === "notes" ? <><div className="pane-heading"><strong>解题笔记</strong><button disabled={editorLoading} onClick={() => download("notes.md",notes.current.get(problemId) ?? "")}>导出 Markdown</button></div>{editorLoading ? <p className="loading">正在读取笔记…</p> : <CodeEditor key={problemId + "/notes"} documentKey={problemId + "/notes"} language="markdown" label="Markdown 笔记" value={notes.current.get(problemId) ?? ""} onChange={text => edit("notes", text)} />}</> :
       <article>{problem.official ? <>{problem.cached && <p className="cache-warning">已缓存题面 · 可离线编辑；重新搜索可更新题面。</p>}<QuestionStatement question={problem.official} /></> : <><p className="eyebrow">练习 {problem.number} <span className="badge">自编样例</span></p><h1>{problem.title}</h1><p className="description">{problem.detail}</p><h3>示例</h3><pre>输入：{problem.input}{"\n"}输出：{problem.output}</pre><h3>写下你的第一种思路</h3><p className="muted">先想清楚边界，再开始写代码。笔记和每种语言的草稿相互独立。</p></>}</article>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
       <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><button disabled title="中国站接入开发中">运行</button><button disabled className="primary" title="中国站接入开发中">提交</button></div></div>
-      {loading ? <p className="loading">正在读取草稿…</p> : <CodeEditor key={activeKey} documentKey={activeKey} language={language} label="代码编辑器" value={doc.code} onChange={text => edit("code", text)} />}
-      <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button disabled={loading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
+      {editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor key={activeKey} documentKey={activeKey} language={language} label="代码编辑器" value={doc.code} onChange={text => edit("code", text)} />}
+      <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button disabled={editorLoading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
     </section>
     {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
     {catalogue && <Catalogue onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
