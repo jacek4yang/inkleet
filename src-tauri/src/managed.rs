@@ -119,15 +119,18 @@ pub async fn start_group(app:tauri::AppHandle,group:String)->Result<(),String>{
             let result=async{
                 if cancel.load(Ordering::Acquire){return Err("安装已取消".into());}
                 if id=="gopls"{
-                    let deadline=tokio::time::Instant::now()+std::time::Duration::from_secs(1800);
-                    loop{
-                        if cancel.load(Ordering::Acquire){return Err("安装已取消".into());}
-                        let phase=app.state::<Environments>().phase("go")?;
-                        if phase=="ready"{break;}
-                        if !matches!(phase.as_str(),"queued"|"downloading"|"verifying"|"extracting"|"building"|"canceling"){return Err("Go 工具链未安装成功，请重试语言环境安装".into());}
-                        if tokio::time::Instant::now()>deadline{return Err("等待 Go 工具链超时，请重试".into());}
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    }
+                    let waiting_app=app.clone();let waiting_cancel=cancel.clone();
+                    tauri::async_runtime::spawn_blocking(move||->Result<(),String>{
+                        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(1800);
+                        loop{
+                            if waiting_cancel.load(Ordering::Acquire){return Err("安装已取消".into());}
+                            let phase=waiting_app.state::<Environments>().phase("go")?;
+                            if phase=="ready"{return Ok(());}
+                            if !matches!(phase.as_str(),"queued"|"downloading"|"verifying"|"extracting"|"building"|"canceling"){return Err("Go 工具链未安装成功，请重试语言环境安装".into());}
+                            if std::time::Instant::now()>deadline{return Err("等待 Go 工具链超时，请重试".into());}
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                        }
+                    }).await.map_err(|_|"等待 Go 工具链的任务中断")??;
                 }
                 let report_app=app.clone();let report_id=id.clone();
                 let report:Report=Arc::new(move|progress|report_app.state::<Environments>().progress(&report_id,progress));
