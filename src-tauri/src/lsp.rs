@@ -88,7 +88,7 @@ impl Services {
     }
 }
 pub async fn start(app:tauri::AppHandle,text:String,language:String)->Result<Started>{
-    if !matches!(language.as_str(),"python3"|"java"|"golang"|"rust"){return Err("此语言服务尚未接入".into());}
+    if !matches!(language.as_str(),"python3"|"java"|"golang"|"rust"|"c"|"cpp"){return Err("此语言服务尚未接入".into());}
     if text.len()>2*1024*1024{return Err("源码超过语言服务的 2 MiB 限制".into());}
     let state=app.state::<Services>();
     if state.starting.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err(){return Err("语言服务正在启动，请稍后重连".into());}
@@ -152,14 +152,14 @@ fn read_allowed_source(roots:&[PathBuf],uri:&str)->Result<Source>{
     let path=url.to_file_path().map_err(|_|"源码路径无效")?;
     let canonical=std::fs::canonicalize(path).map_err(|_|"源码文件不存在")?;
     if !roots.iter().any(|root|canonical.starts_with(root)){return Err("拒绝读取工作区和工具链之外的文件".into());}
-    if !matches!(canonical.extension().and_then(|s|s.to_str()),Some("py"|"pyi"|"java"|"rs"|"go")){return Err("仅支持已接入语言的源码或类型声明".into());}
+    if !matches!(canonical.extension().and_then(|s|s.to_str()),Some("py"|"pyi"|"java"|"rs"|"go"|"c"|"cpp"|"h"|"hpp")|None){return Err("仅支持已接入语言的源码或类型声明".into());}
     let file=std::fs::File::open(&canonical).map_err(|_|"无法读取源码")?;
     let meta=file.metadata().map_err(|_|"无法读取源码信息")?;
     if !meta.is_file() || meta.len()>2*1024*1024{return Err("源码文件类型或大小不受支持".into());}
     let mut text=String::new();
     file.take(2*1024*1024+1).read_to_string(&mut text).map_err(|_|"源码不是有效 UTF-8 文本")?;
     if text.len()>2*1024*1024{return Err("源码文件增长超过大小限制".into());}
-    Ok(Source{text,name:canonical.file_name().unwrap_or_default().to_string_lossy().into(),declaration:canonical.extension().is_some_and(|e|e=="pyi"),language:match canonical.extension().and_then(|e|e.to_str()){Some("java")=>"java",Some("rs")=>"rust",Some("go")=>"golang",_=>"python3"}.into()})
+    Ok(Source{text,name:canonical.file_name().unwrap_or_default().to_string_lossy().into(),declaration:canonical.extension().is_some_and(|e|e=="pyi"),language:match canonical.extension().and_then(|e|e.to_str()){Some("java")=>"java",Some("rs")=>"rust",Some("go")=>"golang",Some("c")=>"c",Some("cpp"|"h"|"hpp")|None=>"cpp",_=>"python3"}.into()})
 }
 #[cfg(test)]mod tests{
     use super::*;

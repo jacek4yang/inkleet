@@ -23,7 +23,12 @@ use std::{path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::{Dura
         .env("HOME",&work).env("USERPROFILE",&work).env("TMP",&work).env("TEMP",&work);
     if let Some(system)=std::env::var_os("SystemRoot"){command.env("SystemRoot",system);}
     let settings=json!({"staticcheck":false,"usePlaceholders":false,"completeUnimported":true,"buildFlags":["-mod=readonly"]});
-    let client=Client::spawn(command,json!({"gopls":settings}),Arc::new(|_|{}))?;
+    let notices=Arc::new(std::sync::Mutex::new(Vec::<String>::new()));let observed=notices.clone();
+    let client=Client::spawn(command,json!({"gopls":settings}),Arc::new(move|value|{
+        if matches!(value.get("method").and_then(Value::as_str),Some("window/logMessage"|"window/showMessage")){
+            if let Ok(mut items)=observed.lock(){if items.len()<30{items.push(value.to_string().chars().take(2000).collect());}}
+        }
+    }))?;
     let result=(||->Result<(),String>{
         println!("GO_LSP_STAGE initialize");
         client.request("initialize",json!({"processId":null,"rootUri":root_uri,"workspaceFolders":[{"uri":root_uri,"name":"InkLeet Go"}],"initializationOptions":settings,"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"workspaceFolders":true},"textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}}}}}),Duration::from_secs(45))?;
@@ -52,6 +57,6 @@ use std::{path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::{Dura
         println!("GO_LSP_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"privateSourceBuild":true,"hover":true,"completion":true,"stdlibSource":true,"systemPathUsed":false}));
         Ok(())
     })();
-    if let Err(error)=&result{println!("GO_LSP_FAILURE {error}; stderr={}",client.stderr());}
+    if let Err(error)=&result{println!("GO_LSP_FAILURE {error}; notices={:?}; stderr={}",notices.lock().ok(),client.stderr());}
     let _=client.request("shutdown",Value::Null,Duration::from_secs(5));client.stop();result
 }

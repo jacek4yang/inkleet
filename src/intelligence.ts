@@ -7,7 +7,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
 type Started = { id: number; version: number; server: string; uri: string };
-export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" };
+export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" | "c" | "cpp" };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 function offset(doc: Text, position: unknown): number | null {
@@ -25,8 +25,8 @@ function content(value: unknown): string {
   if (Array.isArray(value)) return value.slice(0, 20).map(content).join("\n\n").slice(0, 32768);
   return object(value) && typeof value.value === "string" ? value.value.slice(0, 32768) : "";
 }
-export function languageIntelligence(language: "python3" | "java" | "golang" | "rust", status: (text: string) => void, showSource: (source: Source) => void) {
-  const serverName = { python3: "Pyright", java: "JDT LS", golang: "gopls", rust: "rust-analyzer" }[language];
+export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source) => void) {
+  const serverName = { python3: "Pyright", java: "JDT LS", golang: "gopls", rust: "rust-analyzer", c: "clangd", cpp: "clangd" }[language];
   const signatureEffect = StateEffect.define<Tooltip | null>();
   const signatureField = StateField.define<Tooltip | null>({
     create: () => null,
@@ -71,7 +71,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if (context.aborted || !view || view.state.doc !== doc) return null;
       const items = Array.isArray(result) ? result : object(result) && Array.isArray(result.items) ? result.items : [];
       const options: Completion[] = [];
-      for (const item of items.slice(0, 300)) {
+      const needle = word?.text.toLocaleLowerCase() ?? "";
+      // Filter before limiting: large standard libraries can put the desired member after item 300.
+      const candidates = items.slice(0, 5000).filter(item => object(item) && typeof item.label === "string" &&
+        (!needle || String(item.filterText ?? item.label).toLocaleLowerCase().includes(needle)));
+      candidates.sort((a, b) => String(a.sortText ?? a.label).localeCompare(String(b.sortText ?? b.label)));
+      for (const item of candidates.slice(0, 300)) {
         if (!object(item) || typeof item.label !== "string" || item.label.length > 512 || item.insertTextFormat === 2) continue;
         const primary = object(item.textEdit) ? item.textEdit : null;
         const editRange = primary ? range(doc, primary.range ?? primary.replace ?? primary.insert) : { from: word?.from ?? context.pos, to: context.pos };
@@ -202,7 +207,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     async connect(target: EditorView) {
       view = target;
       if (!isTauri()) { status("浏览器预览 · 语言服务需原生客户端"); return; }
-      status(`正在连接 ${{ python3: "Python", java: "Java", golang: "Go", rust: "Rust" }[language]} 语言服务…`);
+      status(`正在连接 ${{ python3: "Python", java: "Java", golang: "Go", rust: "Rust", c: "C", cpp: "C++" }[language]} 语言服务…`);
       const initial = target.state.doc;
       try {
         const connecting = connectionQueue.then(() => closed ? null : invoke<Started>("start_language_service", {text: initial.toString(), language}));

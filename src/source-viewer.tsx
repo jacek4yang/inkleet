@@ -4,6 +4,7 @@ import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { python } from "@codemirror/lang-python";
 import { go } from "@codemirror/lang-go";
+import { cpp } from "@codemirror/lang-cpp";
 import { rust } from "@codemirror/lang-rust";
 import { java } from "@codemirror/lang-java";
 import type { Source } from "./intelligence";
@@ -12,7 +13,7 @@ export function SourceViewer({ source, onClose }: { source: Source; onClose: () 
   useLayoutEffect(() => {
     dialog.current?.showModal();
     const state = EditorState.create({ doc: source.text, extensions: [
-      basicSetup, source.language === "java" ? java() : source.language === "golang" ? go() : source.language === "rust" ? rust() : python(), EditorState.readOnly.of(true), EditorView.editable.of(false),
+      basicSetup, source.language === "java" ? java() : source.language === "golang" ? go() : source.language === "rust" ? rust() : source.language === "cpp" || source.language === "c" ? cpp() : python(), EditorState.readOnly.of(true), EditorView.editable.of(false),
       EditorView.contentAttributes.of({ "aria-label": "只读标准库源码", tabindex: "0" }),
       EditorView.theme({ "&": { height: "100%", fontSize: "13px", backgroundColor: "#fcfcfa" }, ".cm-scroller": { fontFamily: "var(--font-mono)", overflow: "auto" } }),
     ] });

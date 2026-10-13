@@ -32,11 +32,13 @@ async fn main()->Result<(),String>{
         println!("Installing verified {id}");
         install.insert(id,manager.install(id,Arc::new(AtomicBool::new(false)),report.clone()).await?);
     }
+    #[cfg(windows)] install.insert("rust-mingw",manager.install("rust-mingw",Arc::new(AtomicBool::new(false)),report.clone()).await?);
     let work=root.join("work");std::fs::create_dir(&work).map_err(|e|e.to_string())?;
     let rustc=install["rustc"].clone();let cargo=install["cargo"].clone();let zig=install["zig"].clone();
     let stdroot=install["rust-std"].parent().unwrap().to_path_buf();
     let rust_lib=rustc.parent().unwrap().parent().unwrap().join("lib");
-    let paths=vec![rustc.parent().unwrap().to_owned(),rust_lib,cargo.parent().unwrap().to_owned(),zig.parent().unwrap().to_owned()];
+    #[allow(unused_mut)] let mut paths=vec![rustc.parent().unwrap().to_owned(),rust_lib,cargo.parent().unwrap().to_owned(),zig.parent().unwrap().to_owned()];
+    #[cfg(windows)] paths.push(install["rust-mingw"].parent().unwrap().to_owned());
     let version={let mut c=clean(&rustc,&work,&paths);c.arg("--version");checked(c)?};
     let cargo_version={let mut c=clean(&cargo,&work,&paths);c.arg("--version");checked(c)?};
     let ra_version={let mut c=clean(&install["rust-analyzer-preview"],&work,&paths);c.arg("--version");checked(c)?};
@@ -78,6 +80,7 @@ async fn main()->Result<(),String>{
     assert!(hover.to_string().contains("Vec"),"unexpected Rust hover: {hover}");
     let completion=client.request("textDocument/completion",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":3,"character":12}}),Duration::from_secs(15))?;
     let items=completion.as_array().or_else(||completion.get("items").and_then(serde_json::Value::as_array)).ok_or("Rust completion list")?;
+    println!("RUST_COMPLETION_DIAGNOSTIC {}",serde_json::json!({"count":items.len(),"push":items.iter().enumerate().filter(|(_,item)|item.get("label").and_then(serde_json::Value::as_str).is_some_and(|s|s.starts_with("push"))).take(2).collect::<Vec<_>>()}));
     assert!(items.iter().any(|item|item.get("label").and_then(serde_json::Value::as_str).is_some_and(|s|s.starts_with("push"))),"missing Rust Vec member completion");
     let definition=client.request("textDocument/definition",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":1,"character":23}}),Duration::from_secs(15))?;
     assert!(definition.to_string().contains("file:"),"missing real Rust source definition");
@@ -101,14 +104,18 @@ async fn main()->Result<(),String>{
         checked(command)?;
         assert_eq!(checked(clean(&output,&work,&paths))?.trim(),"6");
     }
-    let rust_source=work.join("check.rs");std::fs::write(&rust_source,"fn main(){let v=vec![1,2,3];println!(\"{}\",v.iter().sum::<i32>());}\n").map_err(|e|e.to_string())?;
+    let rust_source=work.join("check.rs");std::fs::write(&rust_source,"fn main(){let value=std::thread::spawn(||{let v=vec![1,2,3];v.iter().sum::<i32>()}).join().unwrap();assert!(std::panic::catch_unwind(||panic!(\"fixture\")).is_err());println!(\"{}\",value);}\n").map_err(|e|e.to_string())?;
     let output=work.join(format!("check-rust{extension}"));
     let mut command=clean(&rustc,&work,&paths);
     command.arg(&rust_source).arg("--edition=2021").arg("--sysroot").arg(&stdroot)
         .arg("-C").arg(format!("linker={}",std::env::current_exe().map_err(|e|e.to_string())?.display()))
         .args(["-C","linker-flavor=gcc"]).arg("-o").arg(&output)
         .env("INKLEET_LINKER_MODE","1").env("INKLEET_ZIG",&zig);
-    if cfg!(windows){command.args(["--target","x86_64-pc-windows-gnu"]);}
+    if cfg!(windows){
+        command.args(["--target","x86_64-pc-windows-gnu"]);
+        let mingw_target=install["rust-mingw"].parent().and_then(Path::parent).and_then(Path::parent).ok_or("Rust MinGW layout")?;
+        command.arg("-L").arg(format!("native={}",mingw_target.join("lib/self-contained").display()));
+    }
     checked(command)?;
     assert_eq!(checked(clean(&output,&work,&paths))?.trim(),"6");
     println!("COMPILER_RESULT {}",serde_json::json!({"platform":inkleet_managed_env::platform(),"rust":version.trim(),"cargo":cargo_version.trim(),"rustAnalyzer":ra_version.trim(),"rustCompileRun":true,"cCompileRun":true,"cppCompileRun":true,"systemPathUsed":false,"stdlibSource":install["rust-src"].is_file()}));

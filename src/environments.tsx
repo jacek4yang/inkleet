@@ -3,13 +3,14 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 type Tool = { id: string; version: string; size: number; phase: string; downloaded: number; message: string };
 type Overview = { platform: string; supported: boolean; tools: Tool[] };
 const groups = {
+  cpp: {name:"C / C++", ids:["zig","clangd"]},
   python: {name:"Python", ids:["python","node","pyright","debugpy"]},
   java: {name:"Java", ids:["jdk","jdtls"]},
   golang: {name:"Go", ids:["go","gopls"]},
   rust: {name:"Rust", ids:["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"]},
 };
 type Group = keyof typeof groups;
-const labels: Record<string, string> = { go: "Go 编译器与标准库源码", gopls: "Go 语言服务 · gopls", rustc: "Rust 编译器", cargo: "Rust 工程工具 · Cargo", "rust-std": "Rust 标准库", "rust-src": "Rust 标准库源码", "rust-analyzer-preview": "Rust 语言服务 · rust-analyzer", jdk: "Java 运行时与标准库源码", jdtls: "Java 语言服务 · Eclipse JDT LS", debugpy: "Python 调试器 · debugpy", python: "Python 运行时与标准库", node: "语言服务运行时", pyright: "Python 语言服务 · Pyright" };
+const labels: Record<string, string> = { zig: "C/C++ 编译器与标准库 · Zig", clangd: "C/C++ 语言服务 · clangd", go: "Go 编译器与标准库源码", gopls: "Go 语言服务 · gopls", rustc: "Rust 编译器", cargo: "Rust 工程工具 · Cargo", "rust-std": "Rust 标准库", "rust-src": "Rust 标准库源码", "rust-analyzer-preview": "Rust 语言服务 · rust-analyzer", jdk: "Java 运行时与标准库源码", jdtls: "Java 语言服务 · Eclipse JDT LS", debugpy: "Python 调试器 · debugpy", python: "Python 运行时与标准库", node: "语言服务运行时", pyright: "Python 语言服务 · Pyright" };
 const phases: Record<string, string> = { ready: "已安装", missing: "未安装", broken: "需要修复", queued: "准备中", downloading: "下载中", verifying: "校验中", extracting: "解压中", building: "编译工具中", canceling: "取消中", canceled: "已取消", error: "未完成" };
 const busy = (phase: string) => ["queued", "downloading", "verifying", "extracting", "building", "canceling"].includes(phase);
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1) + " MiB";
@@ -81,6 +82,6 @@ export function Environments({ onClose }: { onClose: () => void }) {
       </section>)}</div>
     </>}
     {error && <p role="alert" className="error">{error}</p>}
-    <p className="muted">Go 语言服务首次安装会使用独立 Go 编译固定源码，可能需要几分钟。C/C++ 和其余调试器仍在接入；Windows Java 中文路径兼容性仍在验证，未安装项不会伪装成可用。下载来源：Python Build Standalone、Node.js 官方发行版、Microsoft Pyright / debugpy、Eclipse Temurin / JDT LS、Rust 官方发行版、Go 官方发行版及校验模块代理。</p>
+    <p className="muted">Go 语言服务首次安装会使用独立 Go 编译固定源码，可能需要几分钟。其余语言的本地运行和调试界面仍在接入；Windows Java 中文路径兼容性仍在验证，未安装项不会伪装成可用。下载来源：Python Build Standalone、Node.js 官方发行版、Microsoft Pyright / debugpy、Eclipse Temurin / JDT LS、Rust 官方发行版、Go 官方发行版及校验模块代理、Zig 和 LLVM clangd。</p>
   </dialog>;
 }

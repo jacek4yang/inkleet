@@ -3,6 +3,7 @@ mod managed;
 mod lsp;
 mod lsp_document;
 mod lsp_launch;
+mod lsp_native;
 mod local_run;
 mod debugger;
 mod leetcode;

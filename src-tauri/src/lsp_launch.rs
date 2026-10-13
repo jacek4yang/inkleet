@@ -7,7 +7,7 @@ pub struct Launch{
     pub command:Command,pub settings:Value,pub initialization:Value,pub roots:Vec<PathBuf>,
     pub filename:&'static str,pub language_id:&'static str,pub server:&'static str,
 }
-fn clean(command:&mut Command,root:&Path,paths:&[PathBuf])->Result<()>{
+pub(crate) fn clean(command:&mut Command,root:&Path,paths:&[PathBuf])->Result<()>{
     command.current_dir(root).env_clear().env("PATH",std::env::join_paths(paths).map_err(|_|"工具路径无效")?)
         .env("HOME",root).env("USERPROFILE",root).env("TEMP",root).env("TMP",root);
     if let Some(system)=std::env::var_os("SystemRoot"){command.env("SystemRoot",system);}
@@ -93,6 +93,7 @@ pub fn prepare(manager:&Manager,root:&Path,language:&str)->Result<Launch>{
             let settings=json!({"rust-analyzer":initialization});
             Ok(Launch{command,settings,initialization,roots:vec![std::fs::canonicalize(root).map_err(|_|"工作区无效")?,std::fs::canonicalize(source_root).map_err(|_|"Rust 标准库源码无效")?],filename:"solution.rs",language_id:"rust",server:"rust-analyzer"})
         },
+        "c"|"cpp"=>crate::lsp_native::prepare(manager,root,language),
         _=>Err("此语言服务尚未接入".into()),
     }
 }

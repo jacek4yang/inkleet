@@ -206,13 +206,14 @@ try:
         for group,language,server,code_text,member,definition_word,source_name in [
             ("golang","golang","gopls",'import "strings"; func example() { var builder strings.Builder; builder. }',"WriteString","Builder","builder.go"),
             ("rust","rust","rust-analyzer","fn example() { let mut values = Vec::<i32>::new(); values.pu }","push","Vec","mod.rs"),
+            ("cpp","cpp","clangd","void example() { vector<int> values; values.pu }","push_back","vector","vector.h"),
         ]:
             click('[data-action="open-environments"]')
             wait_for(lambda: element("dialog.environments"), "environment dialog")
             click(f'select[aria-label="开发环境语言"] option[value="{group}"]')
             click(".environment-summary button")
             wait_for(lambda: all("已安装" in text(f'[data-tool="{tool}"]') for tool in (
-                ["go","gopls"] if group=="golang" else ["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"]
+                {"golang":["go","gopls"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"],"cpp":["zig","clangd"]}[group]
             )),f"{group} managed installation",seconds=720)
             click("dialog.environments header button")
             click(f'select[aria-label="编程语言"] option[value="{language}"]')

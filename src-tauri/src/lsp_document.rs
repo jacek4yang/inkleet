@@ -1,6 +1,12 @@
 //! Virtual language scaffolding never changes the user's saved/submitted source.
 use serde_json::Value;
 pub fn source(language:&str,text:&str)->(String,u32){
+    let prefix=match language{
+        "cpp"=>"#include <vector>\n#include <string>\n#include <algorithm>\n#include <array>\n#include <map>\n#include <unordered_map>\n#include <set>\n#include <unordered_set>\n#include <queue>\n#include <stack>\n#include <deque>\n#include <list>\n#include <tuple>\n#include <utility>\n#include <numeric>\n#include <functional>\n#include <limits>\n#include <climits>\n#include <cmath>\n#include <cstdint>\nusing namespace std;\n",
+        "c"=>"#include <stdlib.h>\n#include <stdio.h>\n#include <string.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <limits.h>\n#include <math.h>\n",
+        _=>"",
+    };
+    if !prefix.is_empty(){return(format!("{prefix}{text}"),prefix.lines().count() as u32);}
     if language=="golang"&&!go_package(text){(format!("package main\n{text}"),1)}else{(text.to_owned(),0)}
 }
 fn go_package(text:&str)->bool{
@@ -58,6 +64,14 @@ pub fn diagnostics(value:&mut Value,prefix:u32){
         let (wrapped,prefix)=source("golang",text);assert_eq!(prefix,1);assert_eq!(wrapped,format!("package main\n{text}"));
         for text in ["package foo\n", "// header\npackage main\n", "/* header */\npackage fixture\n","\u{feff}package main\n"]{assert_eq!(source("golang",text),(text.to_owned(),0));}
         assert_eq!(source("python3","print(1)"),("print(1)".into(),0));
+    }
+    #[test]fn c_family_headers_remain_virtual(){
+        for language in ["c","cpp"]{
+            let original="int solve(){return 0;}";
+            let (wrapped,prefix)=source(language,original);
+            assert!(prefix>0);assert!(wrapped.ends_with(original));
+            assert_eq!(wrapped.lines().count(),prefix as usize+1);
+        }
     }
     #[test]fn completion_and_diagnostics_map_only_editable_lines(){
         let span=|line|json!({"start":{"line":line,"character":0},"end":{"line":line,"character":1}});
