@@ -1,0 +1,33 @@
+name: Prepare editor language-service lock
+on:
+  push:
+    branches: [feat/first-workbench]
+    paths: ['.github/workflows/editor-lock.yml']
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Pin one shared CodeMirror state and view for LSP extensions
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const p=JSON.parse(fs.readFileSync("package.json")); Object.assign(p.dependencies,{"@codemirror/state":"6.7.6","@codemirror/view":"6.43.14","@codemirror/autocomplete":"6.20.3","@codemirror/lint":"6.9.7"}); p.overrides={"@codemirror/state":"6.7.6","@codemirror/view":"6.43.14"}; fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");'
+          npm install --package-lock-only --ignore-scripts
+          npm ci --ignore-scripts
+          npm ls @codemirror/state @codemirror/view
+          npm run typecheck
+          npm test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: editor-language-service-lock
+          path: |
+            package.json
+            package-lock.json
+          retention-days: 7
