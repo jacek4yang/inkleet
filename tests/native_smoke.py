@@ -47,7 +47,10 @@ def fill(css, value):
                 {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}
             ]}]})
         if line: cmd("POST",f"/element/{node}/value",{"text":line,"value":list(line)})
-    wait_for(lambda: text(css) == value, "GUI text matches typed text")
+    def editor_text():
+        lines=cmd("POST",f"/element/{node}/elements",{"using":"css selector","value":".cm-line"})
+        return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else text(css)
+    wait_for(lambda: editor_text() == value, "GUI line texts match typed text")
 def screenshot(name):
     (evidence / name).write_bytes(base64.b64decode(cmd("GET","/screenshot")))
 def start():
@@ -104,7 +107,9 @@ try:
         click(".environments header button")
         click('select[aria-label="编程语言"] option[value="python3"]')
         wait_for(lambda: "Pyright 已连接" in text(".lsp-status"), "real private language server connected", seconds=45)
-        fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.")
+        fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
+        python_source=source.with_name("solution.py")
+        wait_for(lambda: python_source.exists() and python_source.read_text() == "from collections import deque\nitems = deque([1, 2])\nitems.pop", "multiline Python source persisted exactly")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue009"}
         ]}]})
