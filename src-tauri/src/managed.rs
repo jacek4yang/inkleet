@@ -16,7 +16,7 @@ impl Environments {
         if jobs.is_some(){return;}
         let mut result=BTreeMap::new();
         if platform()!="unsupported" {
-            for package in catalogue().into_iter().filter(|p|(p.platform==platform()||p.platform=="any")&&(matches!(p.id.as_str(),"python"|"node"|"pyright"|"debugpy"|"go"|"gopls"|"rustc"|"cargo"|"rust-std"|"rust-mingw"|"rust-src"|"rust-analyzer-preview"|"zig"|"clangd"|"delve"|"codelldb")||(!cfg!(windows)&&matches!(p.id.as_str(),"jdk"|"jdtls")))){
+            for package in catalogue().into_iter().filter(|p|(p.platform==platform()||p.platform=="any")&&(matches!(p.id.as_str(),"python"|"node"|"pyright"|"debugpy"|"go"|"gopls"|"rustc"|"cargo"|"rust-std"|"rust-mingw"|"rust-src"|"rust-analyzer-preview"|"zig"|"clangd"|"delve"|"codelldb")||matches!(p.id.as_str(),"jdk"|"jdtls"))){
                 let (phase,message)=match self.manager.installed(&package.id){
                     Ok(Some(_))=>("ready","已通过入口文件校验".to_owned()),
                     Ok(None)=>("missing",String::new()),

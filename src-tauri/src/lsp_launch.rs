@@ -43,18 +43,16 @@ pub fn prepare(manager:&Manager,root:&Path,language:&str)->Result<Launch>{
             Ok(Launch{command,settings,initialization:Value::Null,roots,filename:"solution.py",language_id:"python",server:"Pyright"})
         },
         "java"=>{
-            if cfg!(windows){return Err("Windows Java 中文路径兼容性仍在验证；当前尚未启用此语言服务".into());}
-            let java=manager.installed("jdk")?.ok_or("请先在开发环境中安装 Java 运行时")?;
+            let runtime=inkleet_managed_env::java_runtime::Runtime::prepare(manager,std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)))?;
             let launcher=manager.installed("jdtls")?.ok_or("请先安装 Java 语言服务")?;
-            let java_home=java.parent().and_then(Path::parent).ok_or("Java 目录无效")?;
+            let java_home=&runtime.home;
             let jdt_home=launcher.parent().and_then(Path::parent).ok_or("Java 语言服务目录无效")?;
             let config=root.join(".inkleet-jdt-config");
-            copy_config(&jdt_home.join(if cfg!(target_os="macos"){"config_mac"}else{"config_linux"}),&config,&mut(4*1024*1024))?;
-            let mut command=Command::new(&java);
-            command.args(["-Xms64m","-Xmx512m","-Djava.awt.headless=true","-Dfile.encoding=UTF-8","-Declipse.application=org.eclipse.jdt.ls.core.id1","-Dosgi.bundles.defaultStartLevel=4","-Declipse.product=org.eclipse.jdt.ls.core.product","--add-modules=ALL-SYSTEM","--add-opens","java.base/java.util=ALL-UNNAMED","--add-opens","java.base/java.lang=ALL-UNNAMED"])
-                .arg("-jar").arg(launcher).arg("-configuration").arg(config).arg("-data").arg(root.join(".inkleet-jdt-data"));
-            clean(&mut command,root,&[java.parent().ok_or("Java 路径无效")?.to_owned()])?;
-            command.env("JAVA_HOME",java_home);
+            copy_config(&jdt_home.join(if cfg!(target_os="macos"){"config_mac"}else if cfg!(windows){"config_win"}else{"config_linux"}),&config,&mut(4*1024*1024))?;
+            let mut options=vec!["-Xms64m","-Xmx512m","-Djava.awt.headless=true","-Dfile.encoding=UTF-8","-Declipse.application=org.eclipse.jdt.ls.core.id1","-Dosgi.bundles.defaultStartLevel=4","-Declipse.product=org.eclipse.jdt.ls.core.product","--add-modules=ALL-SYSTEM","--add-opens=java.base/java.util=ALL-UNNAMED","--add-opens=java.base/java.lang=ALL-UNNAMED"].into_iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+            options.push(format!("-Djava.class.path={}",launcher.display()).into());
+            let mut command=runtime.command(root,&options,"org.eclipse.equinox.launcher.Main")?;
+            command.arg("-configuration").arg(config).arg("-data").arg(root.join(".inkleet-jdt-data"));
             let settings=json!({"java":{"home":java_home,"autobuild":{"enabled":false},"import":{"maven":{"enabled":false},"gradle":{"enabled":false}},"configuration":{"runtimes":[{"name":"JavaSE-25","path":java_home,"default":true}],"updateBuildConfiguration":"disabled"},"project":{"referencedLibraries":[]}}});
             let root_uri=reqwest::Url::from_directory_path(root).map_err(|_|"Java 工作区地址无效")?.to_string();
             let initialization=json!({"settings":settings,"workspaceFolders":[root_uri],"extendedClientCapabilities":{"classFileContentsSupport":true}});

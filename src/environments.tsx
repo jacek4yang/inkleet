@@ -5,7 +5,7 @@ type Overview = { platform: string; supported: boolean; tools: Tool[] };
 const groups = {
   cpp: {name:"C / C++", ids:["zig","clangd","codelldb"]},
   python: {name:"Python", ids:["python","node","pyright","debugpy"]},
-  java: {name:"Java", ids:["jdk","jdtls"]},
+  java: {name:"Java", ids:["jdk","jdtls","zig"]},
   golang: {name:"Go", ids:["go","gopls","delve"]},
   rust: {name:"Rust", ids:["rustc","cargo","rust-std","rust-src","rust-analyzer-preview","rust-mingw","zig","codelldb"]},
 };
@@ -23,7 +23,7 @@ export function Environments({ onClose }: { onClose: () => void }) {
   const [group,setGroup] = useState<Group>("python");
   const groupName = groups[group].name;
   const [installGoService,setInstallGoService] = useState(false);
-  const visibleTools = overview?.tools.filter(tool => groups[group].ids.includes(tool.id)) ?? [];
+  const visibleTools = overview?.tools.filter(tool => groups[group].ids.includes(tool.id) && !(group==="java" && tool.id==="zig" && overview.platform!=="windows-x64")) ?? [];
   const [, setActions] = useState(0);
   const statusSequence = useRef(0);
   async function refreshStatus() {
@@ -82,6 +82,6 @@ export function Environments({ onClose }: { onClose: () => void }) {
       </section>)}</div>
     </>}
     {error && <p role="alert" className="error">{error}</p>}
-    <p className="muted">Go 语言服务首次安装会使用独立 Go 编译固定源码，可能需要几分钟。Java 的本地运行和调试界面仍在接入；Windows Java 中文路径兼容性仍在验证，未安装项不会伪装成可用。下载来源：Python Build Standalone、Node.js 官方发行版、Microsoft Pyright / debugpy、Eclipse Temurin / JDT LS、Rust 官方发行版、Go 官方发行版及校验模块代理、Zig 和 LLVM clangd。</p>
+    <p className="muted">Go 语言服务首次安装会使用独立 Go 编译固定源码，可能需要几分钟。Java 的调试界面仍在接入；Windows Java 使用应用自己的 UTF-8 启动器，不修改系统语言设置；未安装项不会伪装成可用。下载来源：Python Build Standalone、Node.js 官方发行版、Microsoft Pyright / debugpy、Eclipse Temurin / JDT LS、Rust 官方发行版、Go 官方发行版及校验模块代理、Zig 和 LLVM clangd。</p>
   </dialog>;
 }
