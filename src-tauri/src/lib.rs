@@ -6,6 +6,7 @@ mod lsp_launch;
 mod lsp_native;
 mod local_run;
 mod debugger;
+mod debug_launch;
 mod leetcode;
 mod auth;
 mod cache;

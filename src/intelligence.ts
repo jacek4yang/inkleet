@@ -67,13 +67,23 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     context.addEventListener("abort", () => {}, { onDocChange: true });
     const doc = context.state.doc;
     try {
-      const result = await request("completion", context.pos, doc);
-      if (context.aborted || !view || view.state.doc !== doc) return null;
-      const items = Array.isArray(result) ? result : object(result) && Array.isArray(result.items) ? result.items : [];
+      const deadline = Date.now() + (context.explicit ? 8000 : 1200);
+      let items: unknown[] = [];
+      for (let attempt = 0; ; attempt++) {
+        const result = await request("completion", context.pos, doc);
+        if (context.aborted || !view || view.state.doc !== doc || view.state.selection.main.head !== context.pos) return null;
+        items = Array.isArray(result) ? result : object(result) && Array.isArray(result.items) ? result.items : [];
+        if (items.length || Date.now() >= deadline) break;
+        // initialize confirms transport readiness, not completed project indexing.
+        // Re-query only this unchanged completion context; never restart a server.
+        if (context.explicit) status(serverName + " 正在准备补全…");
+        await new Promise(resolve => setTimeout(resolve, Math.min(200 * 2 ** attempt, 1200)));
+        if (context.aborted || closed || !view || view.state.doc !== doc || view.state.selection.main.head !== context.pos) return null;
+      }
       const options: Completion[] = [];
       const needle = word?.text.toLocaleLowerCase() ?? "";
       // Filter before limiting: large standard libraries can put the desired member after item 300.
-      const candidates = items.slice(0, 5000).filter(item => object(item) && typeof item.label === "string" &&
+      const candidates = items.slice(0, 5000).filter((item): item is Record<string, any> => object(item) && typeof item.label === "string" &&
         (!needle || String(item.filterText ?? item.label).toLocaleLowerCase().includes(needle)));
       candidates.sort((a, b) => String(a.sortText ?? a.label).localeCompare(String(b.sortText ?? b.label)));
       for (const item of candidates.slice(0, 300)) {
@@ -97,12 +107,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         if (!valid) continue;
         const anchor = editRange.from + insert.length + changes.filter(c => c.from < editRange.from).reduce((sum, c) => sum + c.insert.length - (c.to - c.from), 0);
         options.push({
-          label: item.label, detail: typeof item.detail === "string" ? item.detail.slice(0, 500) : undefined,
+          label: typeof item.filterText === "string" ? item.filterText.slice(0, 512) : item.label.trimStart(), displayLabel: item.label.trimStart(), detail: typeof item.detail === "string" ? item.detail.slice(0, 500) : undefined,
           info: content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
           apply(target) { if (!closed && target.state.doc === doc) target.dispatch({ changes, selection: { anchor }, userEvent: "input.complete" }); },
         });
       }
-      if (!options.length && context.explicit) status(serverName + " 未找到匹配补全 · 服务返回 " + items.length + " 项");
+      if (context.explicit) status(options.length ? serverName + " 已连接 · F12 / Ctrl+单击查看定义" : serverName + " 未找到匹配补全 · 服务返回 " + items.length + " 项");
       return options.length ? { from: word?.from ?? context.pos, options } : null;
     } catch (error) { if (context.explicit && !closed) status(serverName + " 补全暂不可用：" + String(error).slice(0, 300)); return null; }
   }

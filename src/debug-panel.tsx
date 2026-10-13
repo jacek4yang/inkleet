@@ -43,7 +43,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   async function showFrame(frame: Frame, current = latest.current) {
     if (!current || current.phase !== "paused") return;
     const request = ++version.current; setFrame(frame.id); setVariables([]);
-    if (!stale && original && (frame.source?.name === "solution.py" || frame.source?.path?.endsWith("/solution.py") || frame.source?.path?.endsWith("\\solution.py"))) pauseCallback.current(frame.line);
+    if (!stale && original && (/(?:^|[\\/])solution\.(?:py|go)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current(frame.line);
     else pauseCallback.current(0);
     try {
       const response = await inspect("scopes", frame.id, current);
@@ -79,7 +79,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     finally { guard.current = false; if (alive.current) setPending(false); }
   }
   const keyAction=useRef<(kind:string)=>boolean>(()=>false);
-  keyAction.current=kind=>{if(pending||guard.current||snapshot.language!=="python3"||running)return false;void action(kind);return true;};
+  keyAction.current=kind=>{if(pending||guard.current||!["python3","golang"].includes(snapshot.language)||running)return false;void action(kind);return true;};
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{
       if(event.repeat||!isTauri()||event.altKey||event.ctrlKey||event.metaKey||document.querySelector("dialog[open]"))return;
@@ -93,15 +93,15 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     return()=>window.removeEventListener("keydown",onKey);
   },[]);
   const paused = state?.phase === "paused";
-  return <div className="debug-panel" aria-label="Python 调试">
+  return <div className="debug-panel" aria-label="本地断点调试">
     <div className="local-actions"><strong>断点调试</strong>
-      <button disabled={!isTauri() || snapshot.language !== "python3" || !!active(state) || pending || running} onClick={() => action("start")}>{pending && !active(state) ? "启动调试…" : "开始调试"}</button>
-      {active(state) && <><button disabled={pending} onClick={() => action(paused ? "continue" : "pause")}>{paused ? "继续" : "暂停"}</button>
+      <button disabled={!isTauri() || !["python3", "golang"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")}>{pending && !active(state) ? "启动调试…" : "开始调试"}</button>
+      {active(state) && <><button disabled={pending || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action(paused ? "continue" : "pause")}>{paused ? "继续" : "暂停"}</button>
         {(["next", "stepIn", "stepOut"] as const).map((kind, index) => <button key={kind} disabled={!paused || pending} onClick={() => action(kind)}>{["单步跳过", "单步进入", "单步跳出"][index]}</button>)}
-        <button disabled={pending || stale || !original} onClick={() => action("breakpoints")}>应用断点</button><button disabled={pending} onClick={() => action("stop")}>停止调试</button></>}
+        <button disabled={pending || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")}>应用断点</button><button disabled={pending} onClick={() => action("stop")}>停止调试</button></>}
     </div>
     <p className="muted">点击代码左侧断点栏或按 F9。断点：{breakpoints.join(", ") || "未设置"}。运行中可用“应用断点”更新。F5 开始 / 继续，F10 单步跳过，F11 进入，Shift+F11 跳出，Shift+F5 停止。连续执行限时 30 秒，整个会话最多 30 分钟。</p>
-    <p role="status">{state ? state.phase === "paused" ? "已暂停 · " + state.reason : state.phase === "finished" ? "调试结束 · " + state.reason : "调试运行中" : "尚未调试"}</p>
+    <p role="status">{state ? state.phase === "paused" ? "已暂停 · " + state.reason : state.phase === "finished" ? "调试结束 · " + state.reason : state.phase === "compiling" ? "正在编译调试快照…" : state.phase === "starting" ? "正在连接调试器…" : "调试运行中" : "尚未调试"}</p>
     {notice && <p role="status">{notice}</p>}
     {stale && <p className="cache-warning">代码或用例已改变，调试仍使用启动时快照；当前编辑器不显示旧快照停靠行。</p>}
     {(error || state?.error) && <p className="error" role="alert">{error || state?.error}</p>}
