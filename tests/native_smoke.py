@@ -6,6 +6,8 @@ session = None
 evidence = pathlib.Path("evidence/native")
 evidence.mkdir(parents=True, exist_ok=True)
 data = pathlib.Path(os.environ["XDG_DATA_HOME"])
+class PublicServiceUnavailable(Exception): pass
+(evidence/"LIVE_CN_RESULT.txt").write_text("NOT RUN: live public CN validation has not completed.\n")
 def request(method, path, payload=None):
     raw = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(BASE + path, data=raw, method=method, headers={"Content-Type":"application/json"})
@@ -242,13 +244,15 @@ try:
             ("golang","golang","gopls",'import "strings"; func example() { var builder strings.Builder; builder. }',"WriteString","Builder","builder.go"),
             ("rust","rust","rust-analyzer","fn example() { let mut values = Vec::<i32>::new(); values.pu }","push","Vec","mod.rs"),
             ("cpp","cpp","clangd","void example() { vector<int> values; values.pu }","push_back","vector","vector.h"),
+            ("c","c","clangd",'void example(void) { printf(""); struct { int value; } pair; pair.va }',"value","printf","stdio.h"),
         ]:
             click('[data-action="open-environments"]')
             wait_for(lambda: element("dialog.environments"), "environment dialog")
-            click(f'select[aria-label="开发环境语言"] option[value="{group}"]')
+            environment_group="cpp" if group=="c" else group
+            click(f'select[aria-label="开发环境语言"] option[value="{environment_group}"]')
             click(".environment-summary button")
             wait_for(lambda: all("已安装" in text(f'[data-tool="{tool}"]') for tool in (
-                {"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"],"cpp":["zig","clangd","codelldb"]}[group]
+                {"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview"],"cpp":["zig","clangd","codelldb"],"c":["zig","clangd","codelldb"]}[group]
             )),f"{group} managed installation",seconds=720)
             click("dialog.environments header button")
             click(f'select[aria-label="编程语言"] option[value="{language}"]')
@@ -270,9 +274,10 @@ try:
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
-            if group in ("golang","cpp"):
+            if group in ("golang","cpp","c"):
                 local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
                 if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"
+                if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
                 fill(code,local_solution)
                 if not cmd("POST","/elements",{"using":"css selector","value":".local-runner"}):
                     click(".pane-heading .actions button")
@@ -281,7 +286,7 @@ try:
                 click('[data-action="local-execute"]')
                 wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),f"{group} private compilation and typed local result",seconds=280)
                 screenshot(group+"-local-run-native.png")
-                saved_solution=data/("top.jacek.inkleet/notebook/sample-sum/solution."+("go" if group=="golang" else "cpp"))
+                saved_solution=data/("top.jacek.inkleet/notebook/sample-sum/solution."+({"golang":"go","cpp":"cpp","c":"c"}[group]))
                 wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
                 (evidence/(group.upper()+"_LOCAL_GUI_RESULT.txt")).write_text(f"PASS: actual Linux GUI compiles a {group} solution using its private downloaded toolchain, executes the bounded typed harness and returns exact value 10. No online judge verdict.\n")
                 click('[data-local-tab="debug"]')
@@ -321,7 +326,24 @@ try:
         wait_for(lambda: element(search), "catalogue opened")
         cmd("POST", f"/element/{element(search)}/value", {"text": "two sum", "value": list("two sum")})
         click('dialog form button[type="submit"]')
-        wait_for(lambda: element('dialog button[data-slug="two-sum"]'), "live Chinese search result", seconds=30)
+        def live_search_outcome():
+            results=cmd("POST","/elements",{"using":"css selector","value":'dialog button[data-slug="two-sum"]'})
+            if results: return ("result",None)
+            alerts=cmd("POST","/elements",{"using":"css selector","value":'dialog [role="alert"]'})
+            if alerts:
+                message=cmd("GET",f"/element/{alerts[0][EID]}/text")
+                # Only the known upstream access-denied state is environmental.
+                # Unknown UI errors, parsing failures and timeouts remain failures.
+                if "中国站拒绝访问" in message: return ("blocked",message)
+            return None
+        outcome,reason=wait_for(live_search_outcome, "live Chinese search result or explicit upstream denial", seconds=30)
+        if outcome=="blocked":
+            screenshot("public-unavailable-native.png")
+            assert text(code)==marker, "Denied search changed current editor draft"
+            preserved=data/"top.jacek.inkleet/notebook/sample-sum/solution.rs"
+            wait_for(lambda: preserved.read_text()==marker,"Denied search preserves saved source")
+            click(".catalogue-heading button")
+            raise PublicServiceUnavailable(reason)
         click('dialog button[data-slug="two-sum"]')
         wait_for(lambda: "两数之和" in text("article h1"), "real Chinese question rendered", seconds=30)
         wait_for(lambda: "impl Solution" in text(code), "official Rust template loaded")
@@ -395,6 +417,9 @@ try:
         if old_no_proxy is None: os.environ.pop("NO_PROXY", None)
         else: os.environ["NO_PROXY"] = old_no_proxy
         (evidence/"LIVE_CN_RESULT.txt").write_text("PASS: real public CN search and question through native GUI, official Rust template, local source save, normalized question-link opening, duplicate draft preservation and offline link/cache recovery. No authenticated login, run or submit.\\n")
+except PublicServiceUnavailable as error:
+    (evidence/"LIVE_CN_RESULT.txt").write_text("UNVERIFIED: public LeetCode CN access denied during live GUI search. Local IDE checks completed; current source preserved. Fresh online question/link/cache sequence not run. " + str(error) + "\n")
+    print("::warning::Live public LeetCode CN verification blocked by upstream access denial; not a passing online or authentication result.",flush=True)
 except Exception:
     subprocess.run(["scrot", str(evidence / "desktop-failure.png")], check=False)
     if session:

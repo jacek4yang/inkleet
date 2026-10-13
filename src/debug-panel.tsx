@@ -43,7 +43,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   async function showFrame(frame: Frame, current = latest.current) {
     if (!current || current.phase !== "paused") return;
     const request = ++version.current; setFrame(frame.id); setVariables([]);
-    if (!stale && original && (/(?:^|[\\/])solution\.(?:py|go|cpp)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current(frame.line);
+    if (!stale && original && (/(?:^|[\\/])solution\.(?:py|go|cpp|c)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current(frame.line);
     else pauseCallback.current(0);
     try {
       const response = await inspect("scopes", frame.id, current);
@@ -79,7 +79,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     finally { guard.current = false; if (alive.current) setPending(false); }
   }
   const keyAction=useRef<(kind:string)=>boolean>(()=>false);
-  keyAction.current=kind=>{if(pending||guard.current||!["python3","golang","cpp"].includes(snapshot.language)||running)return false;void action(kind);return true;};
+  keyAction.current=kind=>{if(pending||guard.current||!["python3","golang","cpp","c"].includes(snapshot.language)||running)return false;void action(kind);return true;};
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{
       if(event.repeat||!isTauri()||event.altKey||event.ctrlKey||event.metaKey||document.querySelector("dialog[open]"))return;
@@ -95,7 +95,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   const paused = state?.phase === "paused";
   return <div className="debug-panel" aria-label="本地断点调试">
     <div className="local-actions"><strong>断点调试</strong>
-      <button disabled={!isTauri() || !["python3", "golang", "cpp"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")}>{pending && !active(state) ? "启动调试…" : "开始调试"}</button>
+      <button disabled={!isTauri() || !["python3", "golang", "cpp", "c"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")}>{pending && !active(state) ? "启动调试…" : "开始调试"}</button>
       {active(state) && <><button disabled={pending || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action(paused ? "continue" : "pause")}>{paused ? "继续" : "暂停"}</button>
         {(["next", "stepIn", "stepOut"] as const).map((kind, index) => <button key={kind} disabled={!paused || pending} onClick={() => action(kind)}>{["单步跳过", "单步进入", "单步跳出"][index]}</button>)}
         <button disabled={pending || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")}>应用断点</button><button disabled={pending} onClick={() => action("stop")}>停止调试</button></>}

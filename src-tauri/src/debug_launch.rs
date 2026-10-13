@@ -38,11 +38,11 @@ pub fn prepare(manager:&Manager,root:&Path,snapshot:&crate::local_run::Snapshot,
         if output.exit_code!=Some(0)||output.truncated{return Err(format!("Go 调试编译未完成：\n{}",output.stderr));}
         let mut command=Command::new(delve);clean(&mut command)?;
         Ok(Launch{command,adapter:"go",arguments:json!({"name":"InkLeet local snapshot","type":"go","request":"launch","mode":"exec","program":binary,"cwd":root,"outputMode":"remote","stopOnEntry":false})})
-    }else if snapshot.language=="cpp"{
+    }else if matches!(snapshot.language.as_str(),"cpp"|"c"){
         let adapter=process::tool_path(&manager.installed("codelldb")?.ok_or("请先安装 C/C++ 调试器 CodeLLDB")?);
         let (binary,output)=crate::compiled_runtime::cpp(manager,root,root.parent().ok_or("调试缓存路径无效")?,snapshot,cancel)?;
         if output.canceled{return Err("调试编译已停止".into());}
-        if output.timed_out{return Err("C++ 调试编译超过 240 秒，已终止".into());}
+        if output.timed_out{return Err("C/C++ 调试编译超过 240 秒，已终止".into());}
         if output.exit_code!=Some(0)||output.truncated{return Err(format!("C++ 调试编译未完成：\n{}",output.stderr));}
         let mut command=Command::new(&adapter);crate::compiled_runtime::clean_runtime(&mut command,root)?;
         command.env("PATH",adapter.parent().ok_or("调试器路径无效")?);
