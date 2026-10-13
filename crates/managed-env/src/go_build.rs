@@ -3,12 +3,14 @@
 use crate::{Manager,Package,Report,Progress,Result,directory,regular,io,canceled,process};
 use std::{path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::Duration};
 pub(crate) fn build(manager:&Manager,p:&Package,stage:&Path,cancel:Arc<AtomicBool>,report:&Report)->Result<()>{
-    let go=manager.installed("go")?.ok_or("请先安装应用独立的 Go 工具链，再安装 gopls")?;
+    let stage=process::tool_path(stage);let stage=stage.as_path();
+    let go=process::tool_path(&manager.installed("go")?.ok_or("请先安装应用独立的 Go 工具链，再安装 gopls")?);
     let go_home=go.parent().and_then(Path::parent).ok_or("Go 工具链路径无效")?;
     regular(&stage.join("go.mod"))?;regular(&stage.join("go.sum"))?;
     let original_mod=io(std::fs::read(stage.join("go.mod")))?;let original_sum=io(std::fs::read(stage.join("go.sum")))?;
-    let cache=manager.root.join("go-build-cache");let modules=manager.root.join("go-module-cache");
-    let home=manager.root.join("go-build-home");let output=stage.join(&p.entry);
+    let root=process::tool_path(&manager.root);
+    let cache=root.join("go-build-cache");let modules=root.join("go-module-cache");
+    let home=root.join("go-build-home");let output=stage.join(&p.entry);
     for path in [&cache,&modules,&home,output.parent().ok_or("gopls 输出目录无效")?]{directory(path)?;}
     let command=||->Result<Command>{
         let mut cmd=Command::new(&go);

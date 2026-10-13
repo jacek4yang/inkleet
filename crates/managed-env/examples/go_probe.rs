@@ -3,7 +3,7 @@ use serde_json::{json,Value};
 use std::{path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::{Duration,Instant}};
 #[tokio::main]async fn main()->Result<(),String>{
     let temp=tempfile::Builder::new().prefix("inkleet go 语言 ").tempdir().map_err(|e|e.to_string())?;
-    let root=std::fs::canonicalize(temp.path()).map_err(|e|e.to_string())?;
+    let root=inkleet_managed_env::process::tool_path(&std::fs::canonicalize(temp.path()).map_err(|e|e.to_string())?);
     let manager=Manager::new(root.join("tools"));let report:Report=Arc::new(|p|{if p.phase!="downloading"{println!("GO_INSTALL_STAGE {}",p.phase);}});
     let go=manager.install("go",Arc::new(AtomicBool::new(false)),report.clone()).await?;
     let gopls=manager.install("gopls",Arc::new(AtomicBool::new(false)),report.clone()).await?;

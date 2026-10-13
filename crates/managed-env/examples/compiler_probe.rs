@@ -25,7 +25,7 @@ async fn main()->Result<(),String>{
         std::process::exit(status.code().unwrap_or(1));
     }
     let temp=tempfile::Builder::new().prefix("inkleet compiler 空格 ").tempdir().map_err(|e|e.to_string())?;
-    let root=std::fs::canonicalize(temp.path()).map_err(|e|e.to_string())?;
+    let root=process::tool_path(&std::fs::canonicalize(temp.path()).map_err(|e|e.to_string())?);
     let manager=Manager::new(root.join("tools"));let report:Report=Arc::new(|_|{});
     let mut install=std::collections::HashMap::new();
     for id in ["rustc","cargo","rust-std","rust-analyzer-preview","rust-src","zig"]{
@@ -64,9 +64,10 @@ async fn main()->Result<(),String>{
     client.request("initialize",serde_json::json!({"processId":null,"rootUri":root_uri,"workspaceFolders":[{"uri":root_uri,"name":"InkLeet fixture"}],"initializationOptions":config,"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true},"textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}}}}}),Duration::from_secs(30))?;
     client.notify("initialized",serde_json::json!({}))?;
     client.notify("textDocument/didOpen",serde_json::json!({"textDocument":{"uri":uri,"languageId":"rust","version":1,"text":doc}}))?;
-    let deadline=std::time::Instant::now()+Duration::from_secs(60);
+    let deadline=std::time::Instant::now()+Duration::from_secs(90);
     let hover=loop{
-        let result=client.request("textDocument/hover",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":2,"character":8}}),Duration::from_secs(10))?;
+        let result=client.request("textDocument/hover",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":2,"character":8}}),Duration::from_secs(10));
+        let result=match result{Ok(value)=>value,Err(error) if client.is_alive()&&std::time::Instant::now()<deadline=>{println!("RUST_LSP_WAIT {error}");continue;},Err(error)=>return Err(error)};
         if result.to_string().contains("Vec"){break result;}
         if std::time::Instant::now()>deadline{
             let status=client.request("rust-analyzer/analyzerStatus",serde_json::json!({}),Duration::from_secs(5)).map(|value|value.to_string().chars().take(2000).collect::<String>());

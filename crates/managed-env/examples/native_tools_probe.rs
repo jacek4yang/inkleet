@@ -29,6 +29,7 @@ fn event(rx:&mpsc::Receiver<Value>,name:&str)->Result<Value,String>{
     let empty=work.join("empty.cpp");std::fs::write(&empty,"").map_err(|e|e.to_string())?;
     let mut query=command(&zig,&work,&paths);query.args(["c++","-E","-v","-x","c++"]);
     if cfg!(windows){query.args(["-target","x86_64-windows-gnu"]);}
+    #[cfg(target_os="linux")] query.args(["-target","x86_64-linux-gnu"]);
     query.arg(&empty);
     let queried=run(query)?;let mut includes=Vec::new();let mut inside=false;
     let zig_root=std::fs::canonicalize(zig.parent().unwrap()).map_err(|e|e.to_string())?;
@@ -78,7 +79,8 @@ fn event(rx:&mpsc::Receiver<Value>,name:&str)->Result<Value,String>{
     let _=client.request("shutdown",Value::Null,Duration::from_secs(5));client.stop();
     let c_source=work.join("debug_subject.c");std::fs::write(&c_source,"int main(void) {\n int total=1;\n total+=2;\n return total;\n}\n").map_err(|e|e.to_string())?;
     let binary=work.join(if cfg!(windows){"subject.exe"}else{"subject"});let mut compile=command(&zig,&work,&paths);
-    compile.args(["cc","-g","-O0"]);if cfg!(windows){compile.args(["-target","x86_64-windows-gnu"]);}compile.arg(&c_source).arg("-o").arg(&binary);run(compile)?;
+    compile.args(["cc","-g","-O0"]);if cfg!(windows){compile.args(["-target","x86_64-windows-gnu"]);}#[cfg(target_os="linux")] compile.args(["-target","x86_64-linux-gnu"]);
+    compile.arg(&c_source).arg("-o").arg(&binary);run(compile)?;
     let (tx,rx)=mpsc::sync_channel(128);let adapter=Arc::new(Client::spawn_dap(command(&lldb,&work,&paths),Arc::new(move|value|{if value.get("event").and_then(Value::as_str)!=Some("output"){let _=tx.try_send(value);}}))?);
     let dap=(||->Result<(),String>{
         adapter.request("initialize",json!({"clientID":"inkleet","adapterID":"lldb","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(30))?;
