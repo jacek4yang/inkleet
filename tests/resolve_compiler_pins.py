@@ -1,5 +1,5 @@
 """Maintainer-only fixed-version metadata resolver. Outputs reviewable pins; executes nothing."""
-import json, pathlib, urllib.request, urllib.parse, tomllib
+import json, pathlib, urllib.request, urllib.parse, tomllib, hashlib, io, tarfile
 RUST = "1.99.0"
 ALLOWED = {"static.rust-lang.org", "ziglang.org", "pypi.org", "files.pythonhosted.org"}
 def open_url(url, method="GET"):
@@ -25,6 +25,21 @@ for platform,triple in [("linux-x64","x86_64-unknown-linux-gnu"),("windows-x64",
         prefix=urllib.parse.urlsplit(url).path.rsplit("/",1)[-1].removesuffix(".tar.gz")
         if platform=="windows-x64" and package!="rust-std":entry+=".exe"
         pins.append(dict(id=package,platform=platform,version=RUST,url=url,sha256=record["hash"],size=size(url),archive="tar-gz",prefix=prefix,entry=entry,license="MIT OR Apache-2.0"))
+
+record=channel["pkg"]["rust-mingw"]["target"]["x86_64-pc-windows-gnu"]
+assert record["available"], "Official Rust Windows linker component unavailable"
+archive=get(record["url"])
+assert hashlib.sha256(archive).hexdigest()==record["hash"], "Rust MinGW vendor hash mismatch"
+prefix=urllib.parse.urlsplit(record["url"]).path.rsplit("/",1)[-1].removesuffix(".tar.gz")
+with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as members:
+    names=members.getnames()
+    entry=next(name for name in names if name.endswith("/bin/self-contained/x86_64-w64-mingw32-gcc.exe"))
+    assert all(any(name.endswith("/lib/self-contained/"+lib) for name in names) for lib in ["libpthread.a","libmsvcrt.a","libgcc_eh.a"])
+    entry=entry.removeprefix(prefix+"/")
+mingw=dict(id="rust-mingw",platform="windows-x64",version=RUST,url=record["url"],sha256=record["hash"],size=len(archive),archive="tar-gz",prefix=prefix,entry=entry,license="Rust MinGW bundled GCC/runtime licenses retained")
+pins.append(mingw)
+print("RUST_MINGW_PIN "+json.dumps(mingw))
+
 record=channel["pkg"]["rust-src"]["target"]["*"]
 pins.append(dict(id="rust-src",platform="any",version=RUST,url=record["url"],sha256=record["hash"],size=size(record["url"]),archive="tar-gz",prefix=f"rust-src-{RUST}",entry="rust-src/lib/rustlib/src/rust/library/std/src/lib.rs",license="MIT OR Apache-2.0"))
 zig=json.loads(get("https://ziglang.org/download/index.json"))["0.17.0"]
