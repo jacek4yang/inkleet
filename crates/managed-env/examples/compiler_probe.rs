@@ -11,7 +11,7 @@ fn clean(program:&Path,work:&Path,paths:&[PathBuf])->Command{
 }
 fn checked(command:Command)->Result<String,String>{
     println!("COMPILER_COMMAND {:?} {:?}",command.get_program(),command.get_args().collect::<Vec<_>>());
-    let result=process::run(command,Arc::new(AtomicBool::new(false)),Duration::from_secs(120),1024*1024)?;
+    let result=process::provision(command,Arc::new(AtomicBool::new(false)),Duration::from_secs(480),1024*1024)?;
     if result.exit_code!=Some(0)||result.timed_out||result.truncated{return Err(format!("compiler probe failed: {:?}",result));}
     Ok(result.stdout)
 }
@@ -50,8 +50,8 @@ async fn main()->Result<(),String>{
     let source_root=install["rust-src"].parent().and_then(Path::parent).and_then(Path::parent).ok_or("Rust source root")?;
     let mut ra=clean(&install["rust-analyzer-preview"],&lsp_work,&paths);
     ra.env("RUSTC",&rustc).env("CARGO",&cargo).env("CARGO_HOME",lsp_work.join("cargo-home")).env("CARGO_NET_OFFLINE","true")
-        .env("RA_LOG","info").env("CARGO_ENCODED_RUSTFLAGS",format!("--sysroot\u{1f}{}",stdroot.display())).env("RUST_SRC_PATH",source_root);
-    let mut config=serde_json::json!({"linkedProjects":[lsp_work.join("Cargo.toml")],"cargo":{"sysroot":stdroot,"sysrootSrc":source_root,"noDeps":true,"buildScripts":{"enable":false}},"procMacro":{"enable":false},"checkOnSave":false,"cachePriming":{"enable":false},"numThreads":2});
+        .env("RA_LOG","project_model=debug").env("CARGO_ENCODED_RUSTFLAGS",format!("--sysroot\u{1f}{}",stdroot.display())).env("RUST_SRC_PATH",source_root);
+    let mut config=serde_json::json!({"linkedProjects":[lsp_work.join("Cargo.toml")],"cargo":{"sysroot":stdroot,"sysrootSrc":source_root,"noDeps":false,"buildScripts":{"enable":false}},"procMacro":{"enable":false},"checkOnSave":false,"cachePriming":{"enable":false},"numThreads":2});
     if cfg!(windows){config["cargo"]["target"]=serde_json::json!("x86_64-pc-windows-gnu");}
     let notices=Arc::new(std::sync::Mutex::new(Vec::<String>::new()));let observed=notices.clone();
     let client=inkleet_managed_env::rpc::Client::spawn(ra,serde_json::json!({"rust-analyzer":config}),Arc::new(move|event|{
@@ -69,7 +69,7 @@ async fn main()->Result<(),String>{
         let result=client.request("textDocument/hover",serde_json::json!({"textDocument":{"uri":uri},"position":{"line":2,"character":8}}),Duration::from_secs(10))?;
         if result.to_string().contains("Vec"){break result;}
         if std::time::Instant::now()>deadline{
-            let status=client.request("rust-analyzer/analyzerStatus",serde_json::json!({}),Duration::from_secs(5));
+            let status=client.request("rust-analyzer/analyzerStatus",serde_json::json!({}),Duration::from_secs(5)).map(|value|value.to_string().chars().take(2000).collect::<String>());
             return Err(format!("Rust hover unavailable; last={result}; status={status:?}; notifications={:?}; diagnostic={}",notices.lock().ok(),client.stderr()));
         }
         std::thread::sleep(Duration::from_millis(300));

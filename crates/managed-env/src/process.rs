@@ -45,8 +45,16 @@ fn drain(mut pipe:impl Read+Send+'static,used:Arc<AtomicUsize>,over:Arc<AtomicBo
     });
     rx
 }
-pub fn run(mut command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
-    if timeout.is_zero()||timeout>Duration::from_secs(120)||output_limit==0||output_limit>1024*1024{return Err("本地运行限制无效".into());}
+pub fn run(command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
+    run_limited(command,cancel,timeout,output_limit,120)
+}
+/// Only for hash-pinned tool provisioning and authored compiler readiness checks.
+/// Ordinary user-code execution must keep using run() and its 120-second ceiling.
+pub fn provision(command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
+    run_limited(command,cancel,timeout,output_limit,600)
+}
+fn run_limited(mut command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize,ceiling:u64)->Result<Output,String>{
+    if timeout.is_zero()||timeout>Duration::from_secs(ceiling)||output_limit==0||output_limit>1024*1024{return Err("本地运行限制无效".into());}
     if cancel.load(Ordering::Relaxed){return Err("运行已取消".into());}
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child=Guard(spawn(command).map_err(|e|format!("无法启动本地进程：{e}"))?,false);
@@ -75,4 +83,17 @@ pub fn run(mut command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_li
         let mut command=Command::new("this-program-must-not-start");command.arg("unused");
         assert!(run(command,Arc::new(AtomicBool::new(false)),Duration::ZERO,1).is_err());
     }
+}
+
+/// Preserve canonical paths for containment checks, but avoid verbatim prefixes
+/// at tool boundaries: several upstream Python utilities concatenate "/" paths.
+pub fn tool_path(path:&std::path::Path)->std::path::PathBuf{
+    #[cfg(windows)]{
+        use std::{path::{Component,Prefix},os::windows::ffi::{OsStrExt,OsStringExt}};
+        if matches!(path.components().next(),Some(Component::Prefix(prefix)) if matches!(prefix.kind(),Prefix::VerbatimDisk(_))){
+            let wide:Vec<u16>=path.as_os_str().encode_wide().skip(4).collect();
+            return std::path::PathBuf::from(std::ffi::OsString::from_wide(&wide));
+        }
+    }
+    path.to_owned()
 }

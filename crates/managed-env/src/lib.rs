@@ -1,6 +1,7 @@
 //! Application-owned tools. This is environment isolation, NOT a security sandbox.
 //! Only compiled-in, hash-pinned packages can be installed; callers never pass URLs.
 mod archive;
+mod go_build;
 pub mod protocol;
 pub mod rpc;
 pub mod process;
@@ -67,7 +68,7 @@ fn directory(path: &Path) -> Result<()> {
 fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.username().is_empty() && url.password().is_none()
         && url.port_or_known_default() == Some(443)
-        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org" | "go.dev" | "dl.google.com" | "download.eclipse.org"))
+        && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org" | "go.dev" | "dl.google.com" | "download.eclipse.org" | "proxy.golang.org" | "storage.googleapis.com"))
 }
 impl Manager {
     pub fn new(root: PathBuf) -> Self { Self { root } }
@@ -124,6 +125,7 @@ impl Manager {
                     _=>Err("不支持的分发包格式".into()),
                 }.map_err(|e|format!("解压工具失败：{e}"))?;
             }
+            if p.id=="gopls"{go_build::build(&manager,&p,stage.path(),verified_cancel.clone(),&report)?;}
             let entry = stage.path().join(&p.entry); regular(&entry)?;
             let receipt = Receipt { package_hash: p.sha256.clone(), entry_hash: hash_file(&entry, &verified_cancel)? };
             let receipt_file = stage.path().join(".inkleet-receipt.json");

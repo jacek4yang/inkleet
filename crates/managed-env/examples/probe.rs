@@ -3,7 +3,7 @@ use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let temp = tempfile::Builder::new().prefix("inkleet managed 环境 ").tempdir().map_err(|e|e.to_string())?;
-    let base=std::fs::canonicalize(temp.path()).map_err(|e|e.to_string())?;
+    let base=inkleet_managed_env::process::tool_path(&std::fs::canonicalize(temp.path()).map_err(|e|e.to_string())?);
     let manager=Manager::new(base.join("tools"));
     let report: Report=Arc::new(|p| { if p.phase!="downloading" { println!("PHASE {}",p.phase); } });
     let python=manager.install("python",Arc::new(AtomicBool::new(false)),report.clone()).await?;
