@@ -4,6 +4,7 @@ use std::{fs,path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::Du
 fn clean(program:&Path,jdk:&Path,work:&Path)->Command{
     let mut command=Command::new(program);command.current_dir(work).env_clear().env("PATH",jdk.join("bin")).env("JAVA_HOME",jdk)
         .env("HOME",work).env("USERPROFILE",work).env("TMP",work).env("TEMP",work).env("TMPDIR",work);
+    #[cfg(target_os="linux")] command.env("LANG","C.UTF-8").env("LC_ALL","C.UTF-8");
     if let Some(system)=std::env::var_os("SystemRoot"){command.env("SystemRoot",system);}command
 }
 fn case(jdk:&Path,root:&Path,index:usize,source:&str,kind:&str,input:&str,expected:Option<Value>,returned:&str)->Result<(),String>{
@@ -23,7 +24,7 @@ fn case(jdk:&Path,root:&Path,index:usize,source:&str,kind:&str,input:&str,expect
         Some(value)=>{assert_eq!(record["ok"],true,"{record}");assert_eq!(if returned=="void"{&record["argumentsAfterCall"]}else{&record["value"]},&value,"{record}");},
         None=>{assert_eq!(record["ok"],false,"{record}");assert!(record["error"].is_string());}
     }
-    assert_eq!(fs::read_to_string(work.join("solution.java")).unwrap(),source);
+    assert_eq!(fs::read_to_string(work.join("original-snapshot.java")).unwrap(),source);
     println!("JAVA_HARNESS_CASE {index} PASS");Ok(())
 }
 #[tokio::main]async fn main()->Result<(),String>{

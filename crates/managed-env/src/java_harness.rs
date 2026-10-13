@@ -64,7 +64,7 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
         if driver.len()>8*1024*1024{return Err("生成 Java 驱动超过 8 MiB".into());}
     }
     driver+="}}}\n";
-    fs::write(root.join("solution.java"),source).map_err(|_|"无法写入原始 Java 快照")?;
+    fs::write(root.join("original-snapshot.java"),source).map_err(|_|"无法写入原始 Java 快照")?;
     // Imports precede the first source line without a newline. Original source
     // line numbers remain valid for JDWP breakpoints (first-line columns differ).
     fs::write(root.join("Solution.java"),format!("import java.util.*; import java.math.*; import java.io.*; {source}")).map_err(|_|"无法写入 Java 编译单元")?;

@@ -88,3 +88,19 @@ pub fn linker_entry()->Option<Result<(),String>>{
         }
     })())
 }
+
+pub fn java(manager:&Manager,root:&Path,snapshot:&crate::local_run::Snapshot,cancel:Arc<AtomicBool>)->Result<(Command,process::Output),String>{
+    if cfg!(windows){return Err("Windows Java 中文路径兼容性验证中，尚未启用本地执行".into());}
+    let java=process::tool_path(&manager.installed("jdk")?.ok_or("请先安装独立 JDK")?);
+    let home=java.parent().and_then(Path::parent).ok_or("JDK 路径无效")?;
+    inkleet_managed_env::java_harness::prepare(root,&snapshot.code,&snapshot.metadata,&snapshot.input)?;
+    let mut compile=Command::new(home.join("bin/javac"));clean_runtime(&mut compile,root)?;
+    #[cfg(target_os="linux")] compile.env("LANG","C.UTF-8").env("LC_ALL","C.UTF-8");
+    compile.env("PATH",home.join("bin")).env("JAVA_HOME",home)
+        .args(["-encoding","UTF-8","-g","-proc:none","Solution.java","InkLeetNodes.java","InkLeetJson.java","InkLeetHarness.java"]);
+    let output=process::compile(compile,cancel,Duration::from_secs(120),64*1024)?;
+    let mut command=Command::new(&java);clean_runtime(&mut command,root)?;
+    #[cfg(target_os="linux")] command.env("LANG","C.UTF-8").env("LC_ALL","C.UTF-8");
+    command.env("JAVA_HOME",home).args(["-Xmx256m","-Dstdout.encoding=UTF-8","-Dstderr.encoding=UTF-8","-cp",".","InkLeetHarness"]);
+    Ok((command,output))
+}

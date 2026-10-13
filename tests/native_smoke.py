@@ -235,6 +235,18 @@ try:
         wait_for(lambda: "ArrayList.java" in text(".source-viewer header"), "real ArrayList source name")
         screenshot("java-stdlib-native.png")
         click(".source-viewer header button")
+        java_solution="class Solution {\n public int solve(int[] values) {\n int total=0;for(int value:values){total+=value;}\n return total;\n }\n}"
+        fill(code,java_solution)
+        click(".pane-heading .actions button")
+        click('[data-local-tab="run"]')
+        fill('[aria-label="本地测试输入"]',"[3,-1,8]")
+        click('[data-action="local-execute"]')
+        wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),"Java private compilation and exact typed result",seconds=150)
+        screenshot("java-local-run-native.png")
+        java_saved=data/"top.jacek.inkleet/notebook/sample-sum/solution.java"
+        wait_for(lambda: java_saved.exists() and java_saved.read_text()==java_solution,"Java run preserves original saved source")
+        (evidence/"JAVA_LOCAL_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK compiles the typed Java Solution harness, computes exact value 10 and preserves original draft. No debugger or online verdict.\n")
+        click(".local-runner header > button:last-child")
         (evidence/"JAVA_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK/JDTLS install, ArrayList member completion and F12 read-only standard library source. Separate three-platform protocol checks compare returned source byte-for-byte with private JDK src.zip.\n")
         click('select[aria-label="编程语言"] option[value="rust"]')
         wait_for(lambda: text(code) == marker, "switching away preserves Rust draft and stops Python session")
