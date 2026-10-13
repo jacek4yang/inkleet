@@ -67,7 +67,11 @@ impl Client {
                     if let Some(id)=value.get("id").and_then(Value::as_u64) {
                         if let Ok(mut pending)=reader_shared.pending.lock() {
                             if let Some(tx)=pending.remove(&id) {
-                                let result=if value.get("error").is_some(){Err("语言服务返回请求错误".into())}
+                                let result=if let Some(error)=value.get("error"){
+                                    let code=error.get("code").and_then(Value::as_i64).unwrap_or(0);
+                                    let message=error.get("message").and_then(Value::as_str).unwrap_or("请求失败").chars().take(1000).collect::<String>();
+                                    Err(format!("语言服务请求错误（{code}）：{message}"))
+                                }
                                     else {Ok(value.get("result").cloned().unwrap_or(Value::Null))};
                                 let _=tx.try_send(result);
                             }

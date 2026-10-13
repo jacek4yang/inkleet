@@ -25,19 +25,24 @@ use std::{path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::{Dura
     let settings=json!({"staticcheck":false,"usePlaceholders":false,"completeUnimported":true,"buildFlags":["-mod=readonly"]});
     let client=Client::spawn(command,json!({"gopls":settings}),Arc::new(|_|{}))?;
     let result=(||->Result<(),String>{
+        println!("GO_LSP_STAGE initialize");
         client.request("initialize",json!({"processId":null,"rootUri":root_uri,"workspaceFolders":[{"uri":root_uri,"name":"InkLeet Go"}],"initializationOptions":settings,"capabilities":{"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"workspaceFolders":true},"textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}}}}}),Duration::from_secs(45))?;
         client.notify("initialized",json!({}))?;
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":"go","version":1,"text":doc}}))?;
+        println!("GO_LSP_STAGE hover");
         let deadline=Instant::now()+Duration::from_secs(90);
         loop{
-            let hover=client.request("textDocument/hover",json!({"textDocument":{"uri":uri},"position":{"line":4,"character":2}}),Duration::from_secs(15))?;
+            let hover=client.request("textDocument/hover",json!({"textDocument":{"uri":uri},"position":{"line":4,"character":2}}),Duration::from_secs(15));
+            let hover=match hover{Ok(value)=>value,Err(error) if client.is_alive()&&Instant::now()<deadline=>{println!("GO_LSP_WAIT {error}");std::thread::sleep(Duration::from_millis(500));continue;},Err(error)=>return Err(error)};
             if hover.to_string().contains("Builder"){break;}
             if Instant::now()>deadline{return Err(format!("Go hover unavailable: {hover}"));}
             std::thread::sleep(Duration::from_millis(300));
         }
+        println!("GO_LSP_STAGE completion");
         let completion=client.request("textDocument/completion",json!({"textDocument":{"uri":uri},"position":{"line":5,"character":8}}),Duration::from_secs(20))?;
         let items=completion.as_array().or_else(||completion.get("items").and_then(Value::as_array)).ok_or("Go completion list")?;
         if !items.iter().any(|item|item.get("label").and_then(Value::as_str).is_some_and(|s|s.starts_with("WriteString"))){return Err("Missing Builder member completion".into());}
+        println!("GO_LSP_STAGE definition");
         let definition=client.request("textDocument/definition",json!({"textDocument":{"uri":uri},"position":{"line":3,"character":23}}),Duration::from_secs(15))?;
         let source_uri=definition.pointer("/0/uri").or_else(||definition.get("uri")).and_then(Value::as_str).ok_or("Go source definition")?;
         let path=reqwest::Url::parse(source_uri).map_err(|e|e.to_string())?.to_file_path().map_err(|_|"Go source file")?;

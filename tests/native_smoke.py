@@ -205,7 +205,7 @@ try:
         # Real application-owned Go and Rust language services, not mocked IPC.
         for group,language,server,code_text,member,definition_word,source_name in [
             ("golang","golang","gopls",'import "strings"; func example() { var builder strings.Builder; builder. }',"WriteString","Builder","builder.go"),
-            ("rust","rust","rust-analyzer","fn example() { let mut values = Vec::<i32>::new(); values. }","push","Vec","mod.rs"),
+            ("rust","rust","rust-analyzer","fn example() { let mut values = Vec::<i32>::new(); values.pu }","push","Vec","mod.rs"),
         ]:
             click('[data-action="open-environments"]')
             wait_for(lambda: element("dialog.environments"), "environment dialog")
