@@ -47,13 +47,14 @@ try {
   await page.screenshot({ path: "evidence/desktop-notes.png", fullPage: true });
   // 真实 Worker 渲染 + DOMPurify；仅自编测试数据，原文与撤销历史不得因预览丢失。
   const notesEditor = page.getByRole("textbox", { name: "Markdown 笔记", exact: true });
-  const originalNotes = await notesEditor.innerText();
+  const readNotes = async () => (await notesEditor.locator(".cm-line").allTextContents()).join("\n");
+  const originalNotes = await readNotes();
   await page.getByRole("button", { name: "预览笔记", exact: true }).click();
   await page.locator(".notes-rendered h1").waitFor();
   assert.equal(await page.locator(".notes-rendered h1").innerText(), "推导");
   await page.screenshot({ path: "evidence/desktop-notes-preview.png", fullPage: true });
   await page.getByRole("button", { name: "返回编辑", exact: true }).click();
-  assert.equal(await notesEditor.innerText(), originalNotes);
+  assert.equal(await readNotes(), originalNotes);
   const hostileNotes = "# 安全预览\n\n**粗体** 与 `code`\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n<script>window.__notesXss = true</script>\n<img src=\"https://example.invalid/secret\" onerror=\"window.__notesXss=true\">\n<a href=\"javascript:alert(1)\">保留文字</a><iframe src=\"https://example.invalid/frame\"></iframe><form><input autofocus></form>";
   const unexpectedRequests = [];
   page.on("request", request => { if (request.url().includes("example.invalid")) unexpectedRequests.push(request.url()); });
@@ -65,18 +66,19 @@ try {
   assert.equal(await page.evaluate(() => window.__notesXss), undefined);
   assert.deepEqual(unexpectedRequests, []);
   await page.getByRole("button", { name: "返回编辑", exact: true }).click();
-  assert.equal(await notesEditor.innerText(), hostileNotes);
+  assert.equal(await readNotes(), hostileNotes);
   const notesDownloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出 Markdown", exact: true }).click();
   const notesDownload = await notesDownloadPromise;
   assert.equal(await readFile(await notesDownload.path(), "utf8"), hostileNotes);
   await notesEditor.press("Control+End");
+  await page.waitForTimeout(600); // 隔开两次用户编辑的撤销分组。
   await notesEditor.pressSequentially("UNDO-PROBE");
   await page.getByRole("button", { name: "预览笔记", exact: true }).click();
   await page.locator(".notes-rendered table").waitFor();
   await page.getByRole("button", { name: "返回编辑", exact: true }).click();
   await notesEditor.press("Control+z");
-  assert.equal(await notesEditor.innerText(), hostileNotes, "切换预览保留同一笔记的撤销历史");
+  assert.equal(await readNotes(), hostileNotes, "切换预览保留同一笔记的撤销历史");
   // 超限只停预览，不截断草稿。
   const longNotes = "x".repeat(256 * 1024 + 1);
   await notesEditor.fill(longNotes);
