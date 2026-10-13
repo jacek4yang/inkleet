@@ -76,12 +76,25 @@ fn parse_check(value: Value) -> Result<CheckResult, String> {
         Some("SUCCESS") if value.get("status_code").is_some() || value.get("status_msg").is_some() => {
             // 只把明确的判题字段返回界面，页面按文本呈现；不执行返回内容。
             let mut filtered = serde_json::Map::new();
+            let mut remaining = 256 * 1024usize;
+            let mut truncated = false;
             for key in ["status_code", "status_msg", "run_success", "compare_result", "total_correct",
                 "total_testcases", "status_runtime", "status_memory", "display_runtime", "memory",
                 "full_compile_error", "compile_error", "full_runtime_error", "runtime_error",
                 "code_output", "std_output", "expected_output", "last_testcase", "task_finish_time"] {
-                if let Some(field) = value.get(key) { filtered.insert(key.into(), field.clone()); }
+                if let Some(field) = value.get(key) {
+                    let encoded = serde_json::to_string(field).map_err(|_| "判题字段编码失败")?;
+                    if encoded.len() <= remaining {
+                        remaining -= encoded.len(); filtered.insert(key.into(), field.clone());
+                    } else {
+                        truncated = true;
+                        let preview: String = encoded.chars().take(remaining / 4).collect();
+                        filtered.insert(key.into(), Value::String(format!("{preview}\\n[输出过长，已截断展示]")));
+                        remaining = 0;
+                    }
+                }
             }
+            if truncated { filtered.insert("output_truncated".into(), Value::Bool(true)); }
             Ok(CheckResult::Finished { result: Value::Object(filtered) })
         }
         _ => Err("判题响应格式变化，不能判断是否完成；保留评测编号供再次查询".into()),
@@ -181,6 +194,16 @@ mod tests {
         assert!(matches!(parse_check(json!({"state":"STARTED","extra":1})).unwrap(), CheckResult::Pending));
         let CheckResult::Finished { result } = parse_check(json!({"state":"SUCCESS","status_code":11,"status_msg":"Wrong Answer","unrelated":"discard"})).unwrap() else { panic!("expected finished"); };
         assert_eq!(result["status_msg"], "Wrong Answer"); assert!(result.get("unrelated").is_none());
+    }
+    #[test]
+    fn oversized_outputs_are_bounded_without_changing_verdict() {
+        let CheckResult::Finished { result } = parse_check(json!({
+            "state": "SUCCESS", "status_code": 11, "status_msg": "Wrong Answer",
+            "code_output": "中".repeat(200_000),
+        })).unwrap() else { panic!("expected result"); };
+        assert_eq!(result["status_msg"], "Wrong Answer");
+        assert_eq!(result["output_truncated"], true);
+        assert!(serde_json::to_vec(&result).unwrap().len() < 300 * 1024);
     }
     #[test]
     fn invalid_destination_and_empty_code_are_rejected_before_send() {

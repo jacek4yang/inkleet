@@ -11,7 +11,7 @@ on:
         description: Build target
         type: choice
         default: all
-        options: [all, desktop, android, native-test]
+        options: [all, desktop, linux, android, native-test]
 permissions:
   contents: read
 concurrency:
@@ -58,19 +58,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   desktop:
-    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'desktop')
+    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'desktop' || inputs.target == 'linux')
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            bundle: deb
-          - os: windows-2025
-            bundle: nsis
-          - os: macos-15-intel
-            bundle: dmg
-          - os: macos-15
-            bundle: dmg
+        include: ${{ fromJSON(inputs.target == 'linux' && '[{"os":"ubuntu-24.04","bundle":"deb"}]' || '[{"os":"ubuntu-24.04","bundle":"deb"},{"os":"windows-2025","bundle":"nsis"},{"os":"macos-15-intel","bundle":"dmg"},{"os":"macos-15","bundle":"dmg"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -80,6 +72,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.os }}-desktop
       - name: Linux prerequisites
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
@@ -91,7 +87,7 @@ jobs:
           npm run build
           rustc --version
       - name: Test native storage
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Build unsigned developer installer
         run: npm run tauri -- build --bundles ${{ matrix.bundle }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -163,6 +159,7 @@ jobs:
         run: |
           export XDG_DATA_HOME="$(mktemp -d)"
           export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

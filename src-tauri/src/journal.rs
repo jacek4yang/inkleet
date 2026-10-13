@@ -60,6 +60,10 @@ impl Journal {
             message: "操作已记录；若请求过程被中断，发送状态未知，必须先核查".into(),
         }, created: SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| "系统时间无效")?.as_secs() };
         records.push(record.clone());
+        while serde_json::to_vec(&records).map_err(|_| "评测日志编码失败")?.len() > 2 * 1024 * 1024 {
+            if let Some(index) = records.iter().position(|r| !r.state.blocks()) { records.remove(index); }
+            else { return Err("待确认快照超过容量限制；本次请求未发送".into()); }
+        }
         self.write(previous.as_deref(), &records)?;
         Ok((record, true))
     }
