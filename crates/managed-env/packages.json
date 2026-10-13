@@ -1,0 +1,62 @@
+[
+  {
+    "id": "python",
+    "platform": "linux-x64",
+    "version": "3.14.8-20261009",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "sha256": "ddc902fd26460f728758c67d80417c1031edf97589f1f162c4ba3aa158a35998",
+    "size": 36299807,
+    "archive": "tar-gz",
+    "prefix": "python",
+    "entry": "bin/python3.14",
+    "license": "Python-2.0 and bundled third-party licenses"
+  },
+  {
+    "id": "python",
+    "platform": "windows-x64",
+    "version": "3.14.8-20261009",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+    "sha256": "5b6fa7ddeabe23ae83d7b54e5043eb4fa1ccb10a73fa4c6b0f541dea8160d505",
+    "size": 23228299,
+    "archive": "tar-gz",
+    "prefix": "python",
+    "entry": "python.exe",
+    "license": "Python-2.0 and bundled third-party licenses"
+  },
+  {
+    "id": "python",
+    "platform": "macos-x64",
+    "version": "3.14.8-20261009",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-apple-darwin-install_only_stripped.tar.gz",
+    "sha256": "0fe0c68a7f90458abd13b50a3d8f5f0cb5b2f0a1f33b6ef1445751cf2dc8b36e",
+    "size": 26874790,
+    "archive": "tar-gz",
+    "prefix": "python",
+    "entry": "bin/python3.14",
+    "license": "Python-2.0 and bundled third-party licenses"
+  },
+  {
+    "id": "python",
+    "platform": "macos-arm64",
+    "version": "3.14.8-20261009",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "sha256": "936217c0e6893f51af939474bee18ecf5e6fe47b986d2c163f19b57c682e4a83",
+    "size": 26655379,
+    "archive": "tar-gz",
+    "prefix": "python",
+    "entry": "bin/python3.14",
+    "license": "Python-2.0 and bundled third-party licenses"
+  },
+  {
+    "id": "pyright",
+    "platform": "any",
+    "version": "1.1.414",
+    "url": "https://github.com/microsoft/pyright/releases/download/1.1.414/pyright.tgz",
+    "sha256": "bf5f473f6167c0d14175492c3263d783b4489a6956e1c06c18e15228e3a3fa42",
+    "size": 4226827,
+    "archive": "tar-gz",
+    "prefix": "package",
+    "entry": "langserver.index.js",
+    "license": "MIT"
+  }
+]
