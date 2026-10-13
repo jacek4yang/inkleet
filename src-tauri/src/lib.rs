@@ -1,5 +1,6 @@
 mod storage;
 mod managed;
+mod lsp;
 mod leetcode;
 mod auth;
 mod cache;
@@ -125,6 +126,37 @@ async fn cancel_environment_install(window: tauri::WebviewWindow, app: tauri::Ap
     check_origin(&window)?; app.state::<managed::Environments>().cancel(&id)
 }
 
+
+#[tauri::command]
+async fn start_language_service(window:tauri::WebviewWindow,app:tauri::AppHandle,text:String)->Result<lsp::Started,String>{
+    check_origin(&window)?;lsp::start(app,text).await
+}
+#[tauri::command]
+async fn stop_language_service(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64)->Result<(),String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().stop(id)).await.map_err(|_|"语言服务停止任务中断".to_owned())?
+}
+#[tauri::command]
+async fn update_language_document(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32,text:String)->Result<(),String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().update(id,version,text)).await.map_err(|_|"语言服务同步任务中断".to_owned())?
+}
+#[tauri::command]
+async fn language_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32,kind:String,line:u32,character:u32)->Result<serde_json::Value,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().request(id,version,&kind,line,character)).await.map_err(|_|"语言服务请求任务中断".to_owned())?
+}
+#[tauri::command]
+async fn language_diagnostics(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64)->Result<serde_json::Value,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().diagnostics(id)).await.map_err(|_|"语言服务诊断任务中断".to_owned())?
+}
+#[tauri::command]
+async fn read_language_source(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,uri:String)->Result<lsp::Source,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().read_source(id,&uri)).await.map_err(|_|"源码读取任务中断".to_owned())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -133,13 +165,14 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             app.manage(Store { root, gate: Mutex::new(()) });
             app.manage(auth::Auth::default());
+            app.manage(lsp::Services::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("language-workspaces")));
             app.manage(managed::Environments::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("tools")));
             app.manage(journal::Journal::new(app.path().app_data_dir()?));
             app.manage(judge::Active::default());
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .run(tauri::generate_context!())
         .expect("InkLeet failed to start");
 }

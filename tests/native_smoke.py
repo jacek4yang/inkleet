@@ -47,7 +47,7 @@ def start():
     global session
     result = request("POST","/session",{"capabilities":{"alwaysMatch":{"browserName":"wry","tauri:options":{"application":str(pathlib.Path(os.environ.get("INKLEET_TEST_BINARY", "src-tauri/target/debug/inkleet")).resolve())}}}})
     session = result["sessionId"]
-    wait_for(lambda: "已读取本机文件" in text('[role="status"]'), "native IPC initial load")
+    wait_for(lambda: "已读取本机文件" in text('.statusbar[role="status"]'), "native IPC initial load")
 def stop():
     global session
     if session:
@@ -62,7 +62,7 @@ try:
     fill(code, marker)
     source = data / "top.jacek.inkleet/notebook/sample-sum/solution.rs"
     wait_for(lambda: source.exists() and source.read_text() == marker, "plain source persisted")
-    wait_for(lambda: "已保存到本机文件" in text('[role="status"]'), "save acknowledgement")
+    wait_for(lambda: "已保存到本机文件" in text('.statusbar[role="status"]'), "save acknowledgement")
     screenshot("desktop-code-native.png")
     click('nav[aria-label="工作区"] button:last-child')
     note = '[aria-label="Markdown 笔记"]'
@@ -83,11 +83,44 @@ try:
     wait_for(lambda: text(note) == "# Native note", "restart restored Markdown")
     notes.write_text("# External editor")
     fill(note, "# Pending local edit")
-    wait_for(lambda: "保存失败" in text('[role="status"]'), "external conflict visible")
+    wait_for(lambda: "保存失败" in text('.statusbar[role="status"]'), "external conflict visible")
     assert notes.read_text() == "# External editor", "external content overwritten"
     assert text(note) == "# Pending local edit", "pending draft lost"
     screenshot("conflict-native.png")
     (evidence/"RESULT.txt").write_text("PASS: real Linux Tauri/WebKitGTK launch, native IPC, plain source and notes save, process restart restore, external conflict preserving both texts. No LeetCode verification.\n")
+    if os.environ.get("INKLEET_MANAGED_ENV") == "1":
+        click('[data-action="open-environments"]')
+        wait_for(lambda: element(".environment-summary button"), "environment manager opened")
+        click(".environment-summary button")
+        wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["python","node","pyright"]), "three verified private tools installed", seconds=300)
+        screenshot("managed-environment-native.png")
+        click(".environments header button")
+        click('select[aria-label="编程语言"] option[value="python3"]')
+        wait_for(lambda: "Pyright 已连接" in text(".lsp-status"), "real private language server connected", seconds=45)
+        fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
+            {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue009"}
+        ]}]})
+        wait_for(lambda: "popleft" in text(".cm-tooltip-autocomplete"), "real stdlib member completion", seconds=30)
+        screenshot("python-completion-native.png")
+        option=cmd("POST","/element",{"using":"xpath","value":"//li[@role='option'][contains(.,'popleft')]"})[EID]
+        cmd("POST",f"/element/{option}/click",{})
+        wait_for(lambda: "items.popleft" in text(code), "completion applied to document")
+        click(code)
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
+            {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
+            {"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}
+        ]}]})
+        wait_for(lambda: element(".source-viewer"), "F12 opened a real stdlib declaration", seconds=30)
+        wait_for(lambda: "只读" in text(".source-viewer header"), "source viewer is explicitly read-only")
+        screenshot("python-stdlib-native.png")
+        click(".source-viewer header button")
+        fill(code, 'bad: int = "wrong"')
+        wait_for(lambda: element(".cm-lintRange-error"), "real Pyright type diagnostic", seconds=30)
+        screenshot("python-diagnostics-native.png")
+        click('select[aria-label="编程语言"] option[value="rust"]')
+        wait_for(lambda: text(code) == marker, "switching away preserves Rust draft and stops Python session")
+        (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")
     if os.environ.get("INKLEET_LIVE_CN") == "1":
         click('[data-action="open-catalogue"]')
         search = '[aria-label="搜索中国站题目"]'

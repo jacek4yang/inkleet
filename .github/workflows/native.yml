@@ -48,6 +48,7 @@ jobs:
           exit "$result"
       - name: Verify native storage through the actual GUI
         env:
+          INKLEET_MANAGED_ENV: "1"
           INKLEET_LIVE_CN: ${{ steps.public-probe.outcome == 'success' && '1' || '0' }}
         run: |
           export XDG_DATA_HOME="$(mktemp -d)"

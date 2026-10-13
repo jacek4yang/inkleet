@@ -386,5 +386,56 @@ try {
   await envPage.close();
   await writeFile("evidence/ENVIRONMENT_UI_RESULT.txt", "PASS: mocked IPC only; duplicate install guard, close/reopen during background download, cancellation, manual retry, mobile layout. Real installer/protocol verified separately.\n");
 
+
+  const lspPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const lspErrors = []; lspPage.on("pageerror", error => lspErrors.push(error.message));
+  await lspPage.addInitScript(() => {
+    window.isTauri = true;
+    window.__lspTest = { id: 0, version: 1, text: "", stops: [], requests: [] };
+    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      const state = window.__lspTest;
+      if (command === "load_recent_questions") return [];
+      if (command === "load_document") return { code: null, notes: null };
+      if (command === "save_text") return;
+      if (command === "start_language_service") { state.text = args.text; state.version = 1; return { id: ++state.id, version: 1, server: "fixture", uri: "file:///fixture/solution.py" }; }
+      if (command === "stop_language_service") { state.stops.push(args.id); return; }
+      if (command === "update_language_document") { state.version = args.version; state.text = args.text; return; }
+      if (command === "language_diagnostics") return { version: state.version, diagnostics: [] };
+      if (command === "language_request") {
+        state.requests.push(args);
+        if (args.kind === "completion") return { items: [{ label: "popleft", kind: 2, documentation: "<img src=x onerror=alert(1)>plain documentation" }] };
+        if (args.kind === "hover") return { contents: { kind: "plaintext", value: "deque.popleft() -> int" } };
+        if (args.kind === "definition") return [{ uri: "file:///fixture/stdlib/collections.pyi", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } } }];
+      }
+      if (command === "read_language_source") return { name: "collections.pyi", text: "class deque:\n    def popleft(self) -> int: ...", declaration: true };
+      throw new Error("Unexpected LSP fixture command: " + command);
+    }};
+  });
+  await lspPage.goto("http://127.0.0.1:5173");
+  await lspPage.getByRole("combobox", { name: "编程语言", exact: true }).selectOption("python3");
+  await lspPage.getByText("Pyright 已连接 · F12 / Ctrl+单击查看定义", { exact: true }).waitFor();
+  const lspEditor = lspPage.getByRole("textbox", { name: "代码编辑器", exact: true });
+  await lspEditor.fill("items.");
+  await lspEditor.press("Control+Space");
+  await lspPage.getByRole("option", { name: /popleft/ }).waitFor();
+  await lspPage.getByRole("option", { name: /popleft/ }).click();
+  assert.equal(await lspEditor.innerText(), "items.popleft");
+  assert.equal(await lspPage.locator(".cm-tooltip img").count(), 0);
+  await lspEditor.press("F12");
+  const sourceDialog = lspPage.getByRole("dialog", { name: "collections.pyi", exact: true });
+  await sourceDialog.waitFor();
+  assert.match(await sourceDialog.innerText(), /不是运行时实现源码/);
+  const readOnly = sourceDialog.getByLabel("只读标准库源码", { exact: true });
+  const beforeSource = await readOnly.innerText();
+  await readOnly.click(); await readOnly.press("x");
+  assert.equal(await readOnly.innerText(), beforeSource);
+  await sourceDialog.getByRole("button", { name: "返回代码", exact: true }).click();
+  assert.equal(await lspEditor.innerText(), "items.popleft");
+  await lspPage.getByRole("combobox", { name: "编程语言", exact: true }).selectOption("rust");
+  await lspPage.waitForFunction(() => window.__lspTest.stops.length > 0);
+  assert.deepEqual(lspErrors, []);
+  await lspPage.close();
+  await writeFile("evidence/LSP_UI_RESULT.txt", "PASS: mocked IPC integration; completion applied, unsafe completion docs remain text, F12 opens explicit read-only declaration, source draft preserved and session stopped on language switch. Native real-server check is separate.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

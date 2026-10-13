@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import { EditorState, StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
@@ -9,6 +9,8 @@ import { cpp } from "@codemirror/lang-cpp";
 import { java } from "@codemirror/lang-java";
 import { markdown } from "@codemirror/lang-markdown";
 import type { Language } from "./domain";
+import { pythonIntelligence, type Source } from "./intelligence";
+import { SourceViewer } from "./source-viewer";
 
 // 仅保存本次运行的编辑器状态；正文持久化由原生存储负责。
 // 切换题目/语言时保留各自的撤销历史、光标与滚动位置。
@@ -41,11 +43,15 @@ type Props = {
 };
 export function CodeEditor({ documentKey, language, value, label, onChange }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const [lspStatus, setLspStatus] = useState("");
+  const [connection, reconnect] = useState(0);
+  const [source, setSource] = useState<Source | null>(null);
   const callback = useRef(onChange);
   useLayoutEffect(() => { callback.current = onChange; });
   useLayoutEffect(() => {
+    const intelligence = language === "python3" ? pythonIntelligence(setLspStatus, setSource) : null;
     const extensions = [
-      basicSetup, syntax(language), theme,
+      basicSetup, syntax(language), theme, ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
       EditorView.updateListener.of(update => {
         if (update.docChanged) callback.current(update.state.doc.toString());
@@ -59,10 +65,12 @@ export function CodeEditor({ documentKey, language, value, label, onChange }: Pr
       : EditorState.create({ doc: value, extensions });
     const view = new EditorView({ state, parent: host.current! });
     if (cached) view.scrollDOM.scrollTop = cached.scroll;
+    if (intelligence) void intelligence.connect(view);
     return () => {
+      intelligence?.destroy();
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
       view.destroy();
     };
-  }, [documentKey, language, label]);
-  return <div className="editor-host" ref={host} />;
+  }, [documentKey, language, label, connection]);
+  return <><div className="editor-host" ref={host} />{language === "python3" && <div className="lsp-status"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }
