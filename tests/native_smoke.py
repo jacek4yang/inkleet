@@ -96,6 +96,24 @@ try:
         fill(code, "// live CN draft persistence")
         live_source = data / "top.jacek.inkleet/notebook/lc-1/solution.rs"
         wait_for(lambda: live_source.exists() and live_source.read_text() == "// live CN draft persistence", "real question local source saved")
+        # 只验证匿名官方登录页面的原生窗口，不输入账号、不解验证码、不读取凭据。
+        main_handle = cmd("GET", "/window")
+        try:
+            click(".login-area > button")
+            handles = wait_for(lambda: (h if len(h := cmd("GET", "/window/handles")) > 1 else None), "isolated login window exposed to WebDriver")
+            login_handle = next(h for h in handles if h != main_handle)
+            cmd("POST", "/window", {"handle": login_handle})
+            wait_for(lambda: "leetcode.cn/accounts/login" in cmd("GET", "/url"), "official login origin", seconds=25)
+            wait_for(lambda: "登录" in text("body") and len(cmd("POST", "/elements", {"using": "css selector", "value": "input"})) > 0, "official login controls", seconds=25)
+            screenshot("official-login-window-native.png")
+            (evidence/"LOGIN_UI_RESULT.txt").write_text("PASS: separate native official anonymous login page and controls loaded. No account login, credentials, CAPTCHA, or session validation performed.\\n")
+        except Exception as error:
+            (evidence/"LOGIN_UI_RESULT.txt").write_text("UNVERIFIED: anonymous native login UI automation could not complete: " + type(error).__name__ + ". Not an authentication verdict.\\n")
+            subprocess.run(["scrot", str(evidence / "login-ui-unverified.png")], check=False)
+        finally:
+            cmd("POST", "/window", {"handle": main_handle})
+            if cmd("POST", "/elements", {"using": "css selector", "value": ".login-panel button:last-child"}):
+                click(".login-panel button:last-child")
         stop()
         # 重启后的题库恢复只读本机缓存；代理指向未监听端口，避免成功来自网络。
         old_proxy = os.environ.get("HTTPS_PROXY")

@@ -89,6 +89,10 @@ impl Journal {
         if !allowed { return Err("评测状态已经变化，忽略过期更新".into()); }
         record.state = next;
         let result = record.clone();
+        while serde_json::to_vec(&records).map_err(|_| "评测日志编码失败")?.len() > 2 * 1024 * 1024 {
+            if let Some(index) = records.iter().position(|r| r.snapshot.id != id && !r.state.blocks()) { records.remove(index); }
+            else { return Err("结果存储容量不足；保留原评测编号，可稍后查询".into()); }
+        }
         self.write(previous.as_deref(), &records)?;
         Ok(result)
     }
