@@ -9,7 +9,7 @@ import { cpp } from "@codemirror/lang-cpp";
 import { java } from "@codemirror/lang-java";
 import { markdown } from "@codemirror/lang-markdown";
 import type { Language } from "./domain";
-import { pythonIntelligence, type Source } from "./intelligence";
+import { languageIntelligence, type Source } from "./intelligence";
 import { debugGutter } from "./debug-gutter";
 import { SourceViewer } from "./source-viewer";
 
@@ -52,7 +52,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, brea
   const debugView = useRef<{ view: EditorView; stopped: (view: EditorView, line: number) => void } | null>(null);
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => {
-    const intelligence = language === "python3" ? pythonIntelligence(setLspStatus, setSource) : null;
+    const intelligence = (language === "python3" || language === "java") ? languageIntelligence(language, setLspStatus, setSource) : null;
     const debug = language === "python3" && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const extensions = [
       basicSetup, syntax(language), theme, ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
@@ -79,5 +79,5 @@ export function CodeEditor({ documentKey, language, value, label, onChange, brea
     };
   }, [documentKey, language, label, connection]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedLine); }, [pausedLine, documentKey, connection]);
-  return <><div className="editor-host" ref={host} />{language === "python3" && <div className="lsp-status"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{(language === "python3" || language === "java") && <div className="lsp-status"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }

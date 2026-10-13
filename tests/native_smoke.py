@@ -173,6 +173,32 @@ try:
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-stop-keys","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
         wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
         click(".local-runner header button")
+        click('[data-action="open-environments"]')
+        wait_for(lambda: element('select[aria-label="开发环境语言"]'), "language-specific tool groups")
+        click('select[aria-label="开发环境语言"] option[value="java"]')
+        click(".environment-summary button")
+        wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["jdk","jdtls"]), "verified private JDK and JDTLS installed", seconds=300)
+        screenshot("java-environment-native.png")
+        click(".environments header button")
+        click('select[aria-label="编程语言"] option[value="java"]')
+        wait_for(lambda: "JDT LS 已连接" in text(".lsp-status"), "real private Java language server connected", seconds=100)
+        java_doc="class Solution { void test() { java.util.ArrayList<String> values = new java.util.ArrayList<>(); values. } }"
+        fill(code,java_doc)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(4): keys += [{"type":"keyDown","value":"\ue012"},{"type":"keyUp","value":"\ue012"}]
+        keys += [{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue009"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"java-completion","actions":keys}]})
+        wait_for(lambda: "add(" in text(".cm-tooltip-autocomplete"), "real Java ArrayList member completion", seconds=45)
+        screenshot("java-completion-native.png")
+        keys=[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(java_doc.index("ArrayList")+3): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
+        keys += [{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"java-source","actions":keys}]})
+        wait_for(lambda: element(".source-viewer"), "Java standard library source viewer", seconds=45)
+        wait_for(lambda: "ArrayList.java" in text(".source-viewer header"), "real ArrayList source name")
+        screenshot("java-stdlib-native.png")
+        click(".source-viewer header button")
+        (evidence/"JAVA_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK/JDTLS install, ArrayList member completion and F12 read-only standard library source. Separate three-platform protocol checks compare returned source byte-for-byte with private JDK src.zip.\n")
         click('select[aria-label="编程语言"] option[value="rust"]')
         wait_for(lambda: text(code) == marker, "switching away preserves Rust draft and stops Python session")
         (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")

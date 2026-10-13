@@ -1,13 +1,13 @@
 use inkleet_managed_env::rpc::Client;
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::{path::{Path,PathBuf}, process::Command, sync::{Arc,Mutex,atomic::{AtomicBool,AtomicU64,Ordering}}, time::Duration};
+use std::{path::{Path,PathBuf}, sync::{Arc,Mutex,atomic::{AtomicBool,AtomicU64,Ordering}}, time::Duration};
 use tauri::Manager as _;
 type Result<T> = std::result::Result<T,String>;
 pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, active:Mutex<Option<Arc<Session>>> }
 struct Document { text:String, version:u32 }
 struct Session {
-    id:u64, client:Client, uri:String, document:Mutex<Document>,
+    id:u64, client:Client, uri:String, language:String, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
     diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
@@ -15,7 +15,7 @@ struct Session {
 pub struct Started { id:u64, version:u32, server:String, uri:String }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct Source { text:String, name:String, declaration:bool }
+pub struct Source { text:String, name:String, declaration:bool, language:String }
 impl Services {
     pub fn new(root:PathBuf)->Self{Self{root,generation:AtomicU64::new(0),starting:AtomicBool::new(false),active:Mutex::new(None)}}
     fn session(&self,id:u64)->Result<Arc<Session>>{
@@ -50,6 +50,15 @@ impl Services {
         let response=session.client.request(method,json!({"textDocument":{"uri":session.uri},"position":{"line":line,"character":character}}),Duration::from_secs(8))?;
         if session.document.lock().map_err(|_|"文档状态不可用")?.version!=version{return Err("忽略旧版本的语言服务结果".into());}
         self.session(id)?;
+        if kind=="definition"{
+            let locations:Vec<&Value>=match response.as_array(){Some(items)=>items.iter().take(32).collect(),None=>vec![&response]};
+            let mut allowed=session.approved_sources.lock().map_err(|_|"源码引用状态不可用")?;
+            for location in locations{
+                if let Some(uri)=location.get("uri").or_else(||location.get("targetUri")).and_then(Value::as_str){
+                    if uri.len()<=8192&&uri.starts_with("jdt://contents/")&&allowed.len()<256{allowed.insert(uri.to_owned());}
+                }
+            }
+        }
         Ok(response)
     }
     pub fn diagnostics(&self,id:u64)->Result<Value>{
@@ -62,10 +71,21 @@ impl Services {
     }
     pub fn read_source(&self,id:u64,uri:&str)->Result<Source>{
         let session=self.session(id)?;
+        if session.language=="java"&&uri.starts_with("jdt://"){
+            if !session.approved_sources.lock().map_err(|_|"源码引用状态不可用")?.contains(uri){return Err("只能查看本次语言服务返回的源码引用".into());}
+            let response=session.client.request("java/classFileContents",json!({"uri":uri}),Duration::from_secs(15))?;
+            let text=response.as_str().ok_or("Java 语言服务未返回源码")?;
+            if text.len()>2*1024*1024{return Err("Java 源码超过显示限制".into());}
+            let url=reqwest::Url::parse(uri).map_err(|_|"Java 源码地址无效")?;
+            let name=url.path_segments().and_then(|mut segments|segments.next_back()).unwrap_or("Java source").to_owned();
+            self.session(id)?;
+            return Ok(Source{text:text.to_owned(),name,declaration:false,language:"java".into()});
+        }
         read_allowed_source(&session.roots,uri)
     }
 }
-pub async fn start(app:tauri::AppHandle,text:String)->Result<Started>{
+pub async fn start(app:tauri::AppHandle,text:String,language:String)->Result<Started>{
+    if !matches!(language.as_str(),"python3"|"java"){return Err("此语言服务尚未接入".into());}
     if text.len()>2*1024*1024{return Err("源码超过语言服务的 2 MiB 限制".into());}
     let state=app.state::<Services>();
     if state.starting.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err(){return Err("语言服务正在启动，请稍后重连".into());}
@@ -77,24 +97,16 @@ pub async fn start(app:tauri::AppHandle,text:String)->Result<Started>{
         impl Drop for Starting<'_>{fn drop(&mut self){self.0.store(false,Ordering::Release);}}
         let _starting=Starting(&state.starting);
         let tools=app.state::<crate::managed::Environments>();
-        let node=tools.manager.installed("node")?.ok_or("请先在开发环境中安装 Python 工具")?;
-        let python=tools.manager.installed("python")?.ok_or("请先安装 Python 运行时")?;
-        let pyright=tools.manager.installed("pyright")?.ok_or("请先安装 Pyright 语言服务")?;
         if state.root.exists() && std::fs::symlink_metadata(&state.root).map_err(|_|"语言服务目录不可用")?.file_type().is_symlink(){return Err("语言服务目录不能是符号链接".into());}
         std::fs::create_dir_all(&state.root).map_err(|_|"无法创建语言服务目录")?;
-        let workspace=tempfile::Builder::new().prefix("python-").tempdir_in(&state.root).map_err(|_|"无法创建语言服务工作区")?;
+        let workspace=tempfile::Builder::new().prefix("language-").tempdir_in(&state.root).map_err(|_|"无法创建语言服务工作区")?;
         let workspace_root=std::fs::canonicalize(workspace.path()).map_err(|_|"无法解析工作区")?;
-        let uri=reqwest::Url::from_file_path(workspace_root.join("solution.py")).map_err(|_|"无法生成文档地址")?.to_string();
+        let launch=crate::lsp_launch::prepare(&tools.manager,&workspace_root,&language)?;
+        std::fs::write(workspace_root.join(launch.filename),&text).map_err(|_|"无法准备语言服务源码")?;
+        let uri=reqwest::Url::from_file_path(workspace_root.join(launch.filename)).map_err(|_|"无法生成文档地址")?.to_string();
         let root_uri=reqwest::Url::from_directory_path(&workspace_root).map_err(|_|"无法生成工作区地址")?.to_string();
         let diagnostics=Arc::new(Mutex::new(Value::Null));let event_diagnostics=diagnostics.clone();let event_uri=uri.clone();
-        let mut command=Command::new(&node);
-        command.arg(&pyright).arg("--stdio").current_dir(&workspace_root).env_clear()
-            .env("PATH",node.parent().ok_or("工具路径无效")?).env("HOME",&workspace_root)
-            .env("USERPROFILE",&workspace_root).env("TEMP",&workspace_root).env("TMP",&workspace_root);
-        if let Some(system_root)=std::env::var_os("SystemRoot"){command.env("SystemRoot",system_root);}
-        #[cfg(windows)] {use std::os::windows::process::CommandExt;command.creation_flags(0x08000000);}
-        let settings=json!({"pythonPath":python,"analysis":{"typeCheckingMode":"basic","autoSearchPaths":false,"useLibraryCodeForTypes":true,"diagnosticMode":"openFilesOnly"}});
-        let client=Client::spawn(command,settings.clone(),Arc::new(move|event|{
+        let client=Client::spawn(launch.command,launch.settings.clone(),Arc::new(move|event|{
             if event.get("method").and_then(Value::as_str)==Some("textDocument/publishDiagnostics"){
                 if let Some(params)=event.get("params"){
                     if params.get("uri").and_then(Value::as_str)==Some(event_uri.as_str()){
@@ -104,28 +116,27 @@ pub async fn start(app:tauri::AppHandle,text:String)->Result<Started>{
             }
         }))?;
         client.request("initialize",json!({
-            "processId":null,"rootUri":root_uri,
+            "processId":null,"rootUri":root_uri,"initializationOptions":launch.initialization,
             "capabilities":{
                 "general":{"positionEncodings":["utf-16"]},
                 "textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}},"publishDiagnostics":{"versionSupport":true}},
-                "workspace":{"configuration":true}
+                "workspace":{"configuration":true,"workspaceFolders":true}
             },
             "workspaceFolders":[{"uri":root_uri,"name":"InkLeet"}]
-        }),Duration::from_secs(30))?;
+        }),Duration::from_secs(if language=="java"{90}else{30}))?;
         client.notify("initialized",json!({}))?;
-        client.notify("workspace/didChangeConfiguration",json!({"settings":{"python":settings}}))?;
-        client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":"python","version":1,"text":text}}))?;
-        let python_root=if cfg!(windows){python.parent()}else{python.parent().and_then(Path::parent)}.ok_or("Python 路径无效")?;
-        let roots=vec![workspace_root,std::fs::canonicalize(python_root).map_err(|_|"标准库路径无效")?,std::fs::canonicalize(pyright.parent().ok_or("类型库路径无效")?).map_err(|_|"类型库路径无效")?];
+        client.notify("workspace/didChangeConfiguration",json!({"settings":if language=="python3"{json!({"python":launch.settings})}else{launch.settings}}))?;
+        client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":text}}))?;
+        let roots=launch.roots;
         let started_uri=uri.clone();
-        let session=Arc::new(Session{id:generation,client,uri,document:Mutex::new(Document{text,version:1}),diagnostics,roots,_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1}),diagnostics,roots,_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
             active.replace(session)
         };
         if let Some(previous)=previous{previous.client.stop();}
-        Ok(Started{id:generation,version:1,server:"Pyright · 应用独立环境".into(),uri:started_uri})
+        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri})
     }).await.map_err(|_|"语言服务启动任务中断".to_owned())?
 }
 
@@ -137,14 +148,14 @@ fn read_allowed_source(roots:&[PathBuf],uri:&str)->Result<Source>{
     let path=url.to_file_path().map_err(|_|"源码路径无效")?;
     let canonical=std::fs::canonicalize(path).map_err(|_|"源码文件不存在")?;
     if !roots.iter().any(|root|canonical.starts_with(root)){return Err("拒绝读取工作区和工具链之外的文件".into());}
-    if !matches!(canonical.extension().and_then(|s|s.to_str()),Some("py"|"pyi")){return Err("仅支持 Python 标准库源码或类型声明".into());}
+    if !matches!(canonical.extension().and_then(|s|s.to_str()),Some("py"|"pyi"|"java")){return Err("仅支持已接入语言的源码或类型声明".into());}
     let file=std::fs::File::open(&canonical).map_err(|_|"无法读取源码")?;
     let meta=file.metadata().map_err(|_|"无法读取源码信息")?;
     if !meta.is_file() || meta.len()>2*1024*1024{return Err("源码文件类型或大小不受支持".into());}
     let mut text=String::new();
     file.take(2*1024*1024+1).read_to_string(&mut text).map_err(|_|"源码不是有效 UTF-8 文本")?;
     if text.len()>2*1024*1024{return Err("源码文件增长超过大小限制".into());}
-    Ok(Source{text,name:canonical.file_name().unwrap_or_default().to_string_lossy().into(),declaration:canonical.extension().is_some_and(|e|e=="pyi")})
+    Ok(Source{text,name:canonical.file_name().unwrap_or_default().to_string_lossy().into(),declaration:canonical.extension().is_some_and(|e|e=="pyi"),language:if canonical.extension().is_some_and(|e|e=="java"){"java"}else{"python3"}.into()})
 }
 #[cfg(test)]mod tests{
     use super::*;

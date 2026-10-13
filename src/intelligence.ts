@@ -7,7 +7,8 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
 type Started = { id: number; version: number; server: string; uri: string };
-export type Source = { name: string; text: string; declaration: boolean; line: number };
+export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" };
+let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 function offset(doc: Text, position: unknown): number | null {
   if (!object(position) || !Number.isInteger(position.line) || !Number.isInteger(position.character) || position.line < 0 || position.character < 0 || position.line >= doc.lines) return null;
@@ -24,7 +25,7 @@ function content(value: unknown): string {
   if (Array.isArray(value)) return value.slice(0, 20).map(content).join("\n\n").slice(0, 32768);
   return object(value) && typeof value.value === "string" ? value.value.slice(0, 32768) : "";
 }
-export function pythonIntelligence(status: (text: string) => void, showSource: (source: Source) => void) {
+export function languageIntelligence(language: "python3" | "java", status: (text: string) => void, showSource: (source: Source) => void) {
   const signatureEffect = StateEffect.define<Tooltip | null>();
   const signatureField = StateField.define<Tooltip | null>({
     create: () => null,
@@ -168,7 +169,7 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
         for (const item of (Array.isArray(result.diagnostics) ? result.diagnostics : []).slice(0, 200)) {
           if (!object(item) || typeof item.message !== "string") continue;
           const span = range(doc, item.range); if (!span) continue;
-          diagnostics.push({ ...span, severity: item.severity === 1 ? "error" : item.severity === 2 ? "warning" : "info", message: item.message.slice(0, 4000), source: "Pyright" });
+          diagnostics.push({ ...span, severity: item.severity === 1 ? "error" : item.severity === 2 ? "warning" : "info", message: item.message.slice(0, 4000), source: language === "java" ? "JDT LS" : "Pyright" });
         }
         view.dispatch(setDiagnostics(view.state, diagnostics));
       }
@@ -200,14 +201,17 @@ export function pythonIntelligence(status: (text: string) => void, showSource: (
     async connect(target: EditorView) {
       view = target;
       if (!isTauri()) { status("浏览器预览 · 语言服务需原生客户端"); return; }
-      status("正在连接 Python 语言服务…");
+      status(`正在连接 ${language === "java" ? "Java" : "Python"} 语言服务…`);
       const initial = target.state.doc;
       try {
-        const started = await invoke<Started>("start_language_service", { text: initial.toString() });
+        const connecting = connectionQueue.then(() => closed ? null : invoke<Started>("start_language_service", {text: initial.toString(), language}));
+        connectionQueue = connecting.then(() => undefined, () => undefined);
+        const started = await connecting;
+        if (!started) return;
         if (closed) { await invoke("stop_language_service", { id: started.id }); return; }
         session = started; version = started.version; sent = initial;
         await flush();
-        if (!closed) { status("Pyright 已连接 · F12 / Ctrl+单击查看定义"); void poll(); }
+        if (!closed) { status(`${language === "java" ? "JDT LS" : "Pyright"} 已连接 · F12 / Ctrl+单击查看定义`); void poll(); }
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
