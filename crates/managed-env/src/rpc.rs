@@ -1,0 +1,99 @@
+//! A bounded JSON-RPC stdio client for trusted language servers.
+//! Reader/writer threads keep pipe I/O off the GUI and async executor threads.
+use crate::protocol::{read_message, write_message};
+use serde_json::{json, Value};
+use std::{collections::HashMap, io::{BufReader, Read}, process::{Child, Command, Stdio}, sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc}, time::Duration};
+type Reply = std::result::Result<Value, String>;
+struct Shared {
+    pending: Mutex<HashMap<u64,mpsc::SyncSender<Reply>>>,
+    dead: AtomicBool,
+}
+pub struct Client {
+    child: Mutex<Child>, shared: Arc<Shared>, outgoing: mpsc::SyncSender<Value>, next: AtomicU64,
+}
+impl Client {
+    pub fn spawn(mut command: Command, settings: Value, event: Arc<dyn Fn(Value)+Send+Sync>) -> Result<Self,String> {
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child=command.spawn().map_err(|e|format!("无法启动语言服务：{e}"))?;
+        let stdin=child.stdin.take().ok_or("语言服务缺少输入管道")?;
+        let stdout=child.stdout.take().ok_or("语言服务缺少输出管道")?;
+        let stderr=child.stderr.take().ok_or("语言服务缺少错误管道")?;
+        let shared=Arc::new(Shared{pending:Mutex::new(HashMap::new()),dead:AtomicBool::new(false)});
+        let (outgoing,rx)=mpsc::sync_channel::<Value>(64);
+        let writer_shared=shared.clone();
+        std::thread::spawn(move || {
+            let mut stdin=stdin;
+            for value in rx {
+                if write_message(&mut stdin,&value).is_err(){break;}
+            }
+            fail_all(&writer_shared);
+        });
+        let reader_shared=shared.clone();let writer=outgoing.clone();
+        std::thread::spawn(move || {
+            let mut reader=BufReader::new(stdout);
+            while let Ok(value)=read_message(&mut reader) {
+                if value.get("method").is_none() {
+                    if let Some(id)=value.get("id").and_then(Value::as_u64) {
+                        if let Ok(mut pending)=reader_shared.pending.lock() {
+                            if let Some(tx)=pending.remove(&id) {
+                                let result=if value.get("error").is_some(){Err("语言服务返回请求错误".into())}
+                                    else {Ok(value.get("result").cloned().unwrap_or(Value::Null))};
+                                let _=tx.try_send(result);
+                            }
+                        }
+                    }
+                } else if let Some(id)=value.get("id") {
+                    let method=value.get("method").and_then(Value::as_str).unwrap_or("");
+                    let response=match method {
+                        "workspace/configuration"=>{
+                            let items=value.pointer("/params/items").and_then(Value::as_array).cloned().unwrap_or_default();
+                            let result:Vec<Value>=items.iter().take(64).map(|item|match item.get("section").and_then(Value::as_str) {
+                                Some("python")=>settings.clone(),Some("python.analysis")=>settings.get("analysis").cloned().unwrap_or(json!({})),
+                                _=>json!({}),
+                            }).collect();
+                            json!({"jsonrpc":"2.0","id":id,"result":result})
+                        },
+                        "workspace/applyEdit"=>json!({"jsonrpc":"2.0","id":id,"result":{"applied":false,"failureReason":"Server-initiated edits require explicit client support"}}),
+                        "client/registerCapability"|"client/unregisterCapability"|"window/workDoneProgress/create"=>json!({"jsonrpc":"2.0","id":id,"result":null}),
+                        _=>json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Unsupported client method"}}),
+                    };
+                    if writer.try_send(response).is_err(){break;}
+                } else { event(value); }
+            }
+            fail_all(&reader_shared);
+        });
+        // Drain without retaining or printing paths/source text from diagnostics logs.
+        std::thread::spawn(move || { let mut reader=stderr;let mut buffer=[0u8;4096];while matches!(reader.read(&mut buffer),Ok(n) if n>0){} });
+        Ok(Self{child:Mutex::new(child),shared,outgoing,next:AtomicU64::new(1)})
+    }
+    pub fn notify(&self,method:&str,params:Value)->Result<(),String>{
+        if self.shared.dead.load(Ordering::Acquire){return Err("语言服务已退出；请重新连接".into());}
+        self.outgoing.try_send(json!({"jsonrpc":"2.0","method":method,"params":params})).map_err(|_|"语言服务队列繁忙，请稍后重试".into())
+    }
+    pub fn request(&self,method:&str,params:Value,timeout:Duration)->Reply{
+        if self.shared.dead.load(Ordering::Acquire){return Err("语言服务已退出".into());}
+        let id=self.next.fetch_add(1,Ordering::Relaxed);
+        let (tx,rx)=mpsc::sync_channel(1);
+        {
+            let mut pending=self.shared.pending.lock().map_err(|_|"语言服务状态不可用")?;
+            if pending.len()>=32{return Err("语言服务请求过多".into());}
+            pending.insert(id,tx);
+        }
+        let sent=self.outgoing.try_send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
+        let result=if sent.is_err(){Err("语言服务队列已满".into())}
+            else{rx.recv_timeout(timeout).unwrap_or_else(|_|Err("语言服务请求超时或连接中断".into()))};
+        if let Ok(mut pending)=self.shared.pending.lock(){pending.remove(&id);}
+        if result.is_err(){let _=self.notify("$/cancelRequest",json!({"id":id}));}
+        result
+    }
+    pub fn is_alive(&self)->bool{!self.shared.dead.load(Ordering::Acquire)}
+    pub fn stop(&self){
+        fail_all(&self.shared);
+        if let Ok(mut child)=self.child.lock(){let _=child.kill();let _=child.wait();}
+    }
+}
+fn fail_all(shared:&Shared){
+    shared.dead.store(true,Ordering::Release);
+    if let Ok(mut pending)=shared.pending.lock(){for (_,tx) in pending.drain(){let _=tx.try_send(Err("语言服务连接已关闭".into()));}}
+}
+impl Drop for Client { fn drop(&mut self){self.stop();} }

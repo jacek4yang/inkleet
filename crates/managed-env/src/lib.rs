@@ -2,6 +2,7 @@
 //! Only compiled-in, hash-pinned packages can be installed; callers never pass URLs.
 mod archive;
 pub mod protocol;
+pub mod rpc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf},
