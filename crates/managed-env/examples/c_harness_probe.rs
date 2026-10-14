@@ -32,6 +32,7 @@ fn case(zig:&Path,base:&Path,index:usize,source:&str,kind:&str,input:&str,expect
     let records=fs::read_to_string(work.join("results.jsonl")).map_err(|e|e.to_string())?;
     let record:Value=serde_json::from_str(records.trim()).map_err(|e|e.to_string())?;
     match expected{Some(value)=>{assert_eq!(record["ok"],true,"{record}");assert_eq!(if void{&record["argumentsAfterCall"]}else{&record["value"]},&value,"{record}");},None=>{assert_eq!(record["ok"],false,"{record}");assert!(record["error"].is_string());}}
+    assert_eq!(fs::read_to_string(work.join("solution.c")).map_err(|e|e.to_string())?,source);
     println!("C_HARNESS_CASE {index} PASS");
     Ok(())
 }
@@ -50,6 +51,8 @@ fn case(zig:&Path,base:&Path,index:usize,source:&str,kind:&str,input:&str,expect
     case(&zig,&root,7,"int* identity(int* v,int n,int* count){*count=10001;return v;}","integer[]","[1]",None,false)?;
     case(&zig,&root,8,"bool* identity(bool* v,int n,int* count){*count=n;return v;}","boolean[]","[true,false]",Some(json!([true,false])),false)?;
     case(&zig,&root,9,"struct ListNode* identity(struct ListNode* n){n->next=n;return n;}","ListNode","[1]",None,false)?;
-    println!("C_HARNESS_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"cases":10,"dialect":"C11","separateTranslationUnit":true,"arrays":true,"matrixLengths":true,"list":true,"tree":true,"exactInteger":true,"escapedUnicode":true,"voidMutation":true,"badLengthRejected":true,"cycleRejected":true,"systemPathUsed":false}));
+    case(&zig,&root,10,"#include <stdlib.h>\n#include <string.h>\nint* identity(int* v,int n,int* count){*count=n;int* out=malloc((n?n:1)*sizeof(int));if(!out){*count=0;return NULL;}memcpy(out,v,n*sizeof(int));return out;}","integer[]","[3,-1,8]",Some(json!([3,-1,8])),false)?;
+    case(&zig,&root,11,"#include <stdint.h>\nlong long identity(long long n){int64_t value=n;return value;}","long","9007199254740993",Some(json!(9007199254740993_i64)),false)?;
+    println!("C_HARNESS_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"cases":12,"explicitIncludes":true,"sourcePreserved":true,"dialect":"C11","separateTranslationUnit":true,"arrays":true,"matrixLengths":true,"list":true,"tree":true,"exactInteger":true,"escapedUnicode":true,"voidMutation":true,"badLengthRejected":true,"cycleRejected":true,"systemPathUsed":false}));
     Ok(())
 }

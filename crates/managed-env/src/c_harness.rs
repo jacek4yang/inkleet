@@ -78,6 +78,7 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     // unknown aliasing returns twice. The bounded test process reclaims memory.
     fs::write(root.join("solution.c"),source).map_err(|_|"无法写入 C 源码")?;
     fs::write(root.join("prototype.h"),prototype).map_err(|_|"无法写入 C 原型")?;
+    fs::write(root.join("cpp_standard.hpp"),crate::cpp_harness::STANDARD_PRELUDE).map_err(|_|"无法写入 C 驱动标准库声明")?;
     fs::write(root.join("cpp_harness.hpp"),crate::cpp_harness::HEADER).map_err(|_|"无法写入 C 序列化器")?;
     fs::write(root.join("c_harness.hpp"),ADAPTER).map_err(|_|"无法写入 C 类型适配")?;
     fs::write(root.join("harness.cpp"),driver).map_err(|_|"无法写入 C 调用驱动")?;
