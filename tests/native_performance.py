@@ -52,7 +52,7 @@ def run_performance(g):
             "large performance source reaches durable recovery",seconds=45)
         verify_source(value)
     report={"source":os.environ.get("INKLEET_BINARY_SOURCE"),"harnessSource":os.environ.get("INKLEET_HARNESS_SOURCE"),
-        "binary":binary,"buildMode":os.environ.get("INKLEET_BUILD_MODE","unknown"),
+        "instrumented":True,"instrumentation":"test-only build alias; protected Tauri internals unchanged; base source plus recorded harness overlay","binary":binary,"buildMode":os.environ.get("INKLEET_BUILD_MODE","unknown"),
         "kernel":platform.platform(),"cpu":next((line.split(":",1)[1].strip() for line in pathlib.Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")),"unknown"),
         "logicalCpus":os.cpu_count(),"compositingDisabled":os.environ.get("WEBKIT_DISABLE_COMPOSITING_MODE"),"environment":"Linux WebKitGTK on GitHub Actions Xvfb; real X11 input, private Pyright and durable draft IPC",
         "limitations":["input-to-rAF is not OS-key-to-screen or completed paint","RSS sums double-count shared pages and are not peak/private memory",
@@ -91,26 +91,9 @@ def run_performance(g):
                         document.addEventListener('beforeinput',input,true);
                         let observer;
                         if(sample.longTaskSupported){observer=new PerformanceObserver(list=>{for(const e of list.getEntries())sample.tasks.push(e.duration);});observer.observe({type:'longtask'});}
-                        const internals=window.__TAURI_INTERNALS__,original=internals.invoke;
-                        const tracked=new Set(['checkpoint_draft','update_language_document','language_request','language_diagnostics']);
-                        function timedInvoke(...args){
-                            if(!tracked.has(args[0]))return Reflect.apply(original,this,args);
-                            const value=args[1]??{},entry={command:args[0],kind:typeof value.kind==='string'?value.kind:null,
-                                textCodeUnits:typeof value.text==='string'?value.text.length:null,
-                                baselineCodeUnits:typeof value.baseline==='string'?value.baseline.length:null,startAt:performance.now()};
-                            sample.ipc.push(entry);
-                            try{
-                                const result=Reflect.apply(original,this,args);
-                                entry.syncMs=performance.now()-entry.startAt;
-                                Promise.resolve(result).then(()=>{entry.endAt=performance.now();entry.ok=true;},()=>{entry.endAt=performance.now();entry.ok=false;});
-                                return result;
-                            }catch(error){entry.syncMs=performance.now()-entry.startAt;entry.endAt=performance.now();entry.ok=false;throw error;}
-                        }
-                        internals.invoke=timedInvoke;
-                        if(internals.invoke!==timedInvoke)throw Error('test IPC instrumentation unavailable');
-                        window.__nativePerf={sample,stop(){if(!active)return;active=false;sample.stoppedAt=performance.now();
-                            cancelAnimationFrame(frame);document.removeEventListener('beforeinput',input,true);observer?.disconnect();
-                            if(internals.invoke===timedInvoke)internals.invoke=original;}};
+                        if(!window.__inkleetIpcInstrumentation)throw Error('test build instrumentation absent');
+                        window.__nativePerf={sample,active:true,stop(){if(!active)return;active=false;this.active=false;sample.stoppedAt=performance.now();
+                            cancelAnimationFrame(frame);document.removeEventListener('beforeinput',input,true);observer?.disconnect();}};
                     """)
                     before=processes(binary);begin=time.monotonic()
                     typed="0123456789"*4
