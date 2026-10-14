@@ -182,7 +182,10 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReve
   keyAction.current=kind=>{if(inspectionOnly && ["next","stepIn","stepOut"].includes(kind))return false;if(pending||guard.current||(evaluationGuard.current&&kind!=="stop")||!["python3","golang","cpp","c","rust","java"].includes(snapshot.language)||running)return false;onReveal?.();void action(kind);return true;};
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{
-      if(event.repeat||!isTauri()||event.altKey||event.ctrlKey||event.metaKey||document.querySelector("dialog[open]"))return;
+      if(event.defaultPrevented||event.isComposing||event.keyCode===229||event.repeat||!isTauri()||event.altKey||event.ctrlKey||event.metaKey||document.querySelector("dialog[open]"))return;
+      const target=event.target instanceof Element?event.target:null;
+      if(target?.closest("input,textarea,select,[role=dialog],.lsp-references,.lsp-rename"))return;
+      if(target?.closest("[contenteditable=true]")&&!target.closest(".code-pane .cm-content"))return;
       const current=latest.current;
       let kind:string|undefined;
       if(event.key==="F5"){if(event.shiftKey&&active(current))kind="stop";else if(!event.shiftKey)kind=current?.phase==="paused"?"continue":!active(current)?"start":undefined;}

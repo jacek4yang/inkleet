@@ -423,3 +423,16 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .icon-button svg{flex:none;display:block;overflow:visible}
 
 .debug-targets{display:flex;flex-wrap:wrap;gap:4px;padding:6px 8px;border-bottom:1px solid var(--line)}.debug-targets>button{font-size:12px}
+
+.editor-command-palette{position:fixed;z-index:1000;top:min(14vh,100px);left:50%;transform:translateX(-50%);width:min(520px,calc(100vw - 24px));border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);box-shadow:0 12px 38px #0002;padding:6px}
+.editor-command-palette>input[type=text]{width:100%;border:0;border-bottom:1px solid var(--line);background:transparent;padding:10px 12px;outline:none}
+.editor-command-list{max-height:min(340px,55vh);overflow:auto;padding-top:4px}
+.editor-command-list button{display:flex;justify-content:space-between;align-items:center;gap:20px;width:100%;border:0;text-align:left;padding:8px 12px;font-size:12px}
+.editor-command-list button[aria-selected=true]{background:var(--active-line)}
+.editor-command-list kbd{font:inherit;color:var(--muted);font-size:10px}
+.command-empty,.editor-command-palette>[role=alert]:not(:empty){padding:12px;font-size:12px;color:var(--muted)}
+.statusbar button:not(.icon-button){font-size:10px;line-height:16px;padding:1px 6px;max-height:22px}
+
+.editor-command-palette>input[type=text]{appearance:none;-webkit-appearance:none;border-radius:0;box-shadow:none}
+.editor-command-palette>input[type=text]:focus,.editor-command-palette>input[type=text]:focus-visible{outline:none;box-shadow:none}
+.editor-command-palette:focus-within{border-color:var(--accent)}

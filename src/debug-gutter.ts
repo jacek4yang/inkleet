@@ -86,6 +86,7 @@ export function debugGutter(initial: number[], onChange: (lines: number[]) => vo
       }),
       EditorView.theme({ ".cm-debug-gutter": { color: "#bc4d43", width: "18px", cursor: "pointer" }, ".cm-debug-gutter .cm-gutterElement": { padding: "0 3px" }, ".cm-execution-gutter":{width:"16px",color:"#ab7816"}, ".cm-execution-gutter .cm-gutterElement":{padding:"0 1px"}, ".cm-execution-pointer,.cm-inspection-pointer":{display:"inline-flex",verticalAlign:"middle"}, ".cm-inspection-pointer":{color:"#64849f"}, ".cm-debug-column": {display:"inline-block",width:"0",height:"0",position:"relative",color:"#ab7816",pointerEvents:"none"}, ".cm-inspection-column":{color:"#64849f"}, ".cm-debug-column svg":{position:"absolute",left:"-4px",top:"-21px"}, ".cm-debug-range": {backgroundColor:"#e7bd4b66",textDecoration:"underline",textDecorationColor:"#956a12",textUnderlineOffset:"3px"}, ".cm-debug-frame": {backgroundColor:"#7891ac22",boxShadow:"inset 3px 0 #7891ac"}, ".cm-debug-frame-range": {backgroundColor:"#7891ac44",textDecoration:"underline"}, ".cm-debug-stopped": { backgroundColor: "#e8bd4b35", boxShadow: "inset 3px 0 #bc8e22" } }),
     ],
+    toggle(view:EditorView){if(view.composing)return false;toggleLine(view,view.state.doc.lineAt(view.state.selection.main.head).from);return true;},
     stopped(view: EditorView, position: DebugPosition|null) {
       const line=position?.line??0;
       view.dispatch({ effects: stoppedAt.of(position) });

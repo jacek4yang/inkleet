@@ -1,6 +1,9 @@
+import {formatBinding} from "./command-registry";
 import { Annotation, ChangeSet } from "@codemirror/state";
 import { isolateHistory } from "@codemirror/commands";
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from "@codemirror/view";
+const formatters=new WeakMap<EditorView,()=>void>();
+export function formatDocument(view:EditorView){const run=formatters.get(view);if(!run||view.composing)return false;run();return true;}
 export const formattedTransaction=Annotation.define<boolean>();
 type Options={enabled:()=>boolean;saved:(text:string)=>Promise<boolean>;request:(text:string)=>Promise<string>;report:(message:string)=>void};
 export function formatOnSave(options:Options){
@@ -8,7 +11,8 @@ export function formatOnSave(options:Options){
     private timer:ReturnType<typeof setTimeout>|undefined;
     private generation=0;private closed=false;private busy=false;private pending:{generation:number;explicit:boolean}|null=null;
     private worker:Worker|null=null;private rejectDiff:((reason:Error)=>void)|null=null;
-    constructor(private view:EditorView){}
+    private readonly trigger=()=>{void this.run(true);};
+    constructor(private view:EditorView){formatters.set(view,this.trigger);}
     update(update:ViewUpdate){
       if(!update.docChanged)return;
       ++this.generation;this.pending=null;clearTimeout(this.timer);this.cancelDiff();
@@ -60,9 +64,9 @@ export function formatOnSave(options:Options){
       finally{this.busy=false;const pending=this.takePending();if(pending&&!this.closed&&pending.generation===this.generation)void this.run(pending.explicit);}
     }
     takePending(){const pending=this.pending;this.pending=null;return pending;}
-    destroy(){this.closed=true;this.pending=null;++this.generation;clearTimeout(this.timer);this.cancelDiff();}
+    destroy(){if(formatters.get(this.view)===this.trigger)formatters.delete(this.view);this.closed=true;this.pending=null;++this.generation;clearTimeout(this.timer);this.cancelDiff();}
   }
   const plugin=ViewPlugin.fromClass(Controller);
-  return [plugin,keymap.of([{key:"Mod-s",run:view=>{void view.plugin(plugin)?.run(true);return true;}},{key:"Mod-Shift-f",run:view=>{void view.plugin(plugin)?.run(true);return true;}}]),
+  return [plugin,keymap.of([{key:"Mod-s",run:view=>{void view.plugin(plugin)?.run(true);return true;}},{key:formatBinding(navigator.platform),run:formatDocument}]),
     EditorView.domEventHandlers({compositionend(_event,view){view.plugin(plugin)?.schedule();return false;}})];
 }

@@ -152,6 +152,13 @@ pub fn rename_edits(value:&Value,uri:&str,prefix:u32,text:&str,version:u32)->Res
     if value.is_null(){return Err("此符号不能重命名".into());}
     if !value.is_object(){return Err("语言服务返回的重命名格式无效".into());}
     if value.get("changes").is_some()&&value.get("documentChanges").is_some(){return Err("拒绝含重复编辑表示的重命名".into());}
+    // We do not advertise change-annotation support. Never strip a server's
+    // confirmation requirement while normalizing into plain source edits.
+    if let Some(annotations)=value.get("changeAnnotations"){
+        if !annotations.as_object().is_some_and(|items|items.is_empty()){
+            return Err("此重命名含需审阅的变更注释，当前无法安全应用".into());
+        }
+    }
     if let Some(changes)=value.get("changes"){
         let changes=changes.as_object().ok_or("重命名文件列表无效")?;
         for (target,items) in changes{
@@ -179,6 +186,9 @@ pub fn rename_edits(value:&Value,uri:&str,prefix:u32,text:&str,version:u32)->Res
     }
     let mut spans=Vec::new();let mut total=0usize;
     for item in &mut edits{
+        if item.get("annotationId").is_some(){
+            return Err("此重命名含需审阅的变更注释，当前无法安全应用".into());
+        }
         let inserted=item.get("newText").and_then(Value::as_str).ok_or("重命名替换文本无效")?;
         total=total.checked_add(inserted.len()).ok_or("重命名文本过大")?;
         if inserted.len()>65536||total>2*1024*1024{return Err("重命名替换文本超过限制".into());}
@@ -208,6 +218,19 @@ pub fn rename_edits(value:&Value,uri:&str,prefix:u32,text:&str,version:u32)->Res
             json!({"documentChanges":[{"kind":"rename","oldUri":uri,"newUri":"file:///other.rs"}]}),
             json!({"documentChanges":[{"textDocument":{"uri":uri,"version":3},"edits":[edit(2,0,3)]}]}),
         ]{assert!(rename_edits(&bad,uri,2,"old",4).is_err(),"{bad}");}
+    }
+    #[test]fn rename_never_discards_change_annotation_confirmation(){
+        let uri="file:///solution.rs";
+        let ordinary=edit(0,0,3);
+        let mut annotated=ordinary.clone();annotated["annotationId"]=json!("review");
+        for bad in [
+            json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[annotated.clone()]}],"changeAnnotations":{"review":{"label":"Review rename","needsConfirmation":true}}}),
+            json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[annotated.clone()]}]}),
+            json!({"changes":{(uri):[ordinary.clone(),annotated]}}),
+            json!({"changes":{(uri):[ordinary.clone()]},"changeAnnotations":{"review":{"label":"Review rename","needsConfirmation":false}}}),
+            json!({"changes":{(uri):[ordinary.clone()]},"changeAnnotations":null}),
+        ]{assert!(rename_edits(&bad,uri,0,"old",1).is_err(),"{bad}");}
+        assert!(rename_edits(&json!({"changes":{(uri):[ordinary]},"changeAnnotations":{}}),uri,0,"old",1).is_ok());
     }
     #[test]fn rename_never_splits_utf16_surrogate_pairs(){
         let uri="file:///solution.rs";

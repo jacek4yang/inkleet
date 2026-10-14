@@ -1,11 +1,13 @@
+import {editorCommands} from "./editor-commands";
+import {formatBinding,type Command} from "./command-registry";
 import type { DebugPosition } from "./debug-position";
-import { formatOnSave } from "./format-on-save";
+import { formatOnSave, formatDocument } from "./format-on-save";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { EditorState, StateEffect, Prec } from "@codemirror/state";
 import { EditorView, keymap, tooltips } from "@codemirror/view";
 import { basicSetup } from "codemirror";
-import { indentMore, indentLess } from "@codemirror/commands";
-import { acceptCompletion } from "@codemirror/autocomplete";
+import { indentMore, indentLess, undo, redo, selectAll } from "@codemirror/commands";
+import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { indentUnit } from "@codemirror/language";
 import { rust } from "@codemirror/lang-rust";
 import { python } from "@codemirror/lang-python";
@@ -60,9 +62,23 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => { onStatus?.(lspStatus); }, [lspStatus,onStatus]);
   useLayoutEffect(() => {
-    const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata) : null;
+    const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata, true) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
-    const extensions = [
+    const commands:Command<EditorView>[]=[
+      {id:"editor.undo",label:"撤销",run:undo},
+      {id:"editor.redo",label:"重做",run:redo},
+      {id:"editor.selectAll",label:"全选",run:selectAll},
+      ...(intelligence?[
+        {id:"editor.rename",enabled:()=>intelligence.available(),label:"重命名符号",key:"F2",run:intelligence.commands.rename},
+        {id:"editor.definition",enabled:()=>intelligence.available(),label:"转到定义",key:"F12",run:intelligence.commands.definition},
+        {id:"editor.references",enabled:()=>intelligence.available(),label:"查找引用",key:"Shift-F12",run:intelligence.commands.references},
+        {id:"editor.signature",enabled:()=>intelligence.available(),label:"参数提示",key:"Mod-Shift-Space",run:intelligence.commands.signature},
+        {id:"editor.completion",enabled:()=>intelligence.available(),label:"触发补全",run:startCompletion},
+      ]:[]),
+      ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:formatDocument}]:[]),
+      ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
+    ];
+    const extensions = [editorCommands(commands),
       basicSetup, syntax(language), theme,
       ...(intelligence&&formatting?formatOnSave({enabled:()=>!!formatOptions.current?.enabled,saved:text=>formatOptions.current?.saved(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
