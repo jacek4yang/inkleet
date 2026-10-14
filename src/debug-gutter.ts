@@ -4,7 +4,7 @@ import { Decoration, EditorView, GutterMarker, gutter, keymap, WidgetType } from
 const toggle = StateEffect.define<number>({ map: (value, mapping) => mapping.mapPos(value) });
 const stoppedAt = StateEffect.define<DebugPosition|null>();
 class Breakpoint extends GutterMarker {
-  toDOM() { const dot = document.createElement("span"); dot.textContent = "●"; dot.title = "断点 · 点击取消，F9 切换当前行"; return dot; }
+  toDOM() { const dot = document.createElement("span"); const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("viewBox","0 0 12 12");svg.setAttribute("width","12");svg.setAttribute("height","12");svg.setAttribute("aria-hidden","true");const circle=document.createElementNS(svg.namespaceURI,"circle");circle.setAttribute("cx","6");circle.setAttribute("cy","6");circle.setAttribute("r","4");circle.setAttribute("fill","currentColor");svg.append(circle);dot.append(svg); dot.title = "断点 · 点击取消，F9 切换当前行"; return dot; }
 }
 class PositionMarker extends WidgetType {
   constructor(readonly execution:boolean){super();}

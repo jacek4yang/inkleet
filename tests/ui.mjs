@@ -810,7 +810,7 @@ try {
         if(args.kind==="stepInTargets"){if(state.deferTargets)return new Promise(resolve=>state.targetsReply=()=>resolve({targets:[{id:9,label:"stale"}]}));return {targets:[{id:7,label:"sum(values)"}]};}
         if(args.kind==="stepInTarget"){state.selectedTarget=args.reference;state.debug.epoch++;return {};}
         if (args.kind === "threads") return { threads: [{id: 1, name: "MainThread"}, {id: 2, name: "Worker"}] };
-        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, column:state.column,endColumn:state.endColumn,inkleetSource:true, source: { name: "solution.py", path: "/fixture/solution.py" } }, { id: 0, name: "caller", line: 1, source: { name: "solution.py" } }] };
+        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, column:state.column,endColumn:state.endColumn,inkleetSource:true, source: { name: "solution.py", path: "/fixture/solution.py" } }, { id: 0, name: "caller", line: 1, inkleetSource:true, source: { name: "solution.py" } }] };
         if (args.kind === "scopes") return { scopes: [{ name: "Locals", variablesReference: args.reference === 0 ? 4 : 1 }] };
         if (args.kind === "variables") {
           if (args.reference === 4) return { variables: [{name: "caller_only", value: "42", variablesReference: 0}] };

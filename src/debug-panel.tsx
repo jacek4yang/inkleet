@@ -12,10 +12,10 @@ type Watch = { id: number; expression: string; result?: string; error?: string; 
 // One owned snapshot survives panel unmounts; never adopt an unknown session.
 let ownedSnapshot: { id: number; snapshot: Snapshot } | null = null;
 const active = (state: State | null) => state && state.phase !== "finished";
-export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { snapshot: Snapshot; breakpoints: number[]; onPauseLine: (position:DebugPosition|null) => void; running: boolean }) {
+export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReveal }: { onReveal?:()=>void; snapshot: Snapshot; breakpoints: number[]; onPauseLine: (position:DebugPosition|null) => void; running: boolean }) {
   const [state, setState] = useState<State | null>(null), [original, setOriginal] = useState<Snapshot | null>(null);
   const [targets,setTargets]=useState<{id:number;label:string}[]>([]),[choosing,setChoosing]=useState(false);
-  const targetVersion=useRef(0);
+  const targetVersion=useRef(0),targetContext=useRef<{id:number;epoch:number;frame:number;thread:number|null}|null>(null);
   const topFrame=useRef<{id:number;thread:number}|null>(null);
   const [threads, setThreads] = useState<{id:number;name:string}[]>([]), [selectedThread, setThread] = useState<number | null>(null);
   const [inspectionRevision, setInspectionRevision] = useState(0), inspectionVersion = useRef(0);
@@ -68,8 +68,8 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   async function showFrame(frame: Frame, current = latest.current) {
     if (!current || current.phase !== "paused") return;
     const request = ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false); setEvaluation(null); frameRef.current = frame.id; setFrame(frame.id); setVariables([]); setScopes([]);
-    if (!stale && original && frame.inkleetSource!==false && (/(?:^|[\\/])(?:solution\.(?:py|go|cpp|c|rs)|Solution\.java)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current({line:frame.line,column:frame.column,endLine:frame.endLine,endColumn:frame.endColumn,frameId:frame.id,execution:topFrame.current?.id===frame.id&&topFrame.current.thread===(current.threadId??0)});
-    else pauseCallback.current(0);
+    if (!stale && original && frame.inkleetSource===true && (/(?:^|[\\/])(?:solution\.(?:py|go|cpp|c|rs)|Solution\.java)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current({line:frame.line,column:frame.column,endLine:frame.endLine,endColumn:frame.endColumn,frameId:frame.id,execution:topFrame.current?.id===frame.id&&topFrame.current.thread===(current.threadId??0)});
+    else pauseCallback.current(null);
     try {
       const response = await inspect("scopes", frame.id, current);
       if (!alive.current || request !== version.current || !currentPause(current)) return;
@@ -80,7 +80,8 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   async function showThread(thread: number, current = latest.current) {
     if (!current || !currentPause(current)) return;
     const request = ++version.current; ++evaluationVersion.current;
-    setThread(thread); setFrames([]); setScopes([]); setVariables([]); setFrame(null); frameRef.current = null; setEvaluation(null); pauseCallback.current(0);
+    ++targetVersion.current;setTargets([]);setChoosing(false);targetContext.current=null;topFrame.current=null;
+    setThread(thread); setFrames([]); setScopes([]); setVariables([]); setFrame(null); frameRef.current = null; setEvaluation(null); pauseCallback.current(null);
     try {
       const response = await inspect("stackTrace", thread, current);
       if (request !== version.current || !currentPause(current)) return;
@@ -89,7 +90,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     } catch (e) { if (request === version.current && currentPause(current)) setError(String(e)); }
   }
   useEffect(() => {
-    ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false);setEvaluation(null); setThreads([]); setThread(null); setFrames([]); setScopes([]); setVariables([]); setFrame(null); frameRef.current = null; pauseCallback.current(0);
+    ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false);setEvaluation(null); setThreads([]); setThread(null); setFrames([]); setScopes([]); setVariables([]); setFrame(null); frameRef.current = null; pauseCallback.current(null);
     if (!state || state.phase !== "paused") return;
     const current = state;
     void showThread(current.threadId ?? 0, current);
@@ -149,11 +150,17 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
         if(typeof value.id!=="number"||!Number.isSafeInteger(value.id)||value.id<0||seen.has(value.id)||typeof value.label!=="string")return [];
         seen.add(value.id);return [{id:value.id,label:value.label.slice(0,200)}];
       });
-      setTargets(values);if(!values.length)setNotice("当前位置没有可选步入目标");
+      targetContext.current={id:current.id,epoch:current.epoch,frame,thread:current.threadId};setTargets(values);if(!values.length)setNotice("当前位置没有可选步入目标");
     }catch(error){if(token===targetVersion.current&&currentPause(current))setError(String(error));}
     finally{if(token===targetVersion.current&&alive.current)setChoosing(false);}
   }
   async function action(kind: string, target?:number) {
+    if(kind==="stepInTarget"){
+      const context=targetContext.current,current=latest.current;
+      if(!context||!current||!currentPause(current)||stale||context.id!==current.id||context.epoch!==current.epoch||context.frame!==frameRef.current||context.thread!==selectedThread||selectedThread!==current.threadId||!targets.some(value=>value.id===target)){
+        ++targetVersion.current;setTargets([]);targetContext.current=null;setError("步入目标已过期，请重新选择");return;
+      }
+    }
     if (guard.current || (evaluationGuard.current && kind !== "stop")) return;
     guard.current = true; ++targetVersion.current;setTargets([]);setChoosing(false);setPending(true); setError(""); setNotice("");
     try {
@@ -172,7 +179,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   }
   const inspectionOnly = selectedThread !== null && state?.threadId !== null && selectedThread !== state?.threadId;
   const keyAction=useRef<(kind:string)=>boolean>(()=>false);
-  keyAction.current=kind=>{if(inspectionOnly && ["next","stepIn","stepOut"].includes(kind))return false;if(pending||guard.current||(evaluationGuard.current&&kind!=="stop")||!["python3","golang","cpp","c","rust","java"].includes(snapshot.language)||running)return false;void action(kind);return true;};
+  keyAction.current=kind=>{if(inspectionOnly && ["next","stepIn","stepOut"].includes(kind))return false;if(pending||guard.current||(evaluationGuard.current&&kind!=="stop")||!["python3","golang","cpp","c","rust","java"].includes(snapshot.language)||running)return false;onReveal?.();void action(kind);return true;};
   useEffect(()=>{
     const onKey=(event:KeyboardEvent)=>{
       if(event.repeat||!isTauri()||event.altKey||event.ctrlKey||event.metaKey||document.querySelector("dialog[open]"))return;
@@ -196,7 +203,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
         {state?.capabilities?.supportsStepInTargetsRequest===true&&<IconButton icon="target" label="选择函数步入" disabled={!paused||pending||evaluating||choosing||inspectionOnly||stale||selectedFrame!==topFrame.current?.id} onClick={()=>void chooseTarget()} />}
         <IconButton icon="breakpoint" label="应用断点" disabled={pending || evaluating || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")} /><IconButton icon="stop" label="停止调试" shortcut="Shift+F5" disabled={pending} onClick={() => action("stop")} /></>}
     </div>
-    <div className="debug-body">    {targets.length>0&&<div className="debug-targets" role="group" aria-label="选择步入函数" onKeyDown={event=>{if(event.key==="Escape"){++targetVersion.current;setTargets([]);event.stopPropagation();}}}>{targets.map(target=><button key={target.id} onClick={()=>void action("stepInTarget",target.id)}>{target.label}</button>)}<IconButton icon="close" label="取消选择步入函数" onClick={()=>{++targetVersion.current;setTargets([]);}} /></div>}<div className="debug-meta"><span className="breakpoint-summary">断点：{breakpoints.join(", ") || "未设置"}。</span>
+    <div className="debug-body">    {targets.length>0&&<div className="debug-targets" role="group" aria-label="选择步入函数" onKeyDown={event=>{if(event.key==="Escape"){++targetVersion.current;setTargets([]);event.stopPropagation();}}}>{targets.map(target=><button key={target.id} disabled={!paused||pending||evaluating||inspectionOnly||stale||selectedFrame!==topFrame.current?.id} onClick={()=>void action("stepInTarget",target.id)}>{target.label}</button>)}<IconButton icon="close" label="取消选择步入函数" onClick={()=>{++targetVersion.current;setTargets([]);}} /></div>}<div className="debug-meta"><span className="breakpoint-summary">断点：{breakpoints.join(", ") || "未设置"}。</span>
     <p role="status" hidden={!state} title={state?.reason}>{state ? state.phase === "paused" ? "已暂停" : state.phase === "finished" ? "调试结束 · " + state.reason : state.phase === "compiling" ? "正在编译调试快照…" : state.phase === "starting" ? "正在连接调试器…" : "调试运行中" : "尚未调试"}</p></div>
     {notice && <p role="status">{notice}</p>}
     {stale && <p className="cache-warning">代码或用例已改变，调试仍使用启动时快照；当前编辑器不显示旧快照停靠行。</p>}

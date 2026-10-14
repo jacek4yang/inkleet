@@ -8,8 +8,8 @@ import type { Language } from "./domain";
 type Snapshot = { documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "compiling", "running", "canceling"].includes(r.phase);
-export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine, onSettings, hidden = false }: {
-  hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
+export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
+  onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
 }) {
   const resize=useResizablePanel("local",!hidden);
   const [input, setInput] = useState(sampleInput);
@@ -73,6 +73,6 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
 
     {result && !busy(result) && <small className="exit-code" title="本地结果不代表通过力扣判题">退出码 {result.exitCode ?? "无"}</small>}
     </div>
-    <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel snapshot={{ documentKey, code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
+    <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel onReveal={()=>{setPane("debug");onReveal?.();}} snapshot={{ documentKey, code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
   </section>;
 }

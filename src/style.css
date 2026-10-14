@@ -419,3 +419,5 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .judge-panel.resizable-panel{padding:0;overflow:hidden;display:flex;flex-direction:column;flex:none}
 .judge-content{padding:10px 14px;overflow:auto;min-height:0;flex:1}
 .icon-button svg{flex:none;display:block;overflow:visible}
+
+.debug-targets{display:flex;flex-wrap:wrap;gap:4px;padding:6px 8px;border-bottom:1px solid var(--line)}.debug-targets>button{font-size:12px}
