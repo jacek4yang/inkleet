@@ -47,7 +47,13 @@ Ubuntu / Mint 可先安装：
 - 公开中国站功能与登录后的在线评测分别验证，不把离线样例作为在线验收。
 - 真实账号登录与在线运行/提交尚未完整验收。
 - 工具目录隔离不是安全沙箱；仅运行你信任的代码。
-- 具体能力以 SOURCE_COMMIT.txt 所列提交及仓库 STATUS.md 为准。
+- 本包包含语义高亮、命令面板、F2 保护、缩进引导线和 Rust 自动导入补全。
+- 新增显式保存时格式化、未保存草稿恢复、独立断点与箭头槽、克制的 Codicons 图标。
+- 新增可编辑命名测试用例、可视化返回值，以及可选 Vim 和 :w 保存。
+- Ctrl+S 才格式化和保存；编辑停顿不会自动格式化。升级前备份应用数据。
+- 独立分支的 prepareRename/重命名预览及集合调试改进未包含在本包中。
+- 集成源码检查点 01103ebaac30503968d1ae743077961de30c34b3；验收结果见 Draft PR #28。
+- 具体能力以 SOURCE_COMMIT.txt 所列提交及对应 Draft PR #28 的测试记录为准。
 
 程序数据与压缩包分离，位于系统应用数据目录（通常为 ~/.local/share/top.jacek.inkleet）。
 删除解压目录不会自动删除笔记、源码和下载的语言工具。
@@ -67,6 +73,15 @@ if test -d public/licenses; then cp -R public/licenses "$work/$name/licenses"; f
 if test -d public/fonts; then
   mkdir -p "$work/$name/font-licenses"
   find public/fonts -type f \( -iname '*license*' -o -iname '*OFL*' \) -exec cp {} "$work/$name/font-licenses/" \;
+fi
+# Preserve dependency notices, including the Vim adapter/core MIT licenses.
+if test -d node_modules; then
+  while IFS= read -r -d '' license; do
+    relative="${license#node_modules/}"
+    target="$work/$name/dependency-licenses/$relative"
+    mkdir -p "$(dirname "$target")"
+    cp "$license" "$target"
+  done < <(find node_modules -type f \( -iname 'license*' -o -iname 'copying*' -o -iname 'notice*' \) -print0)
 fi
 tar -C "$work" -czf "$out/$name.tar.gz" "$name"
 (cd "$out" && sha256sum "$name.tar.gz" > "$name.sha256")

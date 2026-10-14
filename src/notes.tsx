@@ -48,7 +48,8 @@ export function MarkdownPreview({ text }: { text: string }) {
       : <p className="muted">暂无笔记</p>}
   </div>;
 }
-export function Notes({ documentKey, value, loading, onChange, onSettings, onSave, dirty=false }: {
+export function Notes({ vimEnabled=false, documentKey, value, loading, onChange, onSettings, onSave, dirty=false }: {
+  vimEnabled?:boolean;
   documentKey: string; value: string; loading: boolean;
   onChange: (value: string) => void; onExport: () => void;
   onSave?:()=>void;dirty?:boolean;
@@ -63,6 +64,6 @@ export function Notes({ documentKey, value, loading, onChange, onSettings, onSav
     </div></div>
     {loading ? <p className="loading">正在读取笔记…</p> : preview
       ? <MarkdownPreview text={value} />
-      : <CodeEditor onSave={onSave} documentKey={documentKey} language="markdown" label="Markdown 笔记" value={value} onChange={onChange} />}
+      : <CodeEditor vimEnabled={vimEnabled} onSave={onSave} documentKey={documentKey} language="markdown" label="Markdown 笔记" value={value} onChange={onChange} />}
   </>;
 }

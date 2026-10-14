@@ -6,8 +6,8 @@ use crate::storage;
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all="camelCase")]
-pub struct Document { pub version:u32, pub format_on_save:bool, pub overrides:BTreeMap<String,bool> }
-impl Default for Document{fn default()->Self{Self{version:1,format_on_save:true,overrides:BTreeMap::new()}}}
+pub struct Document { pub version:u32, #[serde(default)] pub vim:bool, pub format_on_save:bool, pub overrides:BTreeMap<String,bool> }
+impl Default for Document{fn default()->Self{Self{version:1,vim:false,format_on_save:true,overrides:BTreeMap::new()}}}
 impl Document{
     fn validated(&self)->Result<(),String>{
         if self.version!=1||self.overrides.len()>6||self.overrides.keys().any(|k|!matches!(k.as_str(),"python3"|"rust"|"golang"|"c"|"cpp"|"java")){
@@ -64,6 +64,14 @@ impl EditorSettings {
 
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn legacy_vim_default_and_persistence(){
+        let old:Document=serde_json::from_str(r#"{"version":1,"formatOnSave":false,"overrides":{}}"#).unwrap();
+        assert!(!old.vim);
+        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().into());
+        let mut next=old;next.vim=true;let saved=store.save(next,None).unwrap();
+        assert!(EditorSettings::new(dir.path().into()).get().unwrap().settings.vim);
+        assert!(store.save(Document::default(),None).is_err());assert_eq!(store.get().unwrap().revision,saved.revision);
+    }
     #[test]fn defaults_cas_overrides_and_restart(){
         let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().into());
         assert!(store.get().unwrap().settings.format_on_save);

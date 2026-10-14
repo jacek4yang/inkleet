@@ -565,7 +565,7 @@ try:
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
         wait_for(lambda: text(".local-result").strip()=="10", "real private Python harness result", seconds=30)
-        assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.exit-code')}/attribute/title")
+        assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.case-result')}/attribute/title")
         click('[aria-label="运行与调试设置"]')
         click('[aria-label="使用手册"]')
         wait_for(lambda:"本地输出不代表力扣判题结论" in cmd("GET",f"/element/{element('.user-manual')}/property/textContent"),"local judge distinction is available in the manual")
@@ -878,7 +878,7 @@ try:
                 click('[data-local-tab="run"]')
                 fill('[aria-label="本地测试输入"]',"[3,-1,8]")
                 click('[data-action="local-execute"]')
-                wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),f"{group} private compilation and typed local result",seconds=280)
+                wait_for(lambda: text(".local-result").strip()=="10",f"{group} private compilation and typed local result",seconds=280)
                 screenshot(group+"-local-run-native.png")
                 saved_solution=data/("top.jacek.inkleet/notebook/lc-900000001/solution."+({"golang":"go","cpp":"cpp","c":"c","rust":"rs"}[group]))
                 wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
@@ -959,6 +959,40 @@ try:
         click('select[aria-label="编程语言"] option[value="rust"]')
         fill(code,marker)
         save_editor(code)
+
+        # Native modal keyboard workflow, persisted settings, and explicit :w.
+        fill(code,"one two\nthree four")
+        def set_vim(enabled):
+            click('[data-action="open-settings"]')
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='编辑器']"})[EID]
+            cmd("POST",f"/element/{category}/click",{})
+            check=element(".vim-switch input")
+            selected=cmd("GET",f"/element/{check}/selected")
+            if bool(selected)!=enabled: cmd("POST",f"/element/{check}/click",{})
+            click_debug_action(".format-settings .settings-form-actions button")
+            wait_for(lambda:json.loads(editor_config.read_text()).get("vim",False)==enabled,"native Vim preference saved")
+            click('[aria-label="关闭设置"]')
+        set_vim(True)
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","gg0ciwONE"],check=True)
+        subprocess.run(["xdotool","key","Escape"],check=True)
+        wait_for(lambda:source_text(code)=="ONE two\nthree four","native Vim ciw")
+        subprocess.run(["xdotool","key","u"],check=True)
+        wait_for(lambda:source_text(code)=="one two\nthree four","native Vim atomic undo")
+        subprocess.run(["xdotool","key","ctrl+r"],check=True)
+        wait_for(lambda:source_text(code)=="ONE two\nthree four","native Vim redo")
+        time.sleep(1.4)
+        assert (data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()==marker,"Vim must not idle-save"
+        subprocess.run(["xdotool","type","--clearmodifiers",":w"],check=True)
+        subprocess.run(["xdotool","key","Return"],check=True)
+        wait_for(lambda:(data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()=="ONE two\nthree four","native Vim explicit write")
+        screenshot("vim-native.png")
+        set_vim(False)
+        assert source_text(code)=="ONE two\nthree four","native Vim toggle preserves document"
+        fill(code,marker)
+        save_editor(code)
+        (evidence/"VIM_NATIVE_RESULT.txt").write_text("PASS: real Linux WebView, OS keyboard ciw, atomic undo/redo, idle canonical preservation, explicit :w, persisted toggle without document replacement. Native IME not verified.\n")
 
         (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")
     if os.environ.get("INKLEET_LIVE_CN") == "1":

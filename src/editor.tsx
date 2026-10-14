@@ -1,14 +1,15 @@
+import {vimEditing,vimNormal,getCM} from "./vim";
 import {indentGuides} from "./indent-guides";
 import {editorCommands} from "./editor-commands";
 import {formatBinding,type Command} from "./command-registry";
 import type { DebugPosition } from "./debug-position";
 import { formatOnSave, formatDocument, saveDocument } from "./format-on-save";
 import React, { useLayoutEffect, useRef, useState } from "react";
-import { EditorState, StateEffect, Prec } from "@codemirror/state";
+import { EditorState, StateEffect, Prec, Compartment } from "@codemirror/state";
 import { EditorView, keymap, tooltips } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { indentMore, indentLess, undo, redo, selectAll } from "@codemirror/commands";
-import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
+import { acceptCompletion, startCompletion, closeCompletion } from "@codemirror/autocomplete";
 import { indentUnit } from "@codemirror/language";
 import { rust } from "@codemirror/lang-rust";
 import { python } from "@codemirror/lang-python";
@@ -47,16 +48,18 @@ function syntax(language: Language | "markdown") {
   }
 }
 type Props = {
+  vimEnabled?:boolean;
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void; onStatus?: (status: string) => void; reconnectToken?: number; onSettings?: () => void;
   onSave?:()=>void;onSaveReady?:(save:(()=>boolean)|null)=>void;
   formatting?: {epoch?:()=>number;ready?:(save:boolean)=>boolean;enabled:boolean;save:(text:string)=>Promise<boolean>;report:(message:string)=>void};
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
-export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
+export function CodeEditor({ vimEnabled=false, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
   const formatOptions=useRef(formatting);formatOptions.current=formatting;
   const saveCallback=useRef(onSave),saveReady=useRef(onSaveReady);saveCallback.current=onSave;saveReady.current=onSaveReady;
   const host = useRef<HTMLDivElement>(null);
+  const vimSlot=useRef(new Compartment()),liveView=useRef<EditorView|null>(null),vimSave=useRef<(view:EditorView)=>boolean>(()=>false);
   const [lspStatus, setLspStatus] = useState("");
   const connection = reconnectToken;
   const [source, setSource] = useState<Source | null>(null);
@@ -68,6 +71,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
     const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata, true) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const save=(target:EditorView)=>{if(target.composing)return false;if(language==="markdown"){saveCallback.current?.();return true;}return saveDocument(target);};
+    vimSave.current=save;
     const commands:Command<EditorView>[]=[
       {id:"editor.save",label:"保存",key:"Mod-s",run:save},
       {id:"editor.undo",label:"撤销",run:undo},
@@ -83,19 +87,20 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
       ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:formatDocument}]:[]),
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
     ];
-    const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),
+    const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
       basicSetup, syntax(language), theme, ...(language==="markdown"?[]:[indentGuides]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
       // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。
-      Prec.high(keymap.of([{ key: "Tab", run: view => acceptCompletion(view) || indentMore(view), shift: indentLess }])),
+      Prec.high(keymap.of([{ key: "Tab", run: view => vimNormal(view)||acceptCompletion(view)||indentMore(view), shift:view=>vimNormal(view)||indentLess(view) }])),
       // 脱离面板的 overflow / stacking context；CM 自动同步主题并在销毁时移除容器。
+      keymap.of([{key:"Mod-m",run:view=>{view.setTabFocusMode(2000);return true;}}]),
       tooltips({ parent: document.body, position: "fixed" }),
       EditorView.domEventObservers({
         keydown(event, view) {
           // 即使 Escape 被补全/选区消耗，也保留显式移出编辑器的键盘通道。
-          if (event.key === "Escape") view.setTabFocusMode(2000);
+          if (event.key === "Escape") {if(getCM(view)){closeCompletion(view);view.setTabFocusMode(false);}else view.setTabFocusMode(2000);}
         },
       }), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
@@ -110,11 +115,13 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
       ? cached.state.update({ effects: StateEffect.reconfigure.of(extensions) }).state
       : EditorState.create({ doc: value, extensions });
     const view = new EditorView({ state, parent: host.current! });
+    liveView.current=view;
     saveReady.current?.(()=>save(view));
     if (debug) debugView.current = { view, stopped: debug.stopped };
     if (cached) view.scrollDOM.scrollTop = cached.scroll;
     if (intelligence) void intelligence.connect(view);
     return () => {
+      liveView.current=null;
       saveReady.current?.(null);
       debugView.current = null;
       intelligence?.destroy();
@@ -122,6 +129,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
       view.destroy();
     };
   }, [documentKey, language, label, connection, metadata]);
-  useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection]);
+  useLayoutEffect(()=>{const view=liveView.current;if(view)view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});},[vimEnabled]);
+  useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection, language, label, metadata]);
   return <><div className="editor-host" ref={host} />{(language !== "markdown") && <button type="button" onClick={onSettings} className={"lsp-status " + (lspStatus.includes("已连接") ? "ready" : "unavailable")} data-status={lspStatus} aria-label="语言服务设置" title={lspStatus}><i /><span>LSP</span></button>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }
