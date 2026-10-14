@@ -58,6 +58,7 @@ try {
   await cataloguePage.locator('.question-sidebar [data-slug="inkleet-test-fixture"]').click();
   await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).waitFor();
   await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).fill("// retained while filtering");
+  assert.equal(await cataloguePage.getByRole("combobox",{name:"题目难度"}).evaluate(node => getComputedStyle(node).appearance),"none","compact select keeps semantic native control with quiet appearance");
   await cataloguePage.getByRole("combobox",{name:"题目难度"}).selectOption("EASY");
   await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===2);
   await cataloguePage.getByRole("textbox",{name:"搜索题目",exact:true}).fill("new");
@@ -718,9 +719,16 @@ try {
       }
       if (command === "debug_request") {
         state.debugCalls.push(args.kind);
-        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, source: { name: "solution.py", path: "/fixture/solution.py" } }] };
-        if (args.kind === "scopes") return { scopes: [{ name: "Locals", variablesReference: 1 }] };
-        if (args.kind === "variables") return { variables: [{ name: "values", value: "[3, -1, 8]", variablesReference: 0 }] };
+        if (args.kind === "threads") return { threads: [{id: 1, name: "MainThread"}, {id: 2, name: "Worker"}] };
+        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, source: { name: "solution.py", path: "/fixture/solution.py" } }, { id: 0, name: "caller", line: 1, source: { name: "solution.py" } }] };
+        if (args.kind === "scopes") return { scopes: [{ name: "Locals", variablesReference: args.reference === 0 ? 4 : 1 }] };
+        if (args.kind === "variables") {
+          if (args.reference === 4) return { variables: [{name: "caller_only", value: "42", variablesReference: 0}] };
+          if (args.reference === 2 && state.deferVariables) return new Promise(resolve => { state.variablesReply = () => resolve({variables: [{name: "late_child", value: "stale", variablesReference: 0}]}); });
+          if (args.reference === 2) return {variables: [{name: "0", value: "3", variablesReference: 0}, {name: "nested", value: "{x: 7}", variablesReference: 3}]};
+          if (args.reference === 3) return {variables: [{name: "x", value: "7", variablesReference: 0}]};
+          return { variables: [{ name: "values", value: "[3, -1, 8]", variablesReference: 2, indexedVariables: 3 }] };
+        }
         if (args.kind === "next") { state.debug.epoch++; return {}; }
         if (args.kind === "continue") { state.debug.phase = "finished"; state.debug.epoch++; return {}; }
         return {};
@@ -759,17 +767,22 @@ try {
   assert.match(await runPanel.innerText(), /9007199254740993/);
   assert.match(await runPanel.locator(".exit-code").getAttribute("title"), /不代表通过力扣判题/, "local result distinction remains available on hover");
   await runPanel.getByRole("button", { name: "运行与调试设置", exact: true }).click();
-  await runPage.getByRole("dialog", { name: "设置", exact: true }).getByText(/本地输出不代表力扣判题结果/).waitFor();
+  assert.equal(await runPage.getByRole("dialog",{name:"设置",exact:true}).locator(".settings-reference").count(),0);
+  await runPage.getByRole("button",{name:"使用手册",exact:true}).click();
+  await runPage.getByRole("dialog",{name:"使用手册",exact:true}).getByText(/本地输出不代表力扣判题结论/).waitFor();
+  await runPage.getByRole("button",{name:"关闭使用手册",exact:true}).click();
   await runPage.getByRole("button", { name: "关闭设置", exact: true }).click();
 
   await runPanel.locator('[data-local-tab="debug"]').click();
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).press("F9");
   await runPanel.getByText(/断点：1。/).waitFor();
+  assert.equal(await runPanel.getByRole("button", {name:"开始调试",exact:true}).locator("svg[aria-hidden=true]").count(),1,"start uses accessible SVG");
   await runPanel.getByRole("button", { name: "开始调试", exact: true }).evaluate(button => { button.click(); button.click(); });
   await runPage.waitForFunction(() => window.__runTest.debugStarts === 1);
   await runPanel.getByText("已暂停", { exact: true }).waitFor();
   assert.equal(await runPanel.getByText("已暂停", { exact: true }).getAttribute("title"), "breakpoint");
-  for (const label of ["开始调试", "继续", "单步跳过", "单步进入", "单步跳出", "应用断点", "停止调试"]) {
+  assert.equal(await runPanel.getByRole("button", {name:"开始调试",exact:true}).count(),0,"active session has one primary execution control");
+  for (const label of ["继续", "单步跳过", "单步进入", "单步跳出", "应用断点", "停止调试"]) {
     assert.equal(await runPanel.getByRole("button", { name: label, exact: true }).locator("svg[aria-hidden=true]").count(), 1, label + " has an accessible SVG control");
   }
   await runPage.screenshot({ path: "evidence/debug-svg-toolbar.png", fullPage: true });
@@ -779,10 +792,35 @@ try {
   await runPanel.getByRole("button", { name: "求值一次", exact: true }).click();
   await runPanel.locator(".debug-evaluation-result pre").filter({ hasText: "3" }).waitFor();
   assert.equal(await runPage.evaluate(() => window.__runTest.evaluations), 1);
+  await runPanel.getByRole("button", {name: "values", exact: true}).click();
+  await runPanel.getByRole("button", {name: "nested", exact: true}).click();
+  await runPanel.getByRole("button", {name: "x", exact: true}).waitFor();
+  assert.equal(await runPanel.getByRole("button", {name: "values", exact: true}).count(), 1, "expanding descendants preserves parent variable");
+  await runPanel.getByRole("button", {name: "添加监视表达式", exact: true}).click();
+  await runPanel.getByRole("button", {name: "刷新监视 len(values)", exact: true}).click();
+  await runPage.waitForFunction(() => window.__runTest.evaluations === 2);
+  assert.match(await runPanel.locator(".debug-watch").innerText(), /3/);
+  await runPage.screenshot({path: "evidence/debugger-variable-tree-watches.png", fullPage:true});
+  await runPanel.getByRole("button", {name: "caller · 1", exact: true}).click();
+  await runPanel.getByRole("button", {name: "caller_only", exact:true}).waitFor();
+  assert.equal(await runPanel.getByRole("button", {name: "x", exact: true}).count(),0,"frame switch discards old child references");
+  assert.match(await runPanel.locator(".debug-watch").innerText(), /—/, "watch never presents previous frame result as current");
+  await runPanel.getByRole("button", {name: "solve · 1", exact:true}).click();
+  await runPanel.getByRole("button", {name:"values",exact:true}).waitFor();
+  await runPage.evaluate(() => { window.__runTest.deferVariables = true; });
+  await runPanel.getByRole("button", {name:"values",exact:true}).click();
+  await runPage.waitForFunction(() => typeof window.__runTest.variablesReply === "function");
+  await runPanel.getByRole("button", {name:"caller · 1",exact:true}).click();
+  await runPanel.getByRole("button", {name:"caller_only",exact:true}).waitFor();
+  await runPage.evaluate(() => window.__runTest.variablesReply());
+  assert.equal(await runPanel.getByRole("button", {name:"late_child",exact:true}).count(),0,"late child response discarded after frame switch");
+  await runPage.evaluate(() => { window.__runTest.deferVariables = false; });
+  await runPanel.getByRole("button", {name:"solve · 1",exact:true}).click();
+  await runPanel.getByRole("button", {name:"values",exact:true}).waitFor();
   await runPage.evaluate(() => { window.__runTest.deferEvaluation = true; });
   await runPanel.getByRole("button", { name: "求值一次", exact: true }).evaluate(button => { button.click(); button.click(); });
   await runPage.waitForFunction(() => typeof window.__runTest.evaluationReply === "function");
-  assert.equal(await runPage.evaluate(() => window.__runTest.evaluations), 2, "duplicate expression evaluation must be blocked");
+  assert.equal(await runPage.evaluate(() => window.__runTest.evaluations), 3, "duplicate expression evaluation must be blocked");
   assert.equal(await runPanel.getByRole("button", { name: "停止调试", exact: true }).isDisabled(), false, "stop remains available during evaluation");
   await runPage.evaluate(() => { window.__runTest.debug.epoch++; });
   await runPage.waitForTimeout(350);
@@ -888,7 +926,9 @@ try {
   });
   await conflictPage.goto("http://127.0.0.1:5173");
   const conflictEditor = conflictPage.getByRole("textbox", { name: "代码编辑器", exact: true });
-  await conflictPage.getByText("已读取本机文件", { exact: true }).waitFor();
+  await conflictPage.locator('.statusbar[data-storage-state="已读取本机文件"]').waitFor();
+  assert.equal(await conflictPage.locator(".statusbar").innerText(),"","successful file loading adds no persistent sentence");
+  assert.equal(await conflictPage.getByText("在线评测需要登录中国站",{exact:true}).count(),0,"login explanation is not permanent workbench clutter");
   await conflictPage.evaluate(() => { window.__conflictTest.file = "external"; });
   await conflictEditor.fill("local draft");
   await conflictPage.locator('[data-action="review-code-conflict"]').waitFor();
@@ -962,7 +1002,7 @@ try {
     }};
   });
   await externalPage.goto("http://127.0.0.1:5173");
-  await externalPage.getByText("已读取本机文件", { exact: true }).waitFor();
+  await externalPage.locator('.statusbar[data-storage-state="已读取本机文件"]').waitFor();
   await externalPage.getByRole("button", { name: "笔记", exact: true }).click();
   const externalNote = externalPage.getByRole("textbox", { name: "Markdown 笔记", exact: true });
   await externalNote.fill("# Saved");

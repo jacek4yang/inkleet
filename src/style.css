@@ -260,3 +260,38 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .download-settings>p{font-size:11px;line-height:1.65}
 .settings-form-actions{display:flex;gap:8px;margin-top:16px}
 .settings-form-actions button{font-size:12px;padding:6px 10px}
+
+/* Compact debugger inspection: stack context and nested values stay visible. */
+.debug-inspector{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(0,1.5fr);gap:12px}
+.debug-frames{min-width:0;border-right:1px solid #e5ded5;padding-right:8px}
+.debug-frames>button{display:block;width:100%;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.debug-frames>button[aria-pressed=true]{background:#e7dfd2}
+.debug-frames select{width:100%;font-size:11px}
+.debug-variable{display:flex;gap:6px;align-items:baseline;min-width:0}
+.debug-variable>button{flex-shrink:0;max-width:55%;overflow:hidden;color:#51483c}
+.debug-variable>code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#80705b;font:11px/1.65 var(--font-mono)}
+.debug-tree-node{min-width:0}
+.debug-chevron{display:inline-flex;transition:transform .1s}.debug-chevron.open{transform:rotate(90deg)}
+.debug-tree-children>small{font-size:10px;color:#8c8276;padding-left:12px}
+.debug-watches{border-top:1px solid #e5ded5;margin-top:8px}
+.debug-watches>header{display:flex;align-items:center;justify-content:space-between}
+.debug-watches h4{font-size:11px;font-weight:500;margin:8px 0;color:#7c746a}
+.debug-watches button{border:0;padding:3px}
+.debug-watch{display:grid;grid-template-columns:minmax(65px,1fr) minmax(40px,1fr) 24px 20px;gap:6px;align-items:center;font:11px/1.6 var(--font-mono)}
+.debug-watch>code,.debug-watch>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.debug-watch .icon-button{width:24px;height:24px;padding:4px}
+
+/* Quiet native selects retain platform keyboard and accessibility behavior. */
+select:not([multiple]):not([size]),.pane-heading select,.question-filters select,.download-settings>select,.debug-frames select{
+  appearance:none;-webkit-appearance:none;border:1px solid transparent;border-radius:4px;
+  background-color:transparent;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%238b847b' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 7px center;background-size:12px;
+  padding:4px 25px 4px 7px;min-height:26px;line-height:1.4;box-shadow:none;
+}
+select:not([multiple]):not([size]):hover:not(:disabled){background-color:#eeeae366;border-color:#ded8cf80}
+select:not([multiple]):not([size]):focus-visible{outline:1px solid #ae735280;outline-offset:1px;border-color:#ae735280}
+select:disabled{opacity:.5;cursor:not-allowed}
+select option,select optgroup{background:#faf9f5;color:#302b26}
+@media(forced-colors:active){select:not([multiple]):not([size]){appearance:auto;background-image:none;border:1px solid ButtonText;padding-right:7px}}
+
+.user-manual{width:min(760px,94vw);max-height:86vh;padding:0;border:1px solid #ded8cf;border-radius:6px;background:#faf9f5;color:#302b26}.user-manual>header{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid #e5ded5}.user-manual h2{font-size:14px}.user-manual>.notes-preview{padding:16px 28px}.user-manual::backdrop{background:#302b2630}.settings-hub>header>h2{margin-right:auto}

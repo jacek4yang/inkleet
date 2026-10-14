@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 import { CodeEditor } from "./editor";
 
-function MarkdownPreview({ text }: { text: string }) {
+export function MarkdownPreview({ text }: { text: string }) {
   const [result, setResult] = useState<{ source: string; html?: string; error?: string } | null>(null);
   useEffect(() => {
     let alive = true;

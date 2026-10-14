@@ -53,7 +53,7 @@ def cmd(method, path, payload=None):
         return request(method, f"/session/{session}" + path, payload)
 def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
 def text(css):
-    suffix = "/attribute/data-status" if css == ".lsp-status" else "/text"
+    suffix = "/attribute/data-status" if css == ".lsp-status" else "/attribute/data-storage-state" if css == '.statusbar[role="status"]' else "/text"
     return cmd("GET",f"/element/{element(css)}" + suffix)
 def settings_action(category, css):
     click('[data-action="open-settings"]')
@@ -380,7 +380,9 @@ try:
         wait_for(lambda: '"value": 10' in text(".local-result"), "real private Python harness result", seconds=30)
         assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.exit-code')}/attribute/title")
         click('[aria-label="运行与调试设置"]')
-        wait_for(lambda:"本地输出不代表力扣判题结果" in text(".settings-hub"),"local judge distinction remains in runtime settings")
+        click('[aria-label="使用手册"]')
+        wait_for(lambda:"本地输出不代表力扣判题结论" in cmd("GET",f"/element/{element('.user-manual')}/property/textContent"),"local judge distinction is available in the manual")
+        click('[aria-label="关闭使用手册"]')
         click('[aria-label="关闭设置"]')
         screenshot("python-local-run-native.png")
         (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
@@ -418,6 +420,61 @@ try:
         wait_for(lambda: "断点：未设置。" in text(".debug-panel"), "cleared breakpoint list is reflected in actual UI")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-stop-keys","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
         wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
+        nested_source="def inner(values):\n    inner_total = sum(values)\n    return inner_total\ndef solve(values):\n    total = inner(values)\n    return total"
+        fill(code,nested_source)
+        click(code)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+        keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"nested-breakpoint","actions":keys}]})
+        wait_for(lambda: "断点：5。" in text(".debug-panel"),"nested call breakpoint")
+        click('[aria-label="开始调试"]')
+        wait_for(lambda: "已暂停" in text(".debug-panel"),"pause before nested function",seconds=45)
+        def stack_names():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-frames > button"})
+            return "\n".join(cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes)
+        (evidence/"nested-stack-observation.json").write_text(json.dumps({"webdriverText":text(".debug-frames"),"buttonText":stack_names()},ensure_ascii=False))
+        wait_for(lambda: "solve" in stack_names(),"caller stack initially selected")
+        click('[aria-label="单步进入"]')
+        wait_for(lambda: "inner" in stack_names(),"real stepIn enters inner function")
+        click('[aria-label="单步跳过"]')
+        def inner_total():
+            node=element('.debug-variable > button[aria-label="inner_total"] + code')
+            return cmd("GET",f"/element/{node}/property/textContent")
+        wait_for(lambda:inner_total()=="10","stepOver computes inner-frame local")
+        click('.debug-variable button[aria-label="values"]')
+        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".debug-tree-children .debug-variable"}))>=3,"real nested array tree children")
+        assert cmd("POST","/elements",{"using":"css selector","value":".debug-variable button[aria-label='values']"}),"parent lost while expanding"
+        def child_values():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-tree-children .debug-variable > code"})
+            return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
+        wait_for(lambda:all(value in child_values() for value in ["3","-1","8"]),"expanded array children preserve exact values")
+
+        fill('[aria-label="调试表达式输入"]',"inner_total")
+        click('[aria-label="添加监视表达式"]')
+        click('[aria-label="刷新监视 inner_total"]')
+        def watch_result():
+            return cmd("GET",f"/element/{element('.debug-watch > span')}/property/textContent")
+        wait_for(lambda:watch_result()=="10","real current-frame watch")
+        screenshot("python-nested-debugger-native.png")
+        caller=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'solve')]"})[EID]
+        cmd("POST",f"/element/{caller}/click",{})
+        wait_for(lambda:watch_result()=="—","watch result invalidated on caller selection")
+        inner=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'inner')]"})[EID]
+        cmd("POST",f"/element/{inner}/click",{})
+        wait_for(lambda:inner_total()=="10","selecting inner frame restores its own variables")
+        click('[aria-label="单步跳出"]')
+        wait_for(lambda:"inner" not in stack_names() and "solve" in stack_names(),"real stepOut returns to caller")
+        wait_for(lambda:watch_result()=="—","watch result invalidated on new pause")
+        click('[aria-label="停止调试"]')
+        wait_for(lambda:"调试结束" in text(".debug-panel"),"nested debugger stopped")
+        click(code)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+        keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"clear-nested-breakpoint","actions":keys}]})
+        wait_for(lambda:"断点：未设置。" in text(".debug-panel"),"nested test breakpoint cleaned")
+        (evidence/"NESTED_DEBUGGER_RESULT.txt").write_text("PASS: real private debugpy step-in to nested function, step-over local value, hierarchical array expansion, explicit Watch, caller frame switching, step-out and old-frame/epoch Watch invalidation. Other adapters not covered by nested-function assertion.\n")
         click(".local-runner [aria-label='收起']")
         settings_action("语言与环境", '[data-action="open-environments"]')
         wait_for(lambda: element('select[aria-label="开发环境语言"]'), "language-specific tool groups")
@@ -466,7 +523,7 @@ try:
         wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
         wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
         def java_total():
-            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='total']]/code"})[EID]
+            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='total']]/code"})[EID]
             return cmd("GET",f"/element/{node}/text")
         wait_for(lambda: java_total()=="0","Java initial total")
         wait_for(lambda: "部分断点尚未验证" not in text(".debug-panel"),"Java asynchronous breakpoint verification reaches the UI")
@@ -554,7 +611,7 @@ try:
                 wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
                 wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
                 def local_total():
-                    node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='total']]/code"})[EID]
+                    node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='total']]/code"})[EID]
                     return cmd("GET",f"/element/{node}/text")
                 wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
                 screenshot(group+"-debug-native.png")

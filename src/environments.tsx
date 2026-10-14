@@ -1,3 +1,4 @@
+import { IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 type Tool = { id: string; version: string; size: number; phase: string; downloaded: number; message: string };
@@ -61,9 +62,7 @@ export function Environments({ onClose }: { onClose: () => void }) {
     finally {pending.current.delete(key);if(alive.current)setActions(value=>value+1);}
   }
   return <dialog ref={dialog} className="environments" aria-labelledby="environment-title" onCancel={e => { e.preventDefault(); onClose(); }}>
-    <header><h2 id="environment-title">开发环境</h2><button onClick={onClose}>关闭</button></header>
-    <p>工具由墨题下载并保存在自己的目录中，不修改系统 PATH，也不需要你预装语言运行时。</p>
-    <p className="muted">固定版本与 SHA-256 校验，失败保留下载断点。关闭这个窗口后，安装仍会继续。环境隔离不等于运行不可信代码的安全沙箱。</p>
+    <header><h2 id="environment-title">开发环境</h2><IconButton icon="close" label="关闭" onClick={onClose} /></header>
     {!isTauri() ? <p>请在原生桌面客户端安装开发环境。</p> : !overview ? <p role="status">正在检查本机工具…</p> : !overview.supported ? <p>当前平台尚未提供本地开发环境；仍可编辑、保存和导出源码。</p> : <>
       <label>语言工具 <select aria-label="开发环境语言" value={group} onChange={event=>setGroup(event.target.value as Group)}>{(Object.keys(groups) as Group[]).filter(key=>overview.tools.some(tool=>groups[key].ids.includes(tool.id))).map(key=><option key={key} value={key}>{groups[key].name}</option>)}</select></label>
       <div className="environment-summary"><span>{overview.platform}</span><button disabled={visibleTools.every(t => t.phase === "ready" || busy(t.phase) || pending.current.has(t.id))} onClick={installGroup}>安装缺少的 {groupName} 工具</button></div>
@@ -75,6 +74,5 @@ export function Environments({ onClose }: { onClose: () => void }) {
       </section>)}</div>
     </>}
     {error && <p role="alert" className="error">{error}</p>}
-    <p className="muted">Go 语言服务首次安装会使用独立 Go 编译固定源码，可能需要几分钟。Windows Java 使用应用自己的 UTF-8 启动器，不修改系统语言设置；未安装项不会伪装成可用。下载来源：Python Build Standalone、Node.js 官方发行版、Microsoft Pyright / debugpy、Eclipse Temurin / JDT LS、Rust 官方发行版、Go 官方发行版及校验模块代理、Zig、LLVM clangd 和 Microsoft Java Debug。</p>
   </dialog>;
 }
