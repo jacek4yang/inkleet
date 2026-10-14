@@ -132,6 +132,10 @@ def focus_code_editor():
     wait_for(focused,"actual code editor keyboard focus")
 
 def click(css):
+    # Use a single prospective OS click for ordinary visible controls. Native
+    # select options retain their WebDriver selection semantics below.
+    if not (css.startswith("select[") and " option[value=" in css):
+        return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
         closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
