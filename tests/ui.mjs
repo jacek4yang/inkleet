@@ -1915,6 +1915,58 @@ try {
   await writeFile("evidence/COMMAND_UI_RESULT.txt","PASS: real editor palette search and shared select-all execution, Escape focus restoration, no placeholder commands. Global workbench registry remains future work.\n");
 
 
+  // The actual App must not expose CPP's ready clangd status while C loads.
+  const ownerPage=await testPage({viewport:{width:1200,height:800}});
+  await ownerPage.addInitScript(()=>{
+    window.isTauri=true;
+    const s=window.__statusOwner={next:0,versions:{},calls:[],stopped:[]};
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="search_questions")return {questions:[],total:0,hasMore:false};
+      if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+      if(command==="load_document"){
+        if(args.language==="c")return new Promise(resolve=>{s.releaseLoad=()=>resolve({code:"void f(void) { struct { int value; } pair; pair.va }",notes:null});});
+        return {code:"",notes:null};
+      }
+      if(command==="external_editor_supported")return false;
+      if(command==="start_language_service"){
+        const result={id:++s.next,version:1,server:args.language==="rust"?"rust-analyzer":"clangd",uri:"file:///sample",completionResolve:false,completionTriggerCharacters:["."]};
+        s.versions[result.id]=1;
+        if(args.language==="c")return new Promise(resolve=>{s.releaseStart=()=>resolve(result);});
+        return result;
+      }
+      if(command==="update_language_document"){s.versions[args.id]=args.version;return;}
+      if(command==="language_diagnostics")return {version:s.versions[args.id],diagnostics:[]};
+      if(command==="stop_language_service"){s.stopped.push(args.id);return;}
+      if(command==="language_request"){if(args.kind==="completion"){s.calls.push(args);return [{label:"value"}];}return null;}
+      if(command==="save_text")return;
+      throw Error(command);
+    }};
+  });
+  await ownerPage.goto("http://127.0.0.1:5173");
+  await ownerPage.waitForFunction(()=>document.querySelector(".lsp-status")?.classList.contains("ready"));
+  await ownerPage.getByRole("combobox",{name:"编程语言",exact:true}).selectOption("cpp");
+  await ownerPage.waitForFunction(()=>document.querySelector(".lsp-status")?.getAttribute("data-status")?.includes("clangd 已连接"));
+  await ownerPage.getByRole("combobox",{name:"编程语言",exact:true}).selectOption("c");
+  await ownerPage.waitForFunction(()=>typeof window.__statusOwner.releaseLoad==="function");
+  assert.equal(await ownerPage.getByRole("textbox",{name:"代码编辑器",exact:true}).count(),0,"uncached C editor is still loading");
+  assert.equal(await ownerPage.locator(".lsp-status.ready").count(),0,"old CPP ready state must not describe loading C");
+  await ownerPage.evaluate(()=>window.__statusOwner.releaseLoad());
+  await ownerPage.waitForFunction(()=>typeof window.__statusOwner.releaseStart==="function");
+  const ownerCode=ownerPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await ownerCode.waitFor();
+  assert.equal(await ownerPage.locator(".lsp-status.ready").count(),0,"C remains not ready while its server starts");
+  await ownerCode.press("Control+End");await ownerCode.press("ArrowLeft");await ownerCode.press("ArrowLeft");
+  await ownerCode.press("Control+Space");
+  await ownerPage.waitForTimeout(200);
+  assert.equal(await ownerPage.evaluate(()=>window.__statusOwner.calls.length),0,"unavailable session cannot dispatch completion");
+  await ownerPage.evaluate(()=>window.__statusOwner.releaseStart());
+  await ownerPage.waitForFunction(()=>document.querySelector(".lsp-status")?.getAttribute("data-status")?.includes("clangd 已连接"));
+  await ownerCode.press("Control+Space");
+  await ownerPage.getByRole("option",{name:"value",exact:true}).waitFor();
+  await ownerPage.close();
+  await writeFile("evidence/LSP_STATUS_OWNERSHIP_UI_RESULT.txt","PASS: actual App CPP-to-C switch never displays previous ready state during deferred document load/start; completion unavailable until new session is ready, then succeeds. Mocked IPC; native verification separate.\\n");
+
   const providerPage=await browser.newPage();
   await providerPage.route("**/provider-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
   await providerPage.goto("http://127.0.0.1:5173/provider-test");
