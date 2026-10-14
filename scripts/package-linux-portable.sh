@@ -58,7 +58,7 @@ DOC
 printf '%s\n' "$commit" > "$work/$name/SOURCE_COMMIT.txt"
 dpkg-deb -f "$deb" Depends > "$work/$name/DEPENDENCIES.txt"
 sha256sum "$deb" | awk '{print $1}' > "$work/$name/SOURCE_DEB_SHA256.txt"
-cp LICENSE "$work/$name/LICENSE"
+if test -f LICENSE; then cp LICENSE "$work/$name/LICENSE"; fi
 if test -d public/fonts; then
   mkdir -p "$work/$name/font-licenses"
   find public/fonts -type f \( -iname '*license*' -o -iname '*OFL*' \) -exec cp {} "$work/$name/font-licenses/" \;
