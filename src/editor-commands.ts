@@ -13,7 +13,7 @@ export function editorCommands(commands:Command<EditorView>[]):Extension{
       this.close(false);
       const view=this.view,doc=view.state.doc,previous=document.activeElement;
       const panel=document.createElement("div");panel.className="editor-command-palette";panel.setAttribute("role","dialog");panel.setAttribute("aria-label","编辑器命令");
-      const input=document.createElement("input");input.type="search";input.placeholder="命令";input.setAttribute("aria-label","搜索编辑器命令");input.autocomplete="off";input.spellcheck=false;
+      const input=document.createElement("input");input.type="text";input.placeholder="命令";input.setAttribute("aria-label","搜索编辑器命令");input.autocomplete="off";input.spellcheck=false;
       const listId="editor-commands-"+(++nextPalette);
       input.setAttribute("role","combobox");input.setAttribute("aria-expanded","true");input.setAttribute("aria-controls",listId);input.setAttribute("aria-autocomplete","list");
       const list=document.createElement("div");list.id=listId;list.className="editor-command-list";list.setAttribute("role","listbox");list.setAttribute("aria-label","可用命令");
@@ -21,7 +21,7 @@ export function editorCommands(commands:Command<EditorView>[]):Extension{
       panel.append(input,list,error);document.body.append(panel);
       let selected=0,closed=false,items=registry.list(view);
       const close=(restore=true)=>{
-        if(closed)return;restore=restore&&panel.contains(document.activeElement);closed=true;panel.remove();document.removeEventListener("pointerdown",outside,true);
+        if(closed)return;restore=restore&&panel.contains(document.activeElement);closed=true;this.close=()=>{};panel.remove();document.removeEventListener("pointerdown",outside,true);
         if(restore&&view.dom.isConnected){view.focus();}
         else if(restore&&previous instanceof HTMLElement&&previous.isConnected)previous.focus();
       };

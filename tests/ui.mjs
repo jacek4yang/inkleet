@@ -1552,6 +1552,7 @@ try {
   await commandCode.press("Control+Shift+p");
   const commandDialog=commandPage.getByRole("dialog",{name:"编辑器命令",exact:true});
   await commandDialog.waitFor();
+  await commandPage.screenshot({path:"evidence/editor-command-palette.png"});
   await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).fill("全选");
   await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).press("Enter");
   assert.equal(await commandDialog.count(),0);
