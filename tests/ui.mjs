@@ -687,7 +687,7 @@ try {
   await conflictDialog.getByText("文件版本（已删除）", { exact: true }).waitFor();
   await conflictDialog.getByRole("button", { name: "使用文件版本", exact: true }).click();
   await conflictDialog.waitFor({ state: "hidden" });
-  assert.equal(await conflictEditor.innerText(), "");
+  assert.equal(await conflictEditor.textContent(), "", "empty CodeMirror line must contain no source characters");
   assert.equal(await conflictPage.evaluate(() => window.__conflictTest.file), null);
   await conflictEditor.fill("after recovery");
   await conflictPage.waitForFunction(() => window.__conflictTest.file === "after recovery");
