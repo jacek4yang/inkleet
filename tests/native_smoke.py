@@ -51,7 +51,7 @@ def click(css):
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
         closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner header > button:last-child")
-        selection=css.startswith("select[") and " option[value=" in css
+        selection=(css.startswith("select[") and " option[value=" in css) or css in ('[data-local-tab="run"]','[data-local-tab="debug"]')
         if not (closing or selection): raise
         with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
             log.write(f"Checking idempotent test UI operation after WebKit connection reset: {css}\n")
@@ -295,6 +295,11 @@ try:
         click(".debug-inspector > div:first-child > button")
         wait_for(lambda: element(".debug-variable"), "real variable values loaded")
         wait_for(lambda: element(".cm-debug-stopped"), "paused source line highlighted")
+        expression_input=element('[aria-label="调试表达式输入"]')
+        cmd("POST",f"/element/{expression_input}/value",{"text":"len(values)","value":list("len(values)")})
+        click('.debug-evaluate button[type="submit"]')
+        wait_for(lambda:text(".debug-evaluation-result pre")=="3","real debugpy evaluates current frame expression once")
+        (evidence/"EVALUATE_GUI_RESULT.txt").write_text("PASS: actual native Python paused-frame expression len(values) evaluated through private debugpy and displayed exact result 3. Other language expression adapters are not covered by this assertion.\n")
         screenshot("python-debug-native.png")
         (evidence/"DEBUG_GUI_RESULT.txt").write_text("PASS: real Linux GUI private debugpy, F9 breakpoint and paused call stack inspector. Stepping verified separately by protocol probe.\n")
         click(code)

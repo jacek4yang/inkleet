@@ -547,6 +547,11 @@ try {
         state.breakpointUpdates=(state.breakpointUpdates??0)+1;return;
       }
       if (command === "stop_debug") { state.debug.phase = "finished"; state.debug.epoch++; return; }
+      if (command === "evaluate_debug") {
+        state.evaluations = (state.evaluations ?? 0) + 1;
+        if (state.deferEvaluation) return new Promise(resolve => { state.evaluationReply = () => resolve({ result: "late result", variablesReference: 0 }); });
+        return { result: "3", type: "int", variablesReference: 0 };
+      }
       if (command === "debug_request") {
         state.debugCalls.push(args.kind);
         if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, source: { name: "solution.py", path: "/fixture/solution.py" } }] };
@@ -598,6 +603,22 @@ try {
   await runPanel.getByText("已暂停 · breakpoint", { exact: true }).waitFor();
   await runPanel.getByRole("button", { name: "values", exact: true }).waitFor();
   await runPage.locator(".cm-debug-stopped").waitFor();
+  await runPanel.getByRole("textbox", { name: "调试表达式输入", exact: true }).fill("len(values)");
+  await runPanel.getByRole("button", { name: "求值一次", exact: true }).click();
+  await runPanel.locator(".debug-evaluation-result pre").filter({ hasText: "3" }).waitFor();
+  assert.equal(await runPage.evaluate(() => window.__runTest.evaluations), 1);
+  await runPage.evaluate(() => { window.__runTest.deferEvaluation = true; });
+  await runPanel.getByRole("button", { name: "求值一次", exact: true }).evaluate(button => { button.click(); button.click(); });
+  await runPage.waitForFunction(() => typeof window.__runTest.evaluationReply === "function");
+  assert.equal(await runPage.evaluate(() => window.__runTest.evaluations), 2, "duplicate expression evaluation must be blocked");
+  assert.equal(await runPanel.getByRole("button", { name: "停止调试", exact: true }).isDisabled(), false, "stop remains available during evaluation");
+  await runPage.evaluate(() => { window.__runTest.debug.epoch++; });
+  await runPage.waitForTimeout(350);
+  await runPage.evaluate(() => window.__runTest.evaluationReply());
+  await runPage.waitForTimeout(100);
+  assert.equal(await runPanel.locator(".debug-evaluation-result").count(), 0, "old pause evaluation cannot appear in a new pause");
+  await runPage.evaluate(() => { window.__runTest.deferEvaluation = false; });
+
   await runPage.getByRole("textbox", {name:"代码编辑器",exact:true}).press("F9");
   await runPanel.getByRole("button",{name:"应用断点",exact:true}).click();
   await runPage.waitForFunction(()=>window.__runTest.breakpointUpdates===1&&window.__runTest.debug.breakpoints.length===0);

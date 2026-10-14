@@ -106,3 +106,8 @@
 .recovery-list { display:flex; flex-direction:column; gap:6px; max-height:170px; overflow:auto; margin:12px 0; }
 .recovery-list button { text-align:left; overflow-wrap:anywhere; flex-shrink:0; }
 .file-recovery { max-height:90vh; overflow:auto; }
+
+.debug-evaluate { margin-top:12px; padding:10px; border-top:1px solid var(--border); }
+.debug-evaluate label { display:flex; align-items:center; gap:8px; }
+.debug-evaluate input { flex:1; min-width:0; font-family:"Intel One Mono",monospace; }
+.debug-evaluation-result pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
