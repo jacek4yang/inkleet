@@ -43,10 +43,10 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     },
     provide: field => showTooltip.from(field),
   });
-  let semanticGeneration=0, semanticBusy=false, semanticPending=false;
+  let semanticGeneration=0, semanticBusy=false, semanticPending=false, semanticRevision=0, semanticRetries=0;
   let semanticTimer:ReturnType<typeof setTimeout>|undefined;
   function scheduleSemantic(){
-    ++semanticGeneration;semanticPending=true;clearTimeout(semanticTimer);
+    ++semanticGeneration;semanticRetries=0;semanticPending=true;clearTimeout(semanticTimer);
     semanticTimer=setTimeout(()=>{void semantic();},300);
   }
   async function semantic(){
@@ -60,13 +60,21 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       const askedVersion=version;
       const result=await invoke<{version:number;tokens:unknown}>("language_semantic_tokens",{id,version:askedVersion});
       if(closed||view!==target||session?.id!==id||version!==askedVersion||result.version!==askedVersion||target.state.doc!==doc||generation!==semanticGeneration||target.composing)return;
-      target.dispatch({effects:setSemanticTokens.of(decodeSemanticSpans(doc,result.tokens))});
+      const spans=decodeSemanticSpans(doc,result.tokens);
+      target.dispatch({effects:setSemanticTokens.of(spans)});
+      if(!spans.length)retrySemantic();
     }catch{
-      // Lexical highlighting stays usable. A later edit may try again; no retry loop.
+      // At most two readiness retries per snapshot, never restart the server.
+      retrySemantic();
     }finally{
       semanticBusy=false;
       if(!closed&&semanticPending){clearTimeout(semanticTimer);semanticTimer=setTimeout(()=>{void semantic();},300);}
     }
+  }
+  function retrySemantic(){
+    if(closed||semanticPending||semanticRetries>=2)return;
+    clearTimeout(semanticTimer);
+    semanticTimer=setTimeout(()=>{void semantic();},1000*++semanticRetries);
   }
   let signatureGeneration = 0;
   let signatureTimer: ReturnType<typeof setTimeout> | undefined;
@@ -211,8 +219,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     try {
       await flush();
       const id = session.id, askedVersion = version, doc = view.state.doc;
-      const result = await invoke<{ version: number; diagnostics: unknown[] }>("language_diagnostics", { id });
+      const result = await invoke<{ version: number; diagnostics: unknown[]; semanticRevision?:number }>("language_diagnostics", { id });
       if (!closed && session?.id === id && askedVersion === version && result.version === version && view.state.doc === doc) {
+        if(Number.isSafeInteger(result.semanticRevision)&&result.semanticRevision!==semanticRevision){semanticRevision=result.semanticRevision!;scheduleSemantic();}
         const diagnostics: Diagnostic[] = [];
         for (const item of (Array.isArray(result.diagnostics) ? result.diagnostics : []).slice(0, 200)) {
           if (!object(item) || typeof item.message !== "string") continue;

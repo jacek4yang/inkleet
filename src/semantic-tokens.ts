@@ -7,10 +7,11 @@ function boundary(text:string,at:number) {
 }
 export function decodeSemanticSpans(doc:Text,value:unknown):SemanticSpan[] {
   if(!Array.isArray(value)||value.length>20000)throw Error("Invalid semantic token budget");
-  const result:SemanticSpan[]=[];let previous=0;
+  const result:SemanticSpan[]=[];let previous=0;let cachedLine=-1;let cached:ReturnType<Text["line"]>|null=null;
   for(const t of value){
     if(!t||!Number.isInteger(t.line)||!Number.isInteger(t.start)||!Number.isInteger(t.end)||t.line<0||t.line>=doc.lines||t.start<0||t.end<=t.start||typeof t.kind!=="string"||!Array.isArray(t.modifiers))throw Error("Invalid semantic token");
-    const line=doc.line(t.line+1);
+    if(cachedLine!==t.line){cached=doc.line(t.line+1);cachedLine=t.line;}
+    const line=cached!;
     if(t.end>line.length||!boundary(line.text,t.start)||!boundary(line.text,t.end))throw Error("Invalid semantic token boundary");
     const from=line.from+t.start,to=line.from+t.end;
     if(from<previous)throw Error("Overlapping semantic tokens");previous=to;
