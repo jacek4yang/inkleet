@@ -18,7 +18,7 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
     return () => { if (previous?.isConnected) previous.focus(); };
   }, []);
   const normalized = query.trim().toLocaleLowerCase();
-  const showFormatting=normalized?"格式化 format 保存".includes(normalized):section==="editor";
+  const showFormatting=normalized?"编辑器 格式化 format 保存 vim 键盘".includes(normalized):section==="editor";
   const showDownloads = normalized ? "下载 代理 proxy http https".includes(normalized) : section === "downloads";
   const visible = actions.filter(action => normalized ? action.label.toLocaleLowerCase().includes(normalized) : action.section === section);
   return <dialog ref={dialog} className="settings-hub" aria-labelledby="settings-title" onCancel={event => { event.preventDefault(); onClose(); }}>
