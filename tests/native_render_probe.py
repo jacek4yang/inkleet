@@ -231,7 +231,8 @@ try:
     fill(code,authored)
     wait_for(lambda:cmd("POST","/execute/sync",{"script":"return document.fonts.status === 'loaded'","args":[]}),"fonts loaded")
     def probe(label):
-        focus_code_editor()
+        click(".code-pane .cm-line:first-child")
+        wait_for(lambda:cmd("GET",f"/element/{cmd('GET','/element/active')[EID]}/attribute/aria-label")=="代码编辑器","native scaled editor focus")
         time.sleep(.5)
         sample=cmd("POST","/execute/sync",{"script":"""
           const editor=document.querySelector('.code-pane .cm-editor'),content=editor.querySelector('.cm-content'),scroller=editor.querySelector('.cm-scroller');
