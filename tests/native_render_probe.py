@@ -194,7 +194,7 @@ def fill_once(css, value):
     def editor_text():
         current=element(css)  # Read-only reacquisition after a controlled React update.
         lines=cmd("POST",f"/element/{current}/elements",{"using":"css selector","value":".cm-line"})
-        return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else cmd("GET",f"/element/{current}/property/value")
+        return "\n".join(cmd("GET",f"/element/{line[EID]}/property/textContent") for line in lines) if lines else cmd("GET",f"/element/{current}/property/value")
     wait_for(lambda: editor_text()==value,"GUI paste exactly preserves source")
 def screenshot(name):
     try:
