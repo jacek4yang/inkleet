@@ -1573,6 +1573,41 @@ try {
   await writeFile("evidence/COMMAND_UI_RESULT.txt","PASS: real editor palette search and shared select-all execution, Escape focus restoration, no placeholder commands. Global workbench registry remains future work.\n");
 
 
+  const providerPage=await browser.newPage();
+  await providerPage.route("**/provider-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
+  await providerPage.goto("http://127.0.0.1:5173/provider-test");
+  await providerPage.evaluate(async()=>{
+    const {EditorView,EditorState,basicSetup,languageIntelligence}=await import("/tests/input-harness.ts");
+    const s=window.__providerTest={calls:[],version:1};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:89,version:1,server:"provider-fixture",uri:"file:///s.cpp",completionResolve:false,completionTriggerCharacters:[">","@"]};
+      if(command==="update_language_document"){s.version=args.version;return;}
+      if(command==="stop_language_service")return;
+      if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
+      if(command==="language_request"){if(args.kind==="completion"){s.calls.push(args.completionContext);return {isIncomplete:true,items:[{label:"itemName"}]};}return null;}
+      throw Error(command);
+    }};
+    s.client=languageIntelligence("cpp",()=>{},()=>{});
+    s.view=new EditorView({state:EditorState.create({doc:"item",extensions:[basicSetup,s.client.extensions]}),parent:document.querySelector("#editor")});
+    await s.client.connect(s.view);s.view.dispatch({selection:{anchor:4}});s.view.focus();
+  });
+  await providerPage.keyboard.press("Control+Space");
+  await providerPage.getByRole("option",{name:"itemName",exact:true}).waitFor();
+  assert.deepEqual(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1)),{triggerKind:1});
+  await providerPage.keyboard.type("N");
+  await providerPage.waitForFunction(()=>window.__providerTest.calls.some(x=>x.triggerKind===3));
+  await providerPage.keyboard.press("Escape");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.calls=[];s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:"obj"},selection:{anchor:3}});s.view.focus();});
+  await providerPage.keyboard.type(">");
+  await providerPage.waitForFunction(()=>window.__providerTest.calls.some(x=>x.triggerKind===2&&x.triggerCharacter===">"));
+  await providerPage.keyboard.press("Escape");
+  await providerPage.keyboard.press("Control+Space");
+  await providerPage.waitForFunction(()=>window.__providerTest.calls.at(-1)?.triggerKind===1);
+  await providerPage.evaluate(()=>{window.__providerTest.client.destroy();window.__providerTest.view.destroy();});
+  await providerPage.close();
+  await writeFile("evidence/COMPLETION_CONTEXT_UI_RESULT.txt","PASS: actual CodeMirror keyboard manual context1, adjacent incomplete context3, provider-specific > context2 and manual override. Mocked IPC; native adapters separately verified.\\n");
+
   const inputPage=await browser.newPage({viewport:{width:1200,height:800}});
   await inputPage.route("**/input-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor' style='width:600px'></div></body></html>"}));
   await inputPage.goto("http://127.0.0.1:5173/input-test");

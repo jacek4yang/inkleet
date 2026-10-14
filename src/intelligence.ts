@@ -1,3 +1,4 @@
+import {advanceIncomplete,completionTrigger,identifierTail,type CompletionTrigger,type IncompleteContext} from "./completion-context";
 import { isolateHistory } from "@codemirror/commands";
 import { decodeSemanticSpans, semanticField, semanticTheme, setSemanticTokens } from "./semantic-tokens";
 // Bound pending formatter work across destroyed/recreated EditorViews.
@@ -13,7 +14,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean };
+type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean; completionTriggerCharacters?: string[] };
 export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" | "c" | "cpp" };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -113,27 +114,33 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       }
     });
   }
-  async function request(kind: string, pos: number, doc: Text, newName?: string): Promise<unknown> {
+  async function request(kind: string, pos: number, doc: Text, newName?: string, completionContext?:CompletionTrigger): Promise<unknown> {
     if (!session || closed || !view) return null;
     await flush();
     if (closed || !session || view.state.doc !== doc) return null;
     const line = doc.lineAt(pos), askedVersion = version, id = session.id;
-    const result = await invoke("language_request", { id, version: askedVersion, kind, line: line.number - 1, character: pos - line.from, newName: newName ?? null });
+    const result = await invoke("language_request", { id, version: askedVersion, kind, line: line.number - 1, character: pos - line.from, newName: newName ?? null, completionContext:completionContext??null });
     return !closed && session?.id === id && version === askedVersion && view.state.doc === doc ? result : null;
   }
   let completionApplyGeneration=0,activeCompletionResolves=0;
+  let incomplete:IncompleteContext|null=null;
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
-    const word = context.matchBefore(/\w*/);
-    if (!context.explicit && !word?.text && !/[.:]$/.test(context.state.sliceDoc(Math.max(0, context.pos - 2), context.pos))) return null;
+    const word = context.matchBefore(identifierTail);
+    const triggers=session.completionTriggerCharacters??[".",":"];
+    const before=context.state.sliceDoc(Math.max(0,context.pos-2),context.pos);
+    const continued=!!incomplete&&incomplete.session===session.id&&incomplete.doc===context.state.doc&&incomplete.from===(word?.from??context.pos)&&incomplete.pos===context.pos;
+    const trigger=completionTrigger(context.explicit,before,triggers,continued);
+    if(!context.explicit&&!word?.text&&trigger.triggerKind!==2)return null;
     context.addEventListener("abort", () => {}, { onDocChange: true });
     const doc = context.state.doc;
     try {
       const deadline = Date.now() + (context.explicit ? 8000 : 1200);
-      let items: unknown[] = [];
+      let items: unknown[] = [], isIncomplete=false;
       for (let attempt = 0; ; attempt++) {
-        const result = await request("completion", context.pos, doc);
+        const result = await request("completion", context.pos, doc,undefined,trigger);
         if (context.aborted || !view || view.state.doc !== doc || view.state.selection.main.head !== context.pos) return null;
+        isIncomplete=object(result)&&result.isIncomplete===true;
         items = Array.isArray(result) ? result : object(result) && Array.isArray(result.items) ? result.items : [];
         if (items.length || Date.now() >= deadline) break;
         // initialize confirms transport readiness, not completed project indexing.
@@ -142,6 +149,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         await new Promise(resolve => setTimeout(resolve, Math.min(200 * 2 ** attempt, 1200)));
         if (context.aborted || closed || !view || view.state.doc !== doc || view.state.selection.main.head !== context.pos) return null;
       }
+      incomplete=isIncomplete&&session?{doc,from:word?.from??context.pos,pos:context.pos,session:session.id}:null;
       const options: Completion[] = [];
       const needle = word?.text.toLocaleLowerCase() ?? "";
       // Filter before limiting: large standard libraries can put the desired member after item 300.
@@ -280,14 +288,20 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing)++completionApplyGeneration;}}),
-    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;return false;}, compositionstart(){++completionApplyGeneration;return false;}, mousedown(event, target) {
+    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;incomplete=null;}}}),
+    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;incomplete=null;return false;}, compositionstart(){++completionApplyGeneration;incomplete=null;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
       event.preventDefault(); void definition(pos); return true;
     }}),
     EditorView.updateListener.of(update => {
+      if(update.docChanged){
+        const changes:{from:number;to:number;text:string}[]=[];
+        update.changes.iterChanges((from,to,_fromB,_toB,inserted)=>{if(changes.length<2)changes.push({from,to,text:inserted.length<=256?inserted.toString():""});});
+        incomplete=update.view.composing?null:advanceIncomplete(incomplete,update.startState.doc,update.state.doc,changes);
+      }else if(update.selectionSet)incomplete=null;
+
       if (update.docChanged || update.selectionSet) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); }
       if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
       if (update.docChanged && !closed) {
@@ -339,7 +353,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      references.destroy(); rename.destroy(); ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      references.destroy(); rename.destroy(); incomplete=null; ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },
