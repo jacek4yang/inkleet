@@ -1326,6 +1326,7 @@ try {
       throw Error("Unexpected formatter IPC: "+command);
     }};
   });
+  try {
   await formatPage.goto("http://127.0.0.1:5173");
   await formatPage.getByRole("combobox",{name:"编程语言"}).selectOption("python3");
   const formattedCode=formatPage.getByRole("textbox",{name:"代码编辑器",exact:true});
@@ -1379,7 +1380,11 @@ try {
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount,"blocked save prevents formatter invocation");
   assert.equal(await formattedCode.innerText(),"protected=3","failed write keeps live draft");
   assert.deepEqual(formatErrors,[]);
-  await formatPage.close();
+  } catch(error){
+    await formatPage.screenshot({path:"evidence/format-failure.png",fullPage:true});
+    await writeFile("evidence/format-failure.json",JSON.stringify(await formatPage.evaluate(()=>({state:window.__formatTest,body:document.body.innerText})),null,2));
+    throw error;
+  } finally {await formatPage.close();}
   await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; raw save before format, Unicode, isolated undo/redo, no loop, disabled preference/manual format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
 
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
