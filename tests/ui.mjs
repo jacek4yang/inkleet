@@ -1562,6 +1562,54 @@ try {
   await recoveryPage.close();
   await writeFile("evidence/EXPLICIT_RECOVERY_UI_RESULT.txt","PASS: mocked disk IPC, real CodeMirror dirty recovery and external conflict, clean source/notes sidecars ignored, save D while editing E rebases recovery to D without clearing dirty.\n");
 
+  const gutterPage=await browser.newPage({viewport:{width:1000,height:700}});
+  await gutterPage.route("**/gutter-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body style='margin:0'><div id='editor'></div></body></html>"}));
+  await gutterPage.goto("http://127.0.0.1:5173/gutter-test");
+  await gutterPage.evaluate(async()=>{
+    const {EditorView,EditorState,basicSetup}=await import("/tests/input-harness.ts");
+    const {debugGutter}=await import("/src/debug-gutter.ts");
+    window.__gutterChanges=[];
+    const debug=debugGutter([],lines=>window.__gutterChanges.push(lines));
+    const view=new EditorView({parent:document.getElementById("editor"),state:EditorState.create({
+      doc:"first\nsecond\nthird\nfourth",
+      extensions:[...debug.extensions,basicSetup,EditorView.theme({"&":{height:"300px",fontSize:"14px"},".cm-content":{padding:"8px 0"},".cm-line":{padding:"0 8px"},".cm-scroller":{lineHeight:"1.75"}})]
+    })});
+    window.__gutterView=view;window.__gutterDebug=debug;
+  });
+  const lane=gutterPage.locator(".cm-debug-gutter");
+  assert.equal(await gutterPage.locator(".cm-execution-gutter").count(),0,"one shared glyph lane");
+  assert.equal(await gutterPage.locator(".cm-gutters>.cm-gutter").first().getAttribute("class").then(x=>x.includes("cm-debug-gutter")),true,"glyph lane precedes line numbers");
+  const boxes=await gutterPage.evaluate(()=>{
+    const view=window.__gutterView,lane=document.querySelector(".cm-debug-gutter").getBoundingClientRect();
+    return [1,2,3,4].map(n=>{const rect=view.coordsAtPos(view.state.doc.line(n).from);return {x:lane.x+lane.width/2,y:(rect.top+rect.bottom)/2};});
+  });
+  await gutterPage.mouse.move(boxes[1].x,boxes[1].y);
+  await gutterPage.waitForTimeout(30);
+  assert.equal(await gutterPage.locator(".cm-debug-gutter .cm-gutterElement").evaluateAll(nodes=>nodes.some(n=>getComputedStyle(n,"::before").content==='""')),true,"empty row displays hover ghost");
+  await gutterPage.mouse.click(boxes[1].x,boxes[1].y);
+  assert.deepEqual(await gutterPage.evaluate(()=>window.__gutterChanges.at(-1)),[2]);
+  assert.equal(await gutterPage.locator(".cm-breakpoint-line").count(),1);
+  const changes=await gutterPage.evaluate(()=>window.__gutterChanges.length);
+  await gutterPage.mouse.click(boxes[2].x,boxes[2].y,{button:"right"});
+  await gutterPage.keyboard.press("Escape");
+  await gutterPage.mouse.click(boxes[2].x,boxes[2].y,{button:"middle"});
+  assert.equal(await gutterPage.evaluate(()=>window.__gutterChanges.length),changes,"secondary buttons do not toggle breakpoints");
+  await gutterPage.keyboard.down("Control");await gutterPage.mouse.click(boxes[2].x,boxes[2].y);await gutterPage.keyboard.up("Control");
+  assert.equal(await gutterPage.evaluate(()=>window.__gutterChanges.length),changes,"modified click does not toggle breakpoints");
+  await gutterPage.evaluate(()=>window.__gutterDebug.stopped(window.__gutterView,{line:2,column:2,execution:true}));
+  assert.equal(await gutterPage.locator(".cm-breakpoint-glyph.cm-pointer-glyph").count(),1,"same row preserves breakpoint and paused pointer");
+  await gutterPage.screenshot({path:"evidence/compact-gutter-interaction.png"});
+  await gutterPage.mouse.click(boxes[1].x,boxes[1].y);
+  assert.deepEqual(await gutterPage.evaluate(()=>window.__gutterChanges.at(-1)),[]);
+  assert.equal(await gutterPage.locator(".cm-execution-pointer").count(),1,"removing breakpoint preserves paused arrow");
+  await gutterPage.evaluate(()=>window.__gutterDebug.stopped(window.__gutterView,null));
+  await gutterPage.mouse.click(boxes[0].x,2);
+  await gutterPage.mouse.click(boxes[0].x,260);
+  assert.deepEqual(await gutterPage.evaluate(()=>window.__gutterChanges.at(-1)),[],"padding cannot toggle first or last line");
+  await gutterPage.evaluate(()=>window.__gutterView.destroy());
+  await gutterPage.close();
+  await writeFile("evidence/GUTTER_UI_RESULT.txt","PASS: actual mouse events, shared leading glyph lane, empty-row hover, primary/secondary click isolation, paused+breakpoint composite, row shading and padding exclusion. Native/zoom/wrapping remain separately verified.\n");
+
   const semanticPage=await browser.newPage();
   await semanticPage.route("**/semantic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
   await semanticPage.goto("http://127.0.0.1:5173/semantic-test");

@@ -274,6 +274,19 @@ try:
     click('[aria-label="关闭设置"]')
     (evidence/"DOWNLOAD_SETTINGS_GUI_RESULT.txt").write_text("PASS: native Settings save, app-only config persistence, restart restore, explicit reset before real downloads; no system proxy change. Proxy CONNECT routing covered by isolated Rust test.\n")
     code = '[aria-label="代码编辑器"]'
+    fill(code,"// first gutter row\n// second gutter row\n// third gutter row")
+    lane_rect=cmd("GET",f"/element/{element('.cm-debug-gutter')}/rect")
+    row_rect=cmd("GET",f"/element/{element('[aria-label=\"代码编辑器\"] .cm-line:nth-child(2)')}/rect")
+    window_rect=cmd("GET","/window/rect")
+    glyph_x=int(window_rect["x"]+lane_rect["x"]+lane_rect["width"]/2)
+    glyph_y=int(window_rect["y"]+row_rect["y"]+row_rect["height"]/2)
+    subprocess.run(["xdotool","mousemove","--sync",str(glyph_x),str(glyph_y),"click","1"],check=True)
+    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".cm-breakpoint-line"}))==1,"native pointer sets exact second-row breakpoint")
+    assert cmd("GET",f"/element/{element('.cm-breakpoint-line')}/property/textContent")=="// second gutter row"
+    assert not cmd("POST","/elements",{"using":"css selector","value":".cm-execution-gutter"})
+    screenshot("compact-breakpoint-native.png")
+    subprocess.run(["xdotool","click","1"],check=True)
+    wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".cm-breakpoint-line"}),"native second click removes breakpoint")
     marker = "// native restart persistence"
     fill(code, marker)
     save_editor(code)
