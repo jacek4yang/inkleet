@@ -11,6 +11,9 @@ function arrowSvg(inline=false){
   svg.setAttribute("viewBox",inline?"0 0 10 10":"0 0 14 14");svg.setAttribute("width",inline?"8":"14");svg.setAttribute("height",inline?"8":"14");svg.setAttribute("aria-hidden","true");
   const path=document.createElementNS(svg.namespaceURI,"path");path.setAttribute("d",inline?"M1 2h8L5 8Z":"M1.5 4.5h5V1.5l6 5.5-6 5.5V9.5h-5Z");path.setAttribute("fill","currentColor");path.setAttribute("stroke","var(--surface-editor,white)");path.setAttribute("stroke-width","1");path.setAttribute("stroke-linejoin","round");svg.append(path);return svg;
 }
+class DebugSpacer extends GutterMarker{
+  toDOM(){const node=document.createElement("span");node.style.cssText="display:inline-block;width:22px;height:14px";node.setAttribute("aria-hidden","true");return node;}
+}
 class DebugGlyph extends GutterMarker{
   constructor(readonly breakpoint:boolean,readonly execution:boolean|null){super();}
   eq(other:DebugGlyph){return this.breakpoint===other.breakpoint&&this.execution===other.execution;}
@@ -89,7 +92,7 @@ export function debugGutter(initial: number[], onChange: (lines: number[]) => vo
         state.field(points).between(0,state.doc.length,from=>{marks.push(Decoration.line({class:"cm-breakpoint-line"}).range(from));});
         return Decoration.set(marks,true);
       }),
-      gutter({ class:"cm-debug-gutter",renderEmptyElements:true,initialSpacer:()=>new DebugGlyph(true,true),
+      gutter({ class:"cm-debug-gutter",renderEmptyElements:true,initialSpacer:()=>new DebugSpacer(),
         lineMarker(view,block){
           let breakpoint=false,execution:boolean|null=null;
           view.state.field(points).between(block.from,block.from,()=>{breakpoint=true;});
