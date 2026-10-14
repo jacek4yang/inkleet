@@ -584,7 +584,7 @@ try {
       if (command === "stop_language_service") { state.stops.push(args.id); return; }
       if (command === "update_language_document") {
         if (state.failNextUpdate) { state.failNextUpdate=false; state.events.push({type:"update-failed",...args}); throw Error("controlled sync failure"); }
-        if (state.holdNextUpdate) { state.holdNextUpdate=false; return new Promise((resolve,reject)=>{state.rejectHeldUpdate=()=>reject(Error("old session sync failure"));}); }
+        if (state.holdNextUpdate) { state.holdNextUpdate=false; state.heldUpdateId=args.id; return new Promise((resolve,reject)=>{state.rejectHeldUpdate=()=>reject(Error("old session sync failure"));state.resolveHeldUpdate=()=>{state.events.push({type:"late-update-ack",...args});resolve();};}); }
         state.version=args.version; state.text=args.text; state.events.push({type:"update",...args}); return;
       }
       if (command === "language_diagnostics") return { version: state.version, diagnostics: [] };
@@ -713,6 +713,19 @@ try {
   await lspPage.waitForTimeout(200);
   assert.equal(await lspPage.evaluate(({id,from})=>window.__lspTest.requests.slice(from).some(r=>r.id===id),{id:oldSession,from:requestBoundary}),false,"destroyed session cannot issue requests after its late failed sync");
 
+  const heldSuccessSession=await lspPage.evaluate(()=>{window.__lspTest.holdNextUpdate=true;window.__lspTest.heldUpdateId=null;return window.__lspTest.id;});
+  await lspEditor.fill("held.");
+  await lspPage.waitForFunction(id=>window.__lspTest.heldUpdateId===id,heldSuccessSession);
+  await lspEditor.press("Control+Space");
+  await lspPage.waitForTimeout(200);
+  const heldSuccessBoundary=await lspPage.evaluate(()=>window.__lspTest.requests.length);
+  await lspPage.getByRole("combobox",{name:"编程语言",exact:true}).selectOption("python3");
+  await lspPage.waitForFunction(id=>window.__lspTest.id>id,heldSuccessSession);
+  const replacementText=await lspEditor.innerText();
+  await lspPage.evaluate(()=>window.__lspTest.resolveHeldUpdate());
+  await lspPage.waitForTimeout(200);
+  assert.equal(await lspPage.evaluate(({id,from})=>window.__lspTest.requests.slice(from).some(r=>r.id===id),{id:heldSuccessSession,from:heldSuccessBoundary}),false,"completion queued behind an old successful sync cannot escape after destroy");
+  assert.equal(await lspEditor.innerText(),replacementText,"late sync acknowledgement cannot change replacement editor");
   assert.deepEqual(lspErrors, []);
   await lspPage.close();
   await writeFile("evidence/LSP_UI_RESULT.txt", "PASS: mocked IPC integration; completion applied, unsafe completion docs remain text, F12 opens explicit read-only declaration, source draft preserved and session stopped on language switch. Native real-server check is separate.\n");
