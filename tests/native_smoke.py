@@ -497,6 +497,24 @@ try:
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
         wait_for(lambda:text(code)=="def solve(values): return sum(values)","palette rename remains one undo transaction")
         (evidence/"COMMAND_RENAME_NATIVE_RESULT.txt").write_text("PASS: real palette invokes Pyright rename at preserved source selection, edits declaration/reference, and single undo restores both.\n")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home"],check=True)
+        subprocess.run(["xdotool","key","--repeat","11","--repeat-delay","10","Right"],check=True)
+        subprocess.run(["xdotool","key","F2"],check=True)
+        wait_for(lambda:element(".lsp-rename input"),"preview rename input")
+        fill(".lsp-rename input","previewed")
+        subprocess.run(["xdotool","key","--clearmodifiers","shift+Return"],check=True)
+        wait_for(lambda:element(".lsp-rename-preview:not([hidden])"),"real Pyright rename preview")
+        assert text(code)=="def solve(values): return sum(values)","preview must leave original source unchanged"
+        assert len(cmd("POST","/elements",{"using":"css selector","value":".lsp-rename-change"}))==2,"both semantic occurrences are previewed"
+        screenshot("python-rename-preview-native.png")
+        click(".lsp-rename-preview button:first-of-type")
+        wait_for(lambda:text(code)=="def solve(previewed): return sum(previewed)","reviewed rename applied")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+        wait_for(lambda:text(code)=="def solve(values): return sum(values)","preview application is one undo transaction")
+        (evidence/"RENAME_PREVIEW_NATIVE_RESULT.txt").write_text("PASS: actual F2 + ShiftEnter obtains private Pyright edits, preview does not mutate source, Apply changes both occurrences and one undo restores original.\\n")
+
 
         focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]

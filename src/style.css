@@ -436,3 +436,12 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .editor-command-palette>input[type=text]{appearance:none;-webkit-appearance:none;border-radius:0;box-shadow:none}
 .editor-command-palette>input[type=text]:focus,.editor-command-palette>input[type=text]:focus-visible{outline:none;box-shadow:none}
 .editor-command-palette:focus-within{border-color:var(--accent)}
+
+.lsp-rename:has(.lsp-rename-preview:not([hidden])){max-width:min(560px,85vw)}
+.lsp-rename-preview[hidden]{display:none}
+.lsp-rename-summary{font-size:12px;padding:4px 0 8px;outline:none}
+.lsp-rename-changes{max-height:min(320px,40vh);overflow:auto;margin-bottom:8px;border-block:1px solid var(--line)}
+.lsp-rename-change{display:grid;grid-template-columns:30px minmax(0,1fr) minmax(0,1fr);gap:8px;padding:6px 0;font-size:12px;border-bottom:1px solid var(--line)}
+.lsp-rename-change>span{color:var(--muted);text-align:right}
+.lsp-rename-change pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-family:var(--font-mono)}
+.lsp-rename-before{color:#9b5555}.lsp-rename-after{color:#387451}
