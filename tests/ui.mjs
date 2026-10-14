@@ -890,13 +890,13 @@ try {
   assert.equal(await runPanel.locator(".debug-frames>button").first().evaluate(node=>getComputedStyle(node).display),"flex","stack name and line occupy separate columns");
   // Pure layout stress fixture: temporarily lengthen the rendered breakpoint label.
   // This does not claim breakpoint protocol coverage; real F9 assertions remain below.
-  const overflow=await runPanel.locator(".debug-meta").evaluate(meta=>{
+  const breakpointOverflow=await runPanel.locator(".debug-meta").evaluate(meta=>{
     const label=meta.querySelector(".breakpoint-summary"),previous=label.textContent;
     label.textContent="断点："+Array.from({length:100},(_,i)=>i+1).join(", ")+"。";
     const overflow=meta.scrollWidth>meta.clientWidth+1;
     label.textContent=previous;return overflow;
   });
-  assert.equal(overflow,false,"long breakpoint labels wrap without hiding the adjacent session state");
+  assert.equal(breakpointOverflow,false,"long breakpoint labels wrap without hiding the adjacent session state");
 
   assert.equal(await runPanel.getByRole("button", {name: "x", exact: true}).count(),0,"frame switch discards old child references");
   assert.match(await runPanel.locator(".debug-watch").innerText(), /—/, "watch never presents previous frame result as current");
