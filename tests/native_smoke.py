@@ -87,6 +87,19 @@ def reveal_debug_control(css):
         time.sleep(.15)
     raise AssertionError("Debug control remains unreachable through real wheel: "+css)
 
+def click_debug_action(css):
+    # A debugger action is not idempotent: emit exactly one real pointer click.
+    # Do not fall back to another injection path after an uncertain mutation.
+    node=element(css)
+    assert cmd("GET",f"/element/{node}/enabled"), "debug action is disabled: "+css
+    rect=cmd("GET",f"/element/{node}/rect")
+    window=cmd("GET","/window/rect")
+    assert rect["width"]>0 and rect["height"]>0, "debug action has no visible bounds"
+    assert rect["x"]>=0 and rect["y"]>=0 and rect["x"]+rect["width"]<=window["width"] and rect["y"]+rect["height"]<=window["height"], "debug action is outside the window"
+    x=int(window["x"]+rect["x"]+rect["width"]/2)
+    y=int(window["y"]+rect["y"]+rect["height"]/2)
+    subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","1"],check=True)
+
 def click(css):
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
@@ -444,7 +457,7 @@ try:
         click(code)
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
         wait_for(lambda: "断点：2。" in text(".debug-panel"), "F9 breakpoint on function body, not module definition")
-        click(".debug-panel .local-actions button:first-of-type")
+        click_debug_action(".debug-panel .local-actions button:first-of-type")
         wait_for(lambda: "已暂停" in text(".debug-panel"), "real debugger breakpoint", seconds=45)
         wait_for(lambda: element(".debug-inspector > div:first-child > button"), "real call stack loaded")
         click(".debug-inspector > div:first-child > button")
@@ -575,7 +588,7 @@ try:
         keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
         cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-breakpoint","actions":keys}]})
         wait_for(lambda: "断点：4。" in text(".debug-panel"),"Java original source breakpoint")
-        click(".debug-panel .local-actions button:first-of-type")
+        click_debug_action(".debug-panel .local-actions button:first-of-type")
         wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
         wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
         def java_total():
@@ -663,7 +676,7 @@ try:
                 keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
                 cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-breakpoint","actions":keys}]})
                 wait_for(lambda: "断点：3。" in text(".debug-panel"),f"{group} breakpoint uses original source line")
-                click(".debug-panel .local-actions button:first-of-type")
+                click_debug_action(".debug-panel .local-actions button:first-of-type")
                 wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
                 wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
                 def local_total():
