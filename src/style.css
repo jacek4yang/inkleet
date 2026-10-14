@@ -130,3 +130,6 @@
 .debug-body { flex:1; min-height:0; overflow:auto; }
 .local-runner button, .local-runner input { scroll-margin-top:8px; scroll-margin-bottom:8px; }
 .debug-help summary { cursor:pointer; font-size:11px; color:#72695e; padding:6px 0; }
+
+/* Tooltip portals must stay above sibling editor panels, but below native modal top layers. */
+body > div > .cm-tooltip { z-index: 1000; pointer-events: auto; }

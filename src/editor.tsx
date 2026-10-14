@@ -1,7 +1,10 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
-import { EditorState, StateEffect } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorState, StateEffect, Prec } from "@codemirror/state";
+import { EditorView, keymap, tooltips } from "@codemirror/view";
 import { basicSetup } from "codemirror";
+import { indentMore, indentLess } from "@codemirror/commands";
+import { acceptCompletion } from "@codemirror/autocomplete";
+import { indentUnit } from "@codemirror/language";
 import { rust } from "@codemirror/lang-rust";
 import { python } from "@codemirror/lang-python";
 import { go } from "@codemirror/lang-go";
@@ -55,7 +58,13 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
     const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const extensions = [
-      basicSetup, syntax(language), theme, ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
+      basicSetup, syntax(language), theme,
+      EditorState.tabSize.of(4),
+      indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
+      // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。
+      Prec.high(keymap.of([{ key: "Tab", run: view => acceptCompletion(view) || indentMore(view), shift: indentLess }])),
+      // 脱离面板的 overflow / stacking context；CM 自动同步主题并在销毁时移除容器。
+      tooltips({ parent: document.body, position: "fixed" }), ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
       EditorView.updateListener.of(update => {
         if (update.docChanged) callback.current(update.state.doc.toString());
@@ -79,5 +88,5 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
     };
   }, [documentKey, language, label, connection, metadata]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedLine); }, [pausedLine, documentKey, connection]);
-  return <><div className="editor-host" ref={host} />{(language !== "markdown") && <div className="lsp-status" title="F2 重命名当前符号 · F12 查看定义"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{(language !== "markdown") && <div className="lsp-status" title="Tab 补全或缩进 · Shift+Tab 反缩进 · Escape 后 Tab 移出编辑器 · F2 重命名 · F12 定义 · Shift+F12 引用"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }
