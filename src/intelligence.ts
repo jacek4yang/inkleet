@@ -114,13 +114,14 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       }
     });
   }
-  async function request(kind: string, pos: number, doc: Text, newName?: string, completionContext?:CompletionTrigger): Promise<unknown> {
-    if (!session || closed || !view) return null;
+  async function request(kind: string, pos: number, doc: Text, newName?: string, completionContext?:CompletionTrigger, stillCurrent:()=>boolean=()=>true): Promise<unknown> {
+    if (!session || closed || !view || !stillCurrent()) return null;
+    const owner=view,id=session.id;
     await flush();
-    if (closed || !session || view.state.doc !== doc) return null;
-    const line = doc.lineAt(pos), askedVersion = version, id = session.id;
+    if (closed || session?.id!==id || view!==owner || owner.state.doc!==doc || !stillCurrent()) return null;
+    const line = doc.lineAt(pos), askedVersion = version;
     const result = await invoke("language_request", { id, version: askedVersion, kind, line: line.number - 1, character: pos - line.from, newName: newName ?? null, completionContext:completionContext??null });
-    return !closed && session?.id === id && version === askedVersion && view.state.doc === doc ? result : null;
+    return !closed && session?.id === id && version === askedVersion && view===owner && owner.state.doc===doc && stillCurrent() ? result : null;
   }
   let completionApplyGeneration=0,activeCompletionResolves=0;
   let incomplete:IncompleteContext|null=null,typing:{doc:Text;pos:number}|null=null,completionRequestGeneration=0;
@@ -143,13 +144,14 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     const trigger=completionTrigger(context.explicit&&!typed,before,triggers,continued);
     if(!context.explicit&&!word?.text&&trigger.triggerKind!==2)return null;
     context.addEventListener("abort", () => {}, { onDocChange: true });
-    const doc = context.state.doc;
+    const doc = context.state.doc,owner=view,sessionId=session.id;
+    const current=()=>!closed&&view===owner&&session?.id===sessionId&&generation===completionRequestGeneration&&!context.aborted&&owner.state.doc===doc&&owner.state.selection.main.head===context.pos;
     try {
       const deadline = Date.now() + (context.explicit ? 8000 : 1200);
       let items: unknown[] = [], isIncomplete=false;
       for (let attempt = 0; ; attempt++) {
-        const result = await request("completion", context.pos, doc,undefined,trigger);
-        if (generation!==completionRequestGeneration || context.aborted || !view || view.state.doc !== doc || view.state.selection.main.head !== context.pos) return null;
+        const result = await request("completion", context.pos, doc,undefined,trigger,current);
+        if (!current()) return null;
         isIncomplete=object(result)&&result.isIncomplete===true;
         items = Array.isArray(result) ? result : object(result) && Array.isArray(result.items) ? result.items : [];
         if (items.length || Date.now() >= deadline) break;
@@ -157,7 +159,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         // Re-query only this unchanged completion context; never restart a server.
         if (context.explicit) status(serverName + " 正在准备补全…");
         await new Promise(resolve => setTimeout(resolve, Math.min(200 * 2 ** attempt, 1200)));
-        if (generation!==completionRequestGeneration || context.aborted || closed || !view || view.state.doc !== doc || view.state.selection.main.head !== context.pos) return null;
+        if (!current()) return null;
       }
       incomplete=isIncomplete&&session?{doc,from:word?.from??context.pos,pos:context.pos,session:session.id}:null;
       const options: Completion[] = [];
@@ -208,7 +210,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       }
       if (context.explicit) status(options.length ? serverName + " 已连接 · F12 / Ctrl+单击查看定义" : serverName + " 未找到匹配补全 · 服务返回 " + items.length + " 项");
       return options.length ? { from: word?.from ?? context.pos, options } : null;
-    } catch (error) { if (context.explicit && !closed) status(serverName + " 补全暂不可用：" + String(error).slice(0, 300)); return null; }
+    } catch (error) { if (context.explicit && current()) status(serverName + " 补全暂不可用：" + String(error).slice(0, 300)); return null; }
   }
   async function hover(target: EditorView, pos: number): Promise<Tooltip | null> {
     const doc = target.state.doc;
