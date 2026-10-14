@@ -869,6 +869,7 @@ try {
   await externalPage.getByRole("button", { name: "笔记", exact: true }).click();
   const externalNote = externalPage.getByRole("textbox", { name: "Markdown 笔记", exact: true });
   await externalNote.fill("# Saved");
+  await openSettings(externalPage, "笔记");
   await externalPage.getByRole("button", { name: "Typora 编辑", exact: true }).click();
   await externalPage.waitForFunction(() => window.__externalTest.opened.length === 1);
   assert.deepEqual(await externalPage.evaluate(() => window.__externalTest.opened), [{ editor: "typora", saved: "# Saved" }]);
@@ -887,6 +888,7 @@ try {
   await externalPage.getByRole("button", { name: "刷新文件", exact: true }).click();
   await externalPage.locator(".statusbar").filter({ hasText: "外部笔记已变化 · 请对比两份内容后处理" }).waitFor();
   assert.equal(await externalNote.innerText(), "# Unsaved");
+  await openSettings(externalPage, "笔记");
   await externalPage.getByRole("button", { name: "Typora 编辑", exact: true }).click();
   await externalPage.locator(".statusbar").filter({ hasText: "请先处理笔记保存失败或文件冲突" }).waitFor();
   assert.equal(await externalPage.evaluate(() => window.__externalTest.opened.length), 1);
