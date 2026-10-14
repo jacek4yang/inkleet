@@ -114,7 +114,8 @@ try {
   page.on("pageerror", e => errors.push(e.message));
   await page.goto("http://127.0.0.1:5173");
   const editor = page.getByRole("textbox", { name: "代码编辑器", exact: true });
-  await page.evaluate(() => document.fonts.ready);
+  await editor.waitFor({ state: "visible" });
+  await page.evaluate(async () => { await document.fonts.load('14px "Intel One Mono"'); await document.fonts.ready; });
   const fontLoaded = await page.evaluate(() => document.fonts.check('14px "Intel One Mono"'));
   assert.equal(fontLoaded, true, "必须实际加载内置 Intel One Mono");
   assert.ok((await editor.evaluate(el => getComputedStyle(el).fontFamily)).includes("Intel One Mono"));
