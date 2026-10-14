@@ -337,12 +337,18 @@ try {
     });
     observer.observe({ type: "longtask" });
   });
+  const profileSession=await page.context().newCDPSession(page);
+  await profileSession.send("Profiler.enable");
+  await profileSession.send("Profiler.start");
   await editor.pressSequentially(" // performance probe 0123456789", { delay: 20 });
   await page.waitForFunction(() => window.__inkPerf.frames.length >= 20);
   const measured = await page.evaluate(() => window.__inkPerf);
+  const cpuProfile=await profileSession.send("Profiler.stop");
+  await writeFile("evidence/EDITOR_INPUT.cpuprofile",JSON.stringify(cpuProfile.profile));
+  await profileSession.detach();
   const sorted = [...measured.frames].sort((a, b) => a - b);
   const report = {
-    environment: "GitHub Actions Linux Chromium headless; not native WebView or IME",
+    environment: "GitHub Actions Linux Chromium headless; development React with CPU sampling enabled; not native WebView or IME",
     platform: os.platform(), cpu: os.cpus()[0]?.model, logicalCpus: os.cpus().length,
     viewport: "390x844", lines: 10000, initialCharacters: large.length,
     setup: "Synthetic paste event through CodeMirror; input samples use Playwright keyboard", pasteSetupMs,
@@ -350,15 +356,55 @@ try {
     inputToRafP95Ms: sorted[Math.floor(sorted.length * .95)],
     longestTaskMs: Math.max(0, ...measured.tasks),
   };
+  // Distinguish paste-triggered parser catch-up from settled incremental typing.
+  await page.evaluate(async()=>{window.__inkParseProbe=await import("/tests/parse-probe.ts");});
+  await page.waitForFunction(()=>window.__inkParseProbe.inspect()?.available);
+  const parseBefore=await page.evaluate(()=>window.__inkParseProbe.inspect());
+  await page.evaluate(()=>{window.__inkPerf.frames=[];window.__inkPerf.tasks=[];});
+  const warmSession=await page.context().newCDPSession(page);
+  await warmSession.send("Profiler.enable");await warmSession.send("Profiler.start");
+  const warmText=" // settled typing 0123456789";
+  await editor.pressSequentially(warmText,{delay:20});
+  await page.waitForFunction(()=>window.__inkPerf.frames.length>=20);
+  const warmMeasured=await page.evaluate(()=>({performance:window.__inkPerf,parseAfter:window.__inkParseProbe.inspect()}));
+  const warmProfile=await warmSession.send("Profiler.stop");
+  await writeFile("evidence/EDITOR_SETTLED_INPUT.cpuprofile",JSON.stringify(warmProfile.profile));
+  await warmSession.detach();
+  const warmSorted=[...warmMeasured.performance.frames].sort((a,b)=>a-b);
+  await writeFile("evidence/PERFORMANCE_SETTLED.json",JSON.stringify({...report,setup:"Same editor after syntaxTreeAvailable through document end; no forced parsing",parseBefore,parseAfter:warmMeasured.parseAfter,samples:warmSorted.length,inputToRafP50Ms:warmSorted[Math.floor(warmSorted.length*.5)],inputToRafP95Ms:warmSorted[Math.floor(warmSorted.length*.95)],longestTaskMs:Math.max(0,...warmMeasured.performance.tasks),rawFrames:warmMeasured.performance.frames},null,2));
   const downloadPromise = page.waitForEvent("download");
   await openSettings(page, "源码");
   await page.getByRole("button", { name: "导出源码", exact: true }).click();
   const exported = await downloadPromise;
   const exportedText = await readFile(await exported.path(), "utf8");
-  assert.equal(exportedText, large + " // performance probe 0123456789");
+  assert.equal(exportedText, large + " // performance probe 0123456789" + warmText);
   await writeFile("evidence/PERFORMANCE.json", JSON.stringify(report, null, 2));
   assert.ok(report.inputToRafP95Ms < 100, "受控测试输入响应 P95 不应超过 100ms");
   assert.deepEqual(errors, []);
+
+  // A separate valid-code fixture checks whether comment-heavy parsing is pathological.
+  const structured=Array.from({length:10000},(_,i)=>"fn perf_"+i+"() { let value = "+i+"; }").join("\n");
+  await editor.click();await editor.press("Control+a");
+  await editor.evaluate((el,value)=>{const data=new DataTransfer();data.setData("text/plain",value);el.dispatchEvent(new ClipboardEvent("paste",{clipboardData:data,bubbles:true,cancelable:true}));},structured);
+  await editor.press("Control+End");
+  await page.waitForFunction(()=>window.__inkParseProbe.inspect()?.available);
+  const structuredBefore=await page.evaluate(()=>window.__inkParseProbe.inspect());
+  await page.evaluate(()=>{window.__inkPerf.frames=[];window.__inkPerf.tasks=[];});
+  const structuredSession=await page.context().newCDPSession(page);
+  await structuredSession.send("Profiler.enable");await structuredSession.send("Profiler.start");
+  await editor.pressSequentially(warmText,{delay:20});
+  await page.waitForFunction(()=>window.__inkPerf.frames.length>=20);
+  const structuredMeasured=await page.evaluate(()=>({performance:window.__inkPerf,parseAfter:window.__inkParseProbe.inspect()}));
+  const structuredProfile=await structuredSession.send("Profiler.stop");
+  await writeFile("evidence/EDITOR_STRUCTURED_INPUT.cpuprofile",JSON.stringify(structuredProfile.profile));
+  await structuredSession.detach();
+  const structuredSorted=[...structuredMeasured.performance.frames].sort((a,b)=>a-b);
+  await writeFile("evidence/PERFORMANCE_STRUCTURED.json",JSON.stringify({...report,initialCharacters:structured.length,setup:"10,000 valid Rust function lines after syntaxTreeAvailable through end",parseBefore:structuredBefore,parseAfter:structuredMeasured.parseAfter,samples:structuredSorted.length,inputToRafP50Ms:structuredSorted[Math.floor(structuredSorted.length*.5)],inputToRafP95Ms:structuredSorted[Math.floor(structuredSorted.length*.95)],longestTaskMs:Math.max(0,...structuredMeasured.performance.tasks),rawFrames:structuredMeasured.performance.frames},null,2));
+  const structuredDownload=page.waitForEvent("download");
+  await openSettings(page,"源码");await page.getByRole("button",{name:"导出源码",exact:true}).click();
+  assert.equal(await readFile(await (await structuredDownload).path(),"utf8"),structured+warmText);
+  assert.deepEqual(errors,[]);
+  await page.close(); // Finished profiler must not keep parser/timers alive during unrelated tests.
 
   // 仅模拟 IPC 的登录 UI 竞态测试；不冒充真实账号或原生登录验收。
   const authPage = await testPage();
@@ -796,7 +842,13 @@ try {
   const renameForm = lspPage.getByRole("form", { name: "重命名符号", exact: true });
   await renameForm.getByRole("textbox", { name: "新名称", exact: true }).fill("values");
   await renameForm.getByRole("button", { name: "重命名", exact: true }).click();
+  try {
   await lspPage.waitForFunction(() => document.querySelector('[aria-label="代码编辑器"]').innerText === "values = []\nvalues.append(1)");
+  } catch(error) {
+    await lspPage.screenshot({path:"evidence/rename-timeout.png",fullPage:true}).catch(()=>{});
+    await writeFile("evidence/rename-timeout.json",JSON.stringify(await lspPage.evaluate(()=>({source:document.querySelector('[aria-label="代码编辑器"]')?.textContent,active:document.activeElement?.getAttribute("aria-label"),forms:[...document.querySelectorAll("form")].map(f=>({label:f.getAttribute("aria-label"),text:f.textContent})),status:document.querySelector(".lsp-status")?.textContent})),null,2));
+    throw error;
+  }
   await lspEditor.press("Control+z");
   assert.equal(await lspEditor.innerText(), "items = []\nitems.append(1)", "rename must be one undoable transaction");
   await lspEditor.press("Control+Home"); await lspEditor.press("ArrowRight"); await lspEditor.press("Shift+F12");
