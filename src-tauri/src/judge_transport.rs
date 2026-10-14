@@ -92,7 +92,7 @@ fn parse_check(value: Value) -> Result<CheckResult, String> {
             for key in ["status_code", "status_msg", "run_success", "compare_result", "total_correct",
                 "total_testcases", "status_runtime", "status_memory", "display_runtime", "memory",
                 "full_compile_error", "compile_error", "full_runtime_error", "runtime_error",
-                "code_output", "code_answer", "std_output", "expected_output", "expected_code_answer", "expected_code_output", "display_memory", "last_testcase", "task_finish_time"] {
+                "code_answer", "expected_code_answer", "expected_code_output", "expected_output", "display_memory", "last_testcase", "code_output", "std_output_list", "std_output", "task_finish_time"] {
                 if let Some(field) = value.get(key) {
                     let encoded = serde_json::to_string(field).map_err(|_| "判题字段编码失败")?;
                     if encoded.len() <= remaining {
@@ -194,6 +194,13 @@ mod tests {
             assert!(matches!(parse_start(Kind::OnlineRun,&json!({"interpret_id":bad})),StartResult::Unknown{..}));
         }
         assert!(!identifier(id,120),"snapshot validator is not loosened");
+    }
+    #[test]
+    fn debug_stdout_cannot_displace_actual_answers(){
+        let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_msg":"Accepted","code_output":"x".repeat(300000),"code_answer":["[0,1]"],"expected_code_answer":["[0,1]"]})).unwrap() else {panic!("expected finished")};
+        assert_eq!(result["code_answer"],json!(["[0,1]"]));
+        assert_eq!(result["expected_code_answer"],json!(["[0,1]"]));
+        assert_eq!(result["output_truncated"],true);
     }
     #[test]
     fn preserves_run_answers_separately_from_stdout() {

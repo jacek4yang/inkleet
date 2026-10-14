@@ -6,9 +6,9 @@ export function JudgeResult({result,submission,serverId,input}:{result:Result;su
   ["错误",result.full_compile_error??result.compile_error??result.full_runtime_error??result.runtime_error],
   ["失败输入",submission?result.last_testcase:undefined],
   ["本次运行输入",submission?undefined:input],
-  ["实际输出",submission?result.code_output:result.code_answer??result.code_output],
-  ["预期输出",submission?result.expected_output:result.expected_code_answer??result.expected_output??result.expected_code_output],
-  ["标准输出",submission?result.std_output??result.stdout:present(result.code_answer)?result.code_output:result.std_output??result.stdout],
+  ["实际输出",submission?result.code_output:result.code_answer],
+  ["预期输出",submission?result.expected_output:result.expected_code_answer??result.expected_code_output],
+  ["标准输出",submission?result.std_output??result.stdout:result.std_output_list??result.code_output??result.std_output??result.stdout],
  ];
  const count=present(result.total_correct)&&present(result.total_testcases)?String(result.total_correct)+" / "+String(result.total_testcases):null;
  return <section className="judge-readable" aria-label="评测结果">

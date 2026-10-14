@@ -374,7 +374,7 @@ try {
       }
       if (command === "check_judge") {
         const job = window.__inkAuthTest.jobs.find(j => j.snapshot.id === args.id);
-        job.state = { state: "finished", server_id: "fixture-run-123", result: { status_code: 10, status_msg: "Accepted", code_output: ["3"], expected_output: ["3"] } };
+        job.state = { state: "finished", server_id: "fixture-run-123", result: { status_code: 10, status_msg: "Accepted", code_answer: ["3"], expected_code_answer: ["3"], code_output: ["debug text"] } };
         return job;
       }
       if (command === "acknowledge_unknown_judge") {
