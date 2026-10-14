@@ -1,0 +1,65 @@
+name: Verify packaged completion checkpoint
+on:
+  push:
+    branches: [build/completion-preview]
+    paths: ['.github/workflows/completion-release-native.yml', 'tests/native_smoke.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: packaged-completion-native
+  cancel-in-progress: false
+jobs:
+  packaged-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install native test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Download and verify the pinned release binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/jacek4yang/inkleet/actions/artifacts/11914087210/zip > candidate.zip
+          echo 'e19ff8ac1efc001bee49f36ab07e4bae82fb527b6300a3ae7a6937753abafb9a  candidate.zip' | sha256sum --check
+          unzip -q candidate.zip -d candidate
+          package=candidate/src-tauri/target/release/bundle/portable/InkLeet-0.0.1-preview-524e1c8-linux-x86_64.tar.gz
+          echo "0c2dc9b2de4562a210a6cd86472a26d349ac653acb84239c421db83304362cd6  $package" | sha256sum --check
+          mkdir packaged
+          tar -xzf "$package" -C packaged
+          test "$(cat packaged/*/SOURCE_COMMIT.txt)" = 524e1c840199359ee0ce852444bf1d07e49085f9
+          mkdir -p evidence/native
+          printf '%s\n' 524e1c840199359ee0ce852444bf1d07e49085f9 > evidence/native/BINARY_SOURCE_COMMIT.txt
+          git rev-parse HEAD > evidence/native/TEST_SCRIPT_COMMIT.txt
+          python3 -m py_compile tests/native_smoke.py
+      - name: Verify all IDE flows on the packaged executable
+        env:
+          INKLEET_MANAGED_ENV: "1"
+          INKLEET_LIVE_CN: "1"
+        run: |
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY="$(realpath packaged/*/inkleet)"
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - name: Capture process diagnostics
+        if: failure()
+        run: |
+          mkdir -p evidence/native
+          { sudo dmesg --ctime 2>/dev/null || true; } | grep -Ei 'segfault|out of memory|killed process|inkleet|webkit' | tail -80 > evidence/native/kernel-errors.txt || true
+          free -m > evidence/native/memory.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: packaged-completion-native-verification
+          path: evidence/native/
+          if-no-files-found: warn
+          retention-days: 7
