@@ -424,8 +424,8 @@ try:
         screenshot("editor-command-palette-native.png")
         subprocess.run(["xdotool","key","Escape"],check=True)
         wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".editor-command-palette"}),"native palette Escape closes")
-        assert source_text(code)=="def solve(values):\\npass","palette preserves source"
-        (evidence/"COMMAND_NATIVE_RESULT.txt").write_text("PASS: native CtrlShiftP command discovery, actual LSP action search, Escape and unchanged source.\\n")
+        assert source_text(code)=="def solve(values):\npass","palette preserves source"
+        (evidence/"COMMAND_NATIVE_RESULT.txt").write_text("PASS: native CtrlShiftP command discovery, actual LSP action search, Escape and unchanged source.\n")
         fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
         python_source=source.with_name("solution.py")
         wait_for(lambda: python_source.exists() and python_source.read_text() == "from collections import deque\nitems = deque([1, 2])\nitems.pop", "multiline Python source persisted exactly")
