@@ -440,3 +440,23 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .lsp-completion-documentation{max-height:min(320px,40vh);overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
 
 .unsaved-mark{font-size:9px;color:var(--accent);width:12px;text-align:center;flex:none}.close-drafts{max-width:420px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);padding:20px}.close-drafts::backdrop{background:#0005}.close-drafts button{margin-right:8px}
+
+/* Compact IDE surface: spacing and state hierarchy, without changing glyph slots. */
+:root{--control-radius:4px;--control-height:28px}
+.icon-button{border-radius:var(--control-radius)}
+.icon-button>svg[data-icon]{width:16px;height:16px;overflow:visible}
+.topbar{padding-inline:12px}
+.topbar>div{gap:10px}
+.pane-heading{padding-block:3px;min-height:36px}
+.local-runner>header{min-height:32px;padding-block:1px}
+.local-runner>header button[data-local-tab]{padding-block:5px}
+.debug-panel>.local-actions{gap:3px;padding-block:3px}
+.debug-panel>.local-actions>.icon-button{width:28px;height:28px;padding:6px}
+.debug-inspector h4,.debug-watches h4{margin-top:6px}
+.debug-evaluate{padding-top:7px;margin-top:6px}
+.reading article{padding:16px 20px}
+.reading article h1{margin:10px 0 18px}
+.settings-body>section{padding:14px 16px}
+.settings-actions button{min-height:34px;padding-block:6px}
+button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@media(pointer:coarse){.icon-button,.debug-panel>.local-actions>.icon-button{min-width:36px;min-height:36px}.pane-heading{min-height:40px}}
