@@ -1,0 +1,66 @@
+name: Android emulator
+on:
+  push:
+    branches: [feat/first-workbench]
+    paths: ['tests/android_smoke.py', '.github/workflows/android-smoke.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-emulator-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  android-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Prepare official Android toolchain
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
+          rustup target add x86_64-linux-android
+      - name: Build native x86_64 debug APK for emulator
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run tauri -- android init --ci
+          npm run tauri -- android build --debug --apk --target x86_64
+      - name: Boot isolated emulator and verify real APK
+        run: |
+          mkdir -p evidence/android
+          export ANDROID_USER_HOME="$RUNNER_TEMP/inkleet-android-user"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name InkLeetSmoke --path "$ANDROID_AVD_HOME/InkLeetSmoke.avd" --package "system-images;android-35;google_apis;x86_64"
+          "$ANDROID_HOME/emulator/emulator" -list-avds | tee evidence/android/avd-list.txt
+          grep -Fx InkLeetSmoke evidence/android/avd-list.txt
+          acceleration=off
+          if test -r /dev/kvm && test -w /dev/kvm; then acceleration=on; fi
+          printf 'acceleration=%s; no host permission or security settings changed\n' "$acceleration" > evidence/android/emulator-mode.txt
+          export ANDROID_I_WANT_MY_TCG=yes
+          "$ANDROID_HOME/emulator/emulator" @InkLeetSmoke -port 5554 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -accel "$acceleration" > evidence/android/emulator.log 2>&1 &
+          emulator_pid=$!
+          export INKLEET_EMULATOR_PID="$emulator_pid"
+          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          python3 tests/android_smoke.py
+      - name: Preserve build identity
+        if: always()
+        run: |
+          mkdir -p evidence/android
+          git rev-parse HEAD > evidence/android/BUILD_COMMIT.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: android-emulator-verification
+          path: |
+            evidence/android/
+            src-tauri/gen/android/app/build/outputs/apk/
+          if-no-files-found: warn
+          retention-days: 7

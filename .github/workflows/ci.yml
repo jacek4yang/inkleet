@@ -1,34 +1,218 @@
 name: CI
 on:
   push:
+    branches: [main]
+    paths: ['src/**', 'tests/**', 'package*.json', 'tsconfig.json', 'index.html', '.github/workflows/ci.yml']
   pull_request:
+    paths: ['src/**', 'tests/**', 'package*.json', 'tsconfig.json', 'index.html', '.github/workflows/ci.yml']
   workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        type: choice
+        default: all
+        options: [all, desktop, linux, android, native-test]
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}-${{ inputs.target || 'frontend' }}
   cancel-in-progress: true
 jobs:
-  checkpoint:
+  frontend:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Verify remote checkpoint
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: |
+          npm ci --ignore-scripts
+      - name: Check TypeScript
+        run: npm run typecheck
+      - name: Test domain invariants
+        run: npm test
+      - name: Build frontend preview
+        run: npm run build
+      - name: Test real frontend and capture screenshots
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:ui
+      - name: Record build identity
+        if: always()
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/BUILD_COMMIT.txt
+          printf 'Linux Chromium frontend preview; authored sample data; NOT native client verification.\n' > evidence/VERIFICATION.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: frontend-preview
+          path: |
+            dist/
+            evidence/
+            package-lock.json
+          if-no-files-found: error
+          retention-days: 7
+  desktop:
+    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'desktop' || inputs.target == 'linux')
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.target == 'linux' && '[{"os":"ubuntu-24.04","bundle":"deb"}]' || '[{"os":"ubuntu-24.04","bundle":"deb"},{"os":"windows-2025","bundle":"nsis"},{"os":"macos-15-intel","bundle":"dmg"},{"os":"macos-15","bundle":"dmg"}]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.os }}-desktop
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Prepare frontend and icon
         shell: bash
         run: |
-          set -euo pipefail
-          test -s README.md
-          mkdir -p evidence
-          git rev-parse HEAD > evidence/commit.txt
-          git ls-files > evidence/files.txt
-          printf 'Repository checkpoint verified. No application tests exist yet.\n' > evidence/result.txt
-          cat evidence/result.txt >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run build
+          rustc --version
+      - name: Test native storage
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Build unsigned developer installer
+        run: npm run tauri -- build --bundles ${{ matrix.bundle }}
+      - name: Validate and install Linux package, then test the installed application
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p evidence/install
+          mapfile -d '' packages < <(find src-tauri/target/release/bundle/deb -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          package="$(realpath "${packages[0]}")"
+          dpkg-deb --info "$package" | tee evidence/install/package-info.txt
+          sha256sum "$package" > evidence/install/SHA256.txt
+          sudo apt-get install -y "$package" > evidence/install/install.log 2>&1
+          package_name="$(dpkg-deb -f "$package" Package)"
+          dpkg-query -W -f='${Status} ${Version} ${Architecture}\\n' "$package_name" > evidence/install/installed.txt
+          test -x /usr/bin/inkleet
+          ldd /usr/bin/inkleet > evidence/install/linked-libraries.txt
+          ! grep -q 'not found' evidence/install/linked-libraries.txt
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY=/usr/bin/inkleet
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - name: Build and verify Linux tar distribution
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mapfile -d '' packages < <(find src-tauri/target/release/bundle/deb -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          bash scripts/package-linux-portable.sh "${packages[0]}" "$GITHUB_SHA" src-tauri/target/release/bundle/portable
+          mkdir -p evidence/tar
+          unpacked="$(mktemp -d)"
+          tar -xzf src-tauri/target/release/bundle/portable/*.tar.gz -C "$unpacked"
+          mapfile -d '' binaries < <(find "$unpacked" -type f -name inkleet -print0)
+          test "${#binaries[@]}" -eq 1
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY="${binaries[0]}"
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+          cp evidence/native/*RESULT.txt evidence/tar/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
         with:
-          name: checkpoint-evidence
-          path: evidence/
-          if-no-files-found: error
+          name: native-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/
+            src-tauri/Cargo.lock
+            evidence/install/
+            evidence/native/
+            evidence/tar/
+          if-no-files-found: warn
+          retention-days: 7
+  android:
+    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'android')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Prepare Android toolchain
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0"
+          rustup target add aarch64-linux-android
+      - name: Build arm64 debug APK
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run tauri -- android init --ci
+          npm run tauri -- android build --debug --apk --target aarch64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: android-arm64-debug
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/
+            src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 7
+  native-smoke:
+    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'native-test')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Install native testing prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Build native test application
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run typecheck
+          npm run build
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          npm run tauri -- build --debug --no-bundle
+      - name: Verify native storage through the actual GUI
+        run: |
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-linux-verification
+          path: evidence/native/
+          if-no-files-found: warn
           retention-days: 7
