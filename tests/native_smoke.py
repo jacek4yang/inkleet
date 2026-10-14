@@ -83,7 +83,7 @@ def source_text(css):
     return "\n".join(cmd("GET",f"/element/{line[EID]}/property/textContent") for line in lines)
 
 
-def reveal_debug_control(css):
+def reveal_debug_control(css, fallback="down"):
     # Native WebKit does not reliably auto-scroll controls in nested inspectors.
     # Use the real pointer wheel over the outer padding, never execute JS clicks.
     for _ in range(12):
@@ -98,7 +98,7 @@ def reveal_debug_control(css):
         window=cmd("GET","/window/rect")
         x=int(window["x"]+panel["x"]+4)
         y=int(window["y"]+panel["y"]+panel["height"]/2)
-        direction="5" if target is None or target["y"]+target["height"]>bottom else "4"
+        direction=("4" if fallback=="up" else "5") if target is None else ("5" if target["y"]+target["height"]>bottom else "4")
         subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","--repeat","2","--delay","80",direction],check=True)
         time.sleep(.15)
     raise AssertionError("Debug control remains unreachable through real wheel: "+css)
@@ -543,9 +543,11 @@ try:
             return cmd("GET",f"/element/{element('.debug-watch > span')}/property/textContent")
         wait_for(lambda:watch_result()=="10","real current-frame watch")
         screenshot("python-nested-debugger-native.png")
+        reveal_debug_control('.debug-frames>button[title^="solve ·"]', fallback="up")
         caller=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'solve')]"})[EID]
         cmd("POST",f"/element/{caller}/click",{})
         wait_for(lambda:watch_result()=="—","watch result invalidated on caller selection")
+        reveal_debug_control('.debug-frames>button[title^="inner ·"]', fallback="up")
         inner=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'inner')]"})[EID]
         cmd("POST",f"/element/{inner}/click",{})
         wait_for(lambda:inner_total()=="10","selecting inner frame restores its own variables")

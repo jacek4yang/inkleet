@@ -25,7 +25,7 @@ try {
     try { if ((await fetch("http://127.0.0.1:5173")).ok) break; } catch {}
     await new Promise(r => setTimeout(r, 500));
   }
-  // Approval artwork is a separate document, never installed as the app identity.
+  // Preserve the original approval sheet as history; only owner-approved C is adopted.
   const iconReview = await browser.newPage({viewport:{width:900,height:380}});
   await iconReview.setContent(await readFile("docs/design/inkleet-icon-candidates.svg","utf8"));
   await iconReview.addStyleTag({content:"html,body{margin:0;padding:0}"});
@@ -132,6 +132,7 @@ try {
   await page.evaluate(async () => { await document.fonts.load('14px "Intel One Mono"'); await document.fonts.ready; });
   const fontLoaded = await page.evaluate(() => document.fonts.check('14px "Intel One Mono"'));
   assert.equal(fontLoaded, true, "必须实际加载内置 Intel One Mono");
+  assert.equal(await page.getByRole("img",{name:"墨题 InkLeet",exact:true}).locator("svg").count(),1,"owner-approved C replaces the visible wordmark");
   assert.ok((await editor.evaluate(el => getComputedStyle(el).fontFamily)).includes("Intel One Mono"));
   await openSettings(page, "编辑器");
   await page.getByRole("button", { name: "Intel One Mono", exact: true }).click();
