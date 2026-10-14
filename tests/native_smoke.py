@@ -878,7 +878,7 @@ try:
                 click('[data-local-tab="run"]')
                 fill('[aria-label="本地测试输入"]',"[3,-1,8]")
                 click('[data-action="local-execute"]')
-                wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),f"{group} private compilation and typed local result",seconds=280)
+                wait_for(lambda: text(".local-result").strip()=="10",f"{group} private compilation and typed local result",seconds=280)
                 screenshot(group+"-local-run-native.png")
                 saved_solution=data/("top.jacek.inkleet/notebook/lc-900000001/solution."+({"golang":"go","cpp":"cpp","c":"c","rust":"rs"}[group]))
                 wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
