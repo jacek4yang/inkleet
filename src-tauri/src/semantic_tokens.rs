@@ -17,12 +17,7 @@ pub fn normalize(text:&str,prefix:u32,legend:&Value,response:&Value)->Result<Val
     let types=legend["tokenTypes"].as_array().ok_or("语义标记图例无效")?;
     let modifiers=legend["tokenModifiers"].as_array().ok_or("语义修饰符图例无效")?;
     let lines=text.split('\n').map(|l|l.strip_suffix('\r').unwrap_or(l)).collect::<Vec<_>>();
-    // Construct each line's UTF-16 boundary bitmap once, never rescan per token.
-    let bounds=lines.iter().map(|s|{
-        let mut b=vec![true];
-        for c in s.chars(){if c.len_utf16()==2{b.push(false)}b.push(true);}
-        b
-    }).collect::<Vec<_>>();
+    let mut cached_line=None;let mut boundaries=Vec::new();
     let mut line=0u32;let mut start=0u32;let mut previous:Option<(u32,u32)>=None;let mut output=Vec::new();
     for tuple in data.chunks_exact(5){
         let mut n=[0u32;5];
@@ -36,7 +31,12 @@ pub fn normalize(text:&str,prefix:u32,legend:&Value,response:&Value)->Result<Val
         if previous.is_some_and(|(l,e)|line<l||(line==l&&start<e)){return Err("语义标记重叠".into())}
         previous=Some((line,end));
         let Some(local)=line.checked_sub(prefix)else{continue};
-        let Some(boundaries)=bounds.get(local as usize)else{continue};
+        let Some(source)=lines.get(local as usize)else{continue};
+        if cached_line!=Some(local){
+            boundaries.clear();boundaries.push(true);
+            for c in source.chars(){if c.len_utf16()==2{boundaries.push(false)}boundaries.push(true);}
+            cached_line=Some(local);
+        }
         let length=boundaries.len()-1;
         if start as usize>=length{continue}
         let end=(end as usize).min(length);

@@ -1476,6 +1476,9 @@ try {
     const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
     const {EditorState}=await import("/node_modules/.vite/deps/@codemirror_state.js");
     const {languageIntelligence}=await import("/src/intelligence.ts");
+    const {rust}=await import("/node_modules/.vite/deps/@codemirror_lang-rust.js");
+    const {HighlightStyle,syntaxHighlighting}=await import("/node_modules/.vite/deps/@codemirror_language.js");
+    const {tags}=await import("/node_modules/@lezer/highlight/dist/index.js");
     const state=window.__semanticTest={version:1,requests:0,active:0,maxActive:0,defer:false,reply:null,revision:0,fail:true};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
@@ -1495,12 +1498,12 @@ try {
       throw Error("Unexpected semantic IPC "+command);
     }};
     const client=languageIntelligence("rust",()=>{},()=>{});
-    const view=new EditorView({state:EditorState.create({doc:"foo()",extensions:[client.extensions,EditorView.theme({".cm-content":{color:"rgb(255, 0, 0)"}})]}),parent:document.querySelector("#editor")});
+    const view=new EditorView({state:EditorState.create({doc:"foo()",extensions:[rust(),syntaxHighlighting(HighlightStyle.define([{tag:[tags.variableName,tags.function(tags.variableName)],color:"#ff0000"}])),client.extensions]}),parent:document.querySelector("#editor")});
     window.__semanticTest.client=client;window.__semanticTest.view=view;
     await client.connect(view);
   });
   await semanticPage.locator(".cm-semantic-function").waitFor();
-  assert.equal(await semanticPage.locator(".cm-semantic-function").evaluate(el=>getComputedStyle(el).color),"rgb(76, 114, 140)","semantic mark overrides inherited lexical color");
+  assert.equal(await semanticPage.locator(".cm-semantic-function").evaluate(el=>getComputedStyle(el).color),"rgb(76, 114, 140)","semantic mark overrides actual Lezer lexical highlighting");
   assert.equal(await semanticPage.evaluate(()=>window.__semanticTest.requests),2,"bounded readiness retry recovers without edits");
   await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=true;s.view.dispatch({changes:{from:0,to:3,insert:"bar"}});});
   assert.equal(await semanticPage.locator(".cm-semantic").count(),0,"edit clears semantic classification immediately");

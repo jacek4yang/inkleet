@@ -748,6 +748,11 @@ try:
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
                 if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
+                if group=="golang":
+                    wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function"}),"real gopls semantic function classification",seconds=45)
+                    assert "solve" in text(".code-pane .cm-semantic-function"),"gopls resolves source function"
+                    screenshot("golang-semantic-native.png")
+                    (evidence/"SEMANTIC_NATIVE_RESULT.txt").write_text("PASS: real private gopls semantic function highlighting in native CodeMirror. Other language semantic capabilities unverified.\\n")
                 if not cmd("POST","/elements",{"using":"css selector","value":".local-runner:not([hidden])"}):
                     click(".pane-heading .actions button")
                 click('[data-local-tab="run"]')
