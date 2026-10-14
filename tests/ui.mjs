@@ -911,8 +911,15 @@ try {
   await runPanel.getByRole("button", { name: "values", exact: true }).waitFor();
   await runPage.locator(".cm-debug-stopped").waitFor();
   await runPage.locator(".cm-debug-range").filter({hasText:"sum"}).waitFor();
+  await runPage.locator(".cm-execution-pointer svg").waitFor();
+  const firstPointerX=await runPage.locator(".cm-debug-column").evaluate(node=>node.getBoundingClientRect().x);
+  assert.equal(await runPage.locator(".cm-debug-column").getAttribute("data-debug-column"),"27");
+
   await runPage.evaluate(()=>{window.__runTest.column=11;window.__runTest.endColumn=17;window.__runTest.debug.epoch++;});
   await runPage.locator(".cm-debug-range").filter({hasText:"values"}).waitFor();
+  assert.equal(await runPage.locator(".cm-debug-column").getAttribute("data-debug-column"),"11");
+  assert.ok(await runPage.locator(".cm-debug-column").evaluate(node=>node.getBoundingClientRect().x)<firstPointerX,"inline pointer moves with real reported column");
+
   await runPage.evaluate(()=>{window.__runTest.column=27;window.__runTest.endColumn=30;window.__runTest.debug.epoch++;});
   await runPage.locator(".cm-debug-range").filter({hasText:"sum"}).waitFor();
   await runPanel.getByRole("button",{name:"选择函数步入",exact:true}).click();
@@ -948,6 +955,8 @@ try {
   await runPanel.getByRole("button", {name: "caller · 1", exact: true}).click();
   await runPanel.getByRole("button", {name: "caller_only", exact:true}).waitFor();
   await runPage.locator(".cm-debug-frame").waitFor();
+  await runPage.locator(".cm-inspection-pointer").waitFor();
+  assert.equal(await runPage.locator(".cm-execution-pointer").count(),0,"caller marker is not execution arrow");
   assert.equal(await runPage.locator(".cm-debug-stopped").count(),0,"inspected caller is not marked as execution PC");
   const scalar=runPanel.getByRole("button",{name:"caller_only",exact:true});
   assert.equal(await scalar.isDisabled(),true,"scalar has no expansion action");
