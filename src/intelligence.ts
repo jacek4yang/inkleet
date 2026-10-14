@@ -1,3 +1,4 @@
+import { findReferences } from "./references";
 import { renameSymbol } from "./rename";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
@@ -194,8 +195,10 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     } catch (e) { if (!closed) status(String(e)); }
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
+  const references = findReferences((pos, doc) => request("references", pos, doc), status);
   const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status);
   const extensions: Extension[] = [
+    ...references.extensions,
     ...rename.extensions,
     signatureField,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
@@ -235,7 +238,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      rename.destroy(); closed = true; ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      references.destroy(); rename.destroy(); closed = true; ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },

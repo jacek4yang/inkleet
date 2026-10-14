@@ -214,3 +214,55 @@ pub fn rename_edits(value:&Value,uri:&str,prefix:u32,text:&str,version:u32)->Res
         assert!(rename_edits(&json!({"changes":{(uri):[edit(0,2,3)]}}),uri,0,"🦀x",1).is_ok());
     }
 }
+
+
+/// Bounded current-solution references; hide virtual helpers and other files.
+pub fn references(value:&Value,uri:&str,prefix:u32,text:&str)->Result<Value,String>{
+    use serde_json::json;
+    if value.is_null(){return Ok(json!({"locations":[],"omitted":0}));}
+    let items=value.as_array().ok_or("引用结果格式无效")?;
+    if items.len()>10000{return Err("引用结果超过安全处理上限".into());}
+    let lines=text.split('\n').collect::<Vec<_>>();
+    fn point(value:&Value,lines:&[&str])->Option<(usize,usize)>{
+        let row=usize::try_from(value.get("line")?.as_u64()?).ok()?;
+        let col=usize::try_from(value.get("character")?.as_u64()?).ok()?;
+        let line=lines.get(row)?;let mut units=0;
+        for ch in line.chars(){if units==col{return Some((row,col));}units+=ch.len_utf16();}
+        (units==col).then_some((row,col))
+    }
+    let mut locations=Vec::new();let mut omitted=0usize;let mut seen=std::collections::BTreeSet::new();
+    for item in items{
+        if item.get("uri").and_then(Value::as_str)!=Some(uri){omitted+=1;continue;}
+        let mut span=item.get("range").cloned().ok_or("引用缺少位置")?;
+        if !range(&mut span,prefix){omitted+=1;continue;}
+        let Some(start)=point(&span["start"],&lines)else{omitted+=1;continue};
+        let Some(end)=point(&span["end"],&lines)else{omitted+=1;continue};
+        if start>end{return Err("引用范围顺序无效".into());}
+        if !seen.insert((start,end)){continue;}
+        if locations.len()>=500{omitted+=1;continue;}
+        locations.push(json!({"range":span}));
+    }
+    Ok(json!({"locations":locations,"omitted":omitted}))
+}
+#[cfg(test)]mod reference_tests{
+    use super::*;use serde_json::json;
+    fn loc(uri:&str,line:u32,col:u32,end:u32)->Value{json!({"uri":uri,"range":{"start":{"line":line,"character":col},"end":{"line":line,"character":end}}})}
+    #[test]fn references_map_only_current_editable_utf16_positions(){
+        let uri="file:///solution.py";
+        let value=json!([loc(uri,2,2,5),loc(uri,2,2,5),loc(uri,1,0,1),loc(uri,3,0,1),loc("file:///private.py",2,0,1),loc(uri,2,1,2)]);
+        let result=references(&value,uri,2,"🦀foo").unwrap();
+        assert_eq!(result["locations"].as_array().unwrap().len(),1);
+        assert_eq!(result["locations"][0]["range"]["start"]["line"],0);
+        assert_eq!(result["omitted"],4);
+        assert!(result.to_string().find("private").is_none());
+    }
+    #[test]fn references_are_bounded_and_null_is_empty(){
+        assert_eq!(references(&Value::Null,"file:///s",0,"").unwrap()["locations"],json!([]));
+        assert!(references(&json!({}),"file:///s",0,"").is_err());
+        assert!(references(&Value::Array(vec![Value::Null;10001]),"file:///s",0,"").is_err());
+        let text=(0..600).map(|_|"x").collect::<Vec<_>>().join("\n");
+        let value=Value::Array((0..600).map(|i|loc("file:///s",i,0,1)).collect());
+        let result=references(&value,"file:///s",0,&text).unwrap();
+        assert_eq!(result["locations"].as_array().unwrap().len(),500);assert_eq!(result["omitted"],100);
+    }
+}

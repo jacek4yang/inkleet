@@ -241,6 +241,18 @@ try:
         cmd("POST","/actions",{"actions":[{"type":"key","id":"rename-undo","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"z"},{"type":"keyUp","value":"z"},{"type":"keyUp","value":"\ue009"}]}]})
         wait_for(lambda: text(code)=="def solve(values): return sum(values)","single undo restores complete pre-rename source")
         (evidence/"RENAME_GUI_RESULT.txt").write_text("PASS: actual Linux GUI F2, real private Pyright rename, declaration/reference updates in original source and a single undo restores both.\n")
+        click(code)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
+        keys += [{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"},{"type":"keyUp","value":"\ue008"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-references","actions":keys}]})
+        wait_for(lambda: "本题 2 处引用" in text(".lsp-references"),"real Pyright declaration and reference positions")
+        assert len(cmd("POST","/elements",{"using":"css selector","value":".lsp-reference-list button"}))==2
+        screenshot("python-references-native.png")
+        click(".lsp-reference-list button:last-child")
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-references"}),"reference navigation closes panel")
+        assert text(code)=="def solve(values): return sum(values)"
+        (evidence/"REFERENCES_GUI_RESULT.txt").write_text("PASS: actual native Shift+F12 real private Pyright declaration/reference lookup, two original source locations and navigation without modifying the draft.\n")
         click(".actions button:first-child")
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')

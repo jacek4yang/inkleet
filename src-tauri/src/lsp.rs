@@ -40,7 +40,7 @@ impl Services {
         Ok(())
     }
     pub fn request(&self,id:u64,version:u32,kind:&str,line:u32,character:u32,new_name:Option<String>)->Result<Value>{
-        let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition","signatureHelp"=>"textDocument/signatureHelp","rename"=>"textDocument/rename",_=>return Err("不支持此语言服务请求".into())};
+        let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition","signatureHelp"=>"textDocument/signatureHelp","rename"=>"textDocument/rename","references"=>"textDocument/references",_=>return Err("不支持此语言服务请求".into())};
         let session=self.session(id)?;
         let prefix={
             let document=session.document.lock().map_err(|_|"文档状态不可用")?;
@@ -50,6 +50,7 @@ impl Services {
             document.prefix
         };
         let mut params=json!({"textDocument":{"uri":session.uri},"position":{"line":line+prefix,"character":character}});
+        if kind=="references"{params["context"]=json!({"includeDeclaration":true});}
         if kind=="rename"{
             let name=new_name.as_deref().ok_or("缺少新名称")?;
             if name.is_empty()||name.len()>128||!name.chars().all(|c|c.is_alphanumeric()||matches!(c,'_'|'$'))||name.chars().next().is_some_and(|c|c.is_numeric()){return Err("名称必须为不超过 128 字节的标识符".into());}
@@ -62,6 +63,11 @@ impl Services {
             let document=session.document.lock().map_err(|_|"文档状态不可用")?;
             if document.version!=version{return Err("源码已改变，请重新发起重命名".into());}
             return crate::lsp_document::rename_edits(&response,&session.uri,prefix,&document.text,version);
+        }
+        if kind=="references"{
+            let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+            if document.version!=version{return Err("源码已改变，请重新查找引用".into());}
+            return crate::lsp_document::references(&response,&session.uri,prefix,&document.text);
         }
         crate::lsp_document::response(kind,&mut response,prefix);
         if kind=="definition"{

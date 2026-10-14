@@ -424,6 +424,11 @@ try {
       if (command === "language_diagnostics") return { version: state.version, diagnostics: [] };
       if (command === "language_request") {
         state.requests.push(args);
+        if (args.kind === "references") {
+          const result = { locations: [0,1].map(line => ({ range: { start: { line, character: 0 }, end: { line, character: 5 } } })), omitted: 1 };
+          if (state.deferReferences) return new Promise(resolve => { state.referencesReply = () => resolve(result); });
+          return result;
+        }
         if (args.kind === "rename") {
           const result = [0,1].map(line => ({ range: { start: { line, character: 0 }, end: { line, character: 5 } }, newText: args.newName }));
           if (state.deferRename) return new Promise(resolve => { state.renameReply = () => resolve(result); });
@@ -484,6 +489,23 @@ try {
   await lspPage.waitForFunction(() => document.querySelector('[aria-label="代码编辑器"]').innerText === "values = []\nvalues.append(1)");
   await lspEditor.press("Control+z");
   assert.equal(await lspEditor.innerText(), "items = []\nitems.append(1)", "rename must be one undoable transaction");
+  await lspEditor.press("Control+Home"); await lspEditor.press("ArrowRight"); await lspEditor.press("Shift+F12");
+  await lspPage.locator(".lsp-reference-list button").first().waitFor();
+  assert.equal(await lspPage.locator(".lsp-reference-list button").count(), 2);
+  assert.match(await lspPage.locator(".lsp-references").innerText(), /本题 2 处引用（含声明）/);
+  assert.match(await lspPage.locator(".lsp-references").innerText(), /已省略 1 处/);
+  await lspPage.locator('.lsp-reference-list button[data-reference-line="2"]').click();
+  await lspPage.locator(".lsp-references").waitFor({ state: "hidden" });
+  assert.equal(await lspEditor.innerText(), "items = []\nitems.append(1)", "reference navigation never edits source");
+  assert.equal(await lspPage.evaluate(() => window.getSelection()?.toString()), "items", "reference click selects the original source occurrence");
+  await lspPage.evaluate(() => { window.__lspTest.deferReferences = true; });
+  await lspEditor.press("Shift+F12");
+  await lspPage.waitForFunction(() => typeof window.__lspTest.referencesReply === "function");
+  await lspEditor.press("Escape");
+  await lspPage.evaluate(() => window.__lspTest.referencesReply());
+  await lspPage.waitForTimeout(100);
+  assert.equal(await lspPage.locator(".lsp-references").count(), 0, "dismissed references cannot reopen from a late response");
+  await lspPage.evaluate(() => { window.__lspTest.deferReferences = false; });
   await lspPage.evaluate(() => { window.__lspTest.deferRename = true; });
   await lspEditor.press("Control+Home"); await lspEditor.press("ArrowRight"); await lspEditor.press("F2");
   await renameForm.getByRole("textbox", { name: "新名称", exact: true }).fill("late");
