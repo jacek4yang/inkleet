@@ -288,3 +288,5 @@ pub mod java_debug;
 pub mod lsp_scaffold;
 
 pub mod formatter;
+
+pub mod format_edits;

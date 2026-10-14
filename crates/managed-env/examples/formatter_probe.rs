@@ -3,7 +3,8 @@ use std::sync::{Arc,atomic::AtomicBool};
 #[tokio::main]
 async fn main()->Result<(),String>{
     let root=tempfile::tempdir().map_err(|e|e.to_string())?;
-    let manager=Manager::new(root.path().join("tools"));
+    let canonical=std::fs::canonicalize(root.path()).map_err(|e|e.to_string())?;
+    let manager=Manager::new(canonical.join("tools"));
     let report:Report=Arc::new(|_|{});
     for id in ["ruff","rustc","rustfmt-preview","go"]{manager.install(id,Arc::new(AtomicBool::new(false)),report.clone()).await?;}
     let fixtures=[

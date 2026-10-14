@@ -39,6 +39,7 @@ pub fn prepare(manager:&Manager,root:&Path,language:&str)->Result<Launch,String>
     for path in includes{args.push("-isystem".into());args.push(path.to_string_lossy().into());}
     args.push("-c".into());args.push(source.to_string_lossy().into());
     std::fs::write(root.join("compile_commands.json"),json!([{"directory":root,"file":source,"arguments":args}]).to_string()).map_err(|_|"无法保存独立编译配置")?;
+    std::fs::write(root.join(".clang-format"),"BasedOnStyle: LLVM\nIndentWidth: 4\nColumnLimit: 100\nSortIncludes: Never\n").map_err(|_|"无法准备 C/C++ 格式化配置")?;
     let mut command=Command::new(clangd);clean(&mut command,root,&[zig_home.to_owned()])?;
     command.args(["--background-index=false","--clang-tidy=false","--header-insertion=never","--enable-config=false","--log=error"]);
     Ok(Launch{command,settings:json!({}),initialization:Value::Null,roots:vec![std::fs::canonicalize(root).map_err(|_|"工作区无效")?,allowed],filename,language_id:if is_cpp{"cpp"}else{"c"},server:"clangd"})

@@ -4,6 +4,7 @@ mod recovery;
 mod external;
 mod managed;
 mod download_settings;
+mod editor_settings;
 mod lsp;
 mod lsp_document;
 mod lsp_launch;
@@ -302,6 +303,32 @@ async fn rename_solution(window:tauri::WebviewWindow,app:tauri::AppHandle,proble
  check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||{let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;solutions::rename(&state.root,&problem,&language,&id,&expected,&name)}).await.map_err(|_|"重命名解答任务中断".to_owned())?
 }
 
+
+#[tauri::command]
+async fn format_source(window:tauri::WebviewWindow,app:tauri::AppHandle,language:String,text:String,id:Option<u64>,version:Option<u32>)->Result<String,String>{
+    check_origin(&window)?;
+    if text.len()>1024*1024{return Err("格式化源码超过 1 MiB 限制".into());}
+    tauri::async_runtime::spawn_blocking(move||{
+        if matches!(language.as_str(),"c"|"cpp"|"java"){
+            app.state::<lsp::Services>().format(id.ok_or("语言服务尚未连接")?,version.ok_or("缺少文档版本")?,&language,&text)
+        }else{
+            inkleet_managed_env::formatter::format(&app.state::<managed::Environments>().manager,&language,&text)
+        }
+    }).await.map_err(|_|"格式化任务中断".to_owned())?
+}
+
+
+#[tauri::command]
+async fn get_editor_settings(window:tauri::WebviewWindow,app:tauri::AppHandle)->Result<editor_settings::Snapshot,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<editor_settings::EditorSettings>().get()).await.map_err(|_|"编辑器配置读取任务中断".to_owned())?
+}
+#[tauri::command]
+async fn save_editor_settings(window:tauri::WebviewWindow,app:tauri::AppHandle,settings:editor_settings::Document,expected:Option<String>)->Result<editor_settings::Snapshot,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<editor_settings::EditorSettings>().save(settings,expected)).await.map_err(|_|"编辑器配置保存任务中断".to_owned())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(result)=compiled_runtime::linker_entry(){
@@ -314,6 +341,7 @@ pub fn run() {
             app.manage(Store { root, gate: Mutex::new(()) });
             app.manage(auth::Auth::default());
             app.manage(download_settings::DownloadSettings::new(app.path().app_config_dir()?));
+            app.manage(editor_settings::EditorSettings::new(app.path().app_config_dir()?));
             app.manage(debugger::Debugger::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("debug-sessions")));
             app.manage(local_run::Runner::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("local-runs")));
             app.manage(lsp::Services::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("language-workspaces")));
@@ -323,7 +351,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {

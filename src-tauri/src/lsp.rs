@@ -8,7 +8,7 @@ pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, a
 struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
     id:u64, client:Client, uri:String, language:String, context:inkleet_managed_env::lsp_scaffold::Context, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
-    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, _workspace:tempfile::TempDir,
+    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, formatting:AtomicBool, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
@@ -82,6 +82,30 @@ impl Services {
         }
         Ok(response)
     }
+    pub fn format(&self,id:u64,version:u32,language:&str,text:&str)->Result<String>{
+        let session=self.session(id)?;
+        if !matches!(language,"c"|"cpp"|"java")||session.language!=language{return Err("格式化语言会话不匹配".into());}
+        if !session.range_formatting{return Err("当前语言服务不支持范围格式化".into());}
+        if session.formatting.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err(){return Err("格式化正在进行".into());}
+        struct Guard<'a>(&'a AtomicBool);impl Drop for Guard<'_>{fn drop(&mut self){self.0.store(false,Ordering::Release);}}
+        let _guard=Guard(&session.formatting);
+        let prefix={
+            let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+            if document.version!=version||document.text!=text{return Err("格式化快照已过期".into());}
+            document.prefix
+        };
+        let lines=text.split('\n').collect::<Vec<_>>();
+        let last=lines.last().copied().unwrap_or("");
+        let result=session.client.request("textDocument/rangeFormatting",json!({
+            "textDocument":{"uri":session.uri},
+            "range":{"start":{"line":prefix,"character":0},"end":{"line":prefix+lines.len() as u32-1,"character":last.encode_utf16().count()}},
+            "options":{"tabSize":4,"insertSpaces":true}
+        }),Duration::from_secs(5))?;
+        let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+        if document.version!=version||document.text!=text{return Err("忽略旧版本格式化结果".into());}
+        self.session(id)?;
+        inkleet_managed_env::format_edits::apply(text,prefix,&result)
+    }
     pub fn diagnostics(&self,id:u64)->Result<Value>{
         let session=self.session(id)?;if !session.client.is_alive(){return Err("语言服务已退出，可重连".into());}
         let document=session.document.lock().map_err(|_|"文档状态不可用")?;
@@ -138,7 +162,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
                 }
             }
         }))?;
-        client.request("initialize",json!({
+        let initialized=client.request("initialize",json!({
             "processId":null,"rootUri":root_uri,"initializationOptions":launch.initialization,
             "capabilities":{
                 "general":{"positionEncodings":["utf-16"]},
@@ -147,12 +171,14 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             },
             "workspaceFolders":[{"uri":root_uri,"name":"InkLeet"}]
         }),Duration::from_secs(if language=="java"{90}else{30}))?;
+        let range_provider=&initialized["capabilities"]["documentRangeFormattingProvider"];
+        let range_formatting=range_provider==&Value::Bool(true)||range_provider.is_object();
         client.notify("initialized",json!({}))?;
         client.notify("workspace/didChangeConfiguration",json!({"settings":if language=="python3"{json!({"python":launch.settings})}else{launch.settings}}))?;
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let roots=launch.roots;
         let started_uri=uri.clone();
-        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
