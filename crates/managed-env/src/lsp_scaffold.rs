@@ -41,8 +41,8 @@ impl Context {
     pub fn fragments(&self,language:&str,source:&str)->(String,String){
         if !self.enabled{return (String::new(),String::new());}
         let tokens=tokens(source);
-        let list=self.list&&!declares(&tokens,"ListNode");
-        let tree=self.tree&&!declares(&tokens,"TreeNode");
+        let list=self.list&&!declares_for(&tokens,"ListNode",language);
+        let tree=self.tree&&!declares_for(&tokens,"TreeNode",language);
         let mut before=String::new();let mut after=String::new();
         match language{
             "rust"=>{
@@ -52,7 +52,7 @@ impl Context {
             },
             "java"=>{
                 // Explicit package programs retain their authored import section.
-                if !tokens.iter().any(|t|t=="package"){before.push_str("import java.util.*;\nimport java.math.*;\n");}
+                if !tokens.iter().any(|t|t=="package"){before.push_str(JAVA_IMPORTS);}
                 if list{after.push_str("\nclass ListNode { int val; ListNode next; ListNode(){} ListNode(int val){this.val=val;} ListNode(int val,ListNode next){this.val=val;this.next=next;} }\n");}
                 if tree{after.push_str("\nclass TreeNode { int val; TreeNode left,right; TreeNode(){} TreeNode(int val){this.val=val;} TreeNode(int val,TreeNode left,TreeNode right){this.val=val;this.left=left;this.right=right;} }\n");}
             },
@@ -72,6 +72,27 @@ impl Context {
         }
         (before,after)
     }
+}
+pub(crate) const JAVA_IMPORTS:&str="import java.util.*;\nimport java.math.*;\nimport java.io.*;\n";
+pub(crate) fn java_package(source:&str)->bool{tokens(source).iter().any(|token|token=="package")}
+fn declares_for(tokens:&[String],name:&str,language:&str)->bool{
+    if !matches!(language,"c"|"cpp"){return declares(tokens,name);}
+    let mut depth=0usize;
+    for (i,token) in tokens.iter().enumerate(){
+        if depth==0 && matches!(token.as_str(),"struct"|"class"|"union"|"enum") && tokens.get(i+1).is_some_and(|t|t==name){
+            // A tag reference in a function signature is not a definition.
+            let mut next=i+2;
+            if tokens.get(next).is_some_and(|t|t=="final"){next+=1;}
+            if tokens.get(next).is_some_and(|t|t=="{"){return true;}
+            if language=="cpp" && tokens.get(next).is_some_and(|t|t==":"){
+                for value in &tokens[next+1..]{
+                    if value=="{"{return true;}
+                    if matches!(value.as_str(),";"|"("|")"|"*"){break;}
+                }
+            }
+        }
+        if token=="{"{depth+=1;}else if token=="}"{depth=depth.saturating_sub(1);}
+    }false
 }
 fn declares(tokens:&[String],name:&str)->bool{
     let mut depth=0usize;
@@ -125,7 +146,7 @@ fn tokens(source:&str)->Vec<String>{
         if b[i].is_ascii_alphabetic()||b[i]==b'_'{
             let start=i;i+=1;while i<b.len()&&(b[i].is_ascii_alphanumeric()||b[i]==b'_'){i+=1;}
             out.push(source[start..i].to_owned());
-        }else{if matches!(b[i],b'{'|b'}'){out.push((b[i] as char).to_string());}i+=1;}
+        }else{if matches!(b[i],b'{'|b'}'|b':'|b';'|b'('|b')'|b'*'){out.push((b[i] as char).to_string());}i+=1;}
     }
     out
 }
@@ -237,4 +258,18 @@ fn python_futures(source:&str)->(String,String){
         let (future,body)=python_futures(src);assert!(future.is_empty());assert_eq!(body,src);
         assert!(Context::default().python_source("x=1").is_none());
     }
+}
+
+#[cfg(test)]mod c_definition_contract_tests{
+ use super::*;
+ #[test]fn official_c_node_signature_is_not_a_type_definition(){
+  let c=Context::parse(Some(r#"{"name":"reverseList","params":[{"type":"ListNode"}],"return":{"type":"ListNode"}}"#)).unwrap();
+  for source in [
+   "struct ListNode* reverseList(struct ListNode* head){return head->next;}",
+   "struct ListNode; struct ListNode* reverseList(struct ListNode* head){return head;}",
+   "/* struct ListNode { int val; }; */ struct ListNode* reverseList(struct ListNode* head){return head;}"
+  ]{assert!(c.fragments("c",source).0.contains("struct ListNode {"));}
+  assert!(c.fragments("c","struct ListNode {int val;struct ListNode* next;};").0.is_empty());
+  assert!(c.fragments("cpp","struct ListNode final {int val;};").0.is_empty());
+ }
 }
