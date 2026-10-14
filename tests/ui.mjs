@@ -806,7 +806,7 @@ try {
       if (command === "start_language_service") throw new Error("Language service intentionally absent in runner UI fixture");
       if (command === "debug_status") return state.debug ? JSON.parse(JSON.stringify(state.debug)) : null;
       if (command === "start_debug") {
-        ++state.debugStarts; state.debugCode=args.snapshot.code;
+        ++state.debugStarts; state.debugCode=args.snapshot.code;state.debugInput=args.snapshot.input;
         state.debug = { id: state.debugStarts, phase: "paused", title: args.snapshot.title, threadId: 1, epoch: 1, capabilities:{supportsStepInTargetsRequest:true}, output: "", truncated: false, reason: "breakpoint", error: "", breakpoints: args.lines.map(line => ({ line, verified: true })) };
         return state.debug.id;
       }
@@ -858,7 +858,7 @@ try {
   await runPage.evaluate(() => window.__runTest.pending[0]());
   await runPanel.getByRole("button", { name: "停止", exact: true }).waitFor();
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).fill("def solve(values): return sum(values)");
-  await runPanel.getByText("当前代码或用例已改变，下面是上一次快照的结果。", { exact: true }).waitFor();
+  await runPanel.getByText("结果已过期", { exact: true }).waitFor();
   await runPanel.getByRole("button", { name: "收起", exact: true }).click();
   await runPage.getByRole("button", { name: "本地", exact: true }).click();
   await runPanel.getByRole("button", { name: "停止", exact: true }).click();
@@ -868,10 +868,13 @@ try {
   await runPage.waitForFunction(() => window.__runTest.starts.length === 2);
   await runPage.evaluate(() => window.__runTest.pending[1]());
   await runPage.evaluate(() => Object.assign(window.__runTest.result, { phase: "finished", exitCode: 0, results: ['{"case": 1, "ok": true, "value": 10, "exactInteger": 9007199254740993}'], stdout: "<img src=x onerror=alert(1)>", elapsedMs: 12 }));
-  await runPanel.getByText(/"value": 10/).waitFor();
+  await runPanel.locator(".local-result").getByText("10",{exact:true}).waitFor();
+  await runPanel.getByLabel("查看原始结果",{exact:true}).click();
   assert.equal(await runPanel.locator("img").count(), 0);
   assert.match(await runPanel.innerText(), /9007199254740993/);
-  assert.match(await runPanel.locator(".exit-code").getAttribute("title"), /不代表通过力扣判题/, "local result distinction remains available on hover");
+  assert.match(await runPanel.locator(".case-result").getAttribute("title"), /不代表通过力扣判题/, "local result distinction remains available on hover");
+  await runPanel.getByLabel("查看原始结果",{exact:true}).click();
+  assert.equal(await runPanel.locator(".exit-code").count(),0,"successful exit code is not permanent clutter");
   await runPanel.getByRole("button", { name: "运行与调试设置", exact: true }).click();
   assert.equal(await runPage.getByRole("dialog",{name:"设置",exact:true}).locator(".settings-reference").count(),0);
   await runPage.getByRole("button",{name:"使用手册",exact:true}).click();
@@ -897,12 +900,20 @@ try {
   await runPage.getByRole("separator",{name:"调整测试结果高度",exact:true}).waitFor();
   assert.ok((await runPage.locator(".editor-host").first().boundingBox()).height>=130,"two panels reserve editor space");
   await runPage.getByRole("button",{name:"收起测试与结果",exact:true}).click();
+  const originalInput=await runPanel.getByRole("textbox",{name:"本地测试输入",exact:true}).inputValue();
+  await runPanel.getByRole("button",{name:"添加用例",exact:true}).click();
+  await runPanel.getByRole("textbox",{name:"本地测试输入",exact:true}).fill("[9,8]");
+  await runPanel.getByRole("tab",{name:"用例 1",exact:true}).click();
+  assert.equal(await runPanel.getByRole("textbox",{name:"本地测试输入",exact:true}).inputValue(),originalInput,"switching cases preserves separate inputs");
+  await runPanel.getByRole("tab",{name:"用例 2",exact:true}).click();
+  await runPage.screenshot({path:"evidence/visual-test-results.png",fullPage:true});
   await runPanel.locator('[data-local-tab="debug"]').click();
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).press("F9");
   await runPanel.getByText(/断点：1。/).waitFor();
   assert.equal(await runPanel.getByRole("button", {name:"开始调试",exact:true}).locator("svg[aria-hidden=true]").count(),1,"start uses accessible SVG");
   await runPanel.getByRole("button", { name: "开始调试", exact: true }).evaluate(button => { button.click(); button.click(); });
   await runPage.waitForFunction(() => window.__runTest.debugStarts === 1);
+  assert.equal(await runPage.evaluate(()=>window.__runTest.debugInput),"[9,8]","debug starts exactly the selected case");
   await runPanel.getByText("已暂停", { exact: true }).waitFor();
   assert.equal(await runPanel.getByText("已暂停", { exact: true }).getAttribute("title"), "breakpoint");
   assert.equal(await runPanel.getByRole("button", {name:"开始调试",exact:true}).count(),0,"active session has one primary execution control");
