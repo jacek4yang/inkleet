@@ -47,6 +47,12 @@ def cmd(method, path, payload=None):
         return request(method, f"/session/{session}" + path, payload)
 def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
 def text(css): return cmd("GET",f"/element/{element(css)}/text")
+def source_text(css):
+    # WebDriver rendered text may normalize leading whitespace. Read textContent
+    # of the visible CodeMirror lines, then independently check the saved file.
+    lines=cmd("POST",f"/element/{element(css)}/elements",{"using":"css selector","value":".cm-line"})
+    return "\n".join(cmd("GET",f"/element/{line[EID]}/property/textContent") for line in lines)
+
 def click(css):
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
@@ -219,14 +225,25 @@ try:
         ]}]})
         typed="return len(values)"
         cmd("POST",f"/element/{element(code)}/value",{"text":typed,"value":list(typed)})
-        wait_for(lambda:text(code)=="def solve(values):\n    return len(values)","native Python Enter produces four-space indentation")
+        (evidence/"indent-input-observation.json").write_text(json.dumps({"rendered":text(code),"lines":source_text(code)},ensure_ascii=False))
+        wait_for(lambda:source_text(code)=="def solve(values):\n    return len(values)","native Python Enter produces four-space indentation")
+        python_saved=source.with_name("solution.py")
+        wait_for(lambda:python_saved.exists() and python_saved.read_text()=="def solve(values):\n    return len(values)","native auto-indented source saved byte-for-byte")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"python-dedent","actions":[
             {"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue004"},{"type":"keyUp","value":"\ue004"},{"type":"keyUp","value":"\ue008"}
         ]}]})
-        wait_for(lambda:text(code)=="def solve(values):\nreturn len(values)","native Shift+Tab dedents")
+        wait_for(lambda:source_text(code)=="def solve(values):\nreturn len(values)","native Shift+Tab dedents")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"python-tab","actions":[{"type":"keyDown","value":"\ue004"},{"type":"keyUp","value":"\ue004"}]}]})
-        wait_for(lambda:text(code)=="def solve(values):\n    return len(values)","native Tab indents")
-        (evidence/"EDITOR_KEYS_RESULT.txt").write_text("PASS: actual native WebKitGTK keyboard input; Python Enter uses four spaces, Shift+Tab dedents and Tab restores indentation. Completion popup click tested separately.\n")
+        wait_for(lambda:source_text(code)=="def solve(values):\n    return len(values)","native Tab indents")
+        fill(code,"def solve(values):")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-backspace","actions":[
+            {"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},
+            {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"},
+            {"type":"keyDown","value":"\ue003"},{"type":"keyUp","value":"\ue003"}
+        ]}]})
+        cmd("POST",f"/element/{element(code)}/value",{"text":"pass","value":list("pass")})
+        wait_for(lambda:source_text(code)=="def solve(values):\npass","native Backspace removes the whole indentation unit")
+        (evidence/"EDITOR_KEYS_RESULT.txt").write_text("PASS: actual native WebKitGTK keyboard input; Python Enter uses four spaces, Shift+Tab dedents, Tab restores indentation and Backspace removes the full indentation unit. Completion popup click tested separately.\n")
         fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
         python_source=source.with_name("solution.py")
         wait_for(lambda: python_source.exists() and python_source.read_text() == "from collections import deque\nitems = deque([1, 2])\nitems.pop", "multiline Python source persisted exactly")

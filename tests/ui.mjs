@@ -42,6 +42,21 @@ try {
   assert.equal(await editor.innerText(), "def solve(values):\n    return len(values)", "selected block dedents symmetrically");
   await editor.press("Escape"); await editor.press("Tab");
   assert.equal(await editor.evaluate(el => el.contains(document.activeElement)), false, "Escape then Tab can leave the editor");
+  await editor.fill("def solve(values):");
+  await editor.press("End"); await editor.press("Enter");
+  // This pause separates CodeMirror's documented 500 ms undo groups.
+  // It is not a save-completion check; native persistence is asserted separately.
+  await page.waitForTimeout(600);
+  await editor.press("Backspace");
+  assert.equal((await editor.locator(".cm-line").allTextContents()).join("\n"), "def solve(values):\n", "Backspace removes one indentation unit, not a single space");
+  await editor.press("Control+z");
+  assert.equal((await editor.locator(".cm-line").allTextContents()).join("\n"), "def solve(values):\n    ", "indent deletion is undoable");
+  await editor.fill("name = name + 1");
+  await editor.press("Control+Home"); await editor.press("Control+d"); await editor.press("Control+d");
+  await editor.pressSequentially("value");
+  assert.equal(await editor.innerText(), "value = value + 1", "multiple selections edit both occurrences");
+  await editor.press("Control+z");
+  assert.equal(await editor.innerText(), "name = name + 1", "multi-cursor edits share undo history");
   await editor.fill("# Python 独立草稿");
   await page.getByRole("combobox", { name: "编程语言" }).selectOption("rust");
   await editor.waitFor({ state: "visible" });
