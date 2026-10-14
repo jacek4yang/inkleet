@@ -1477,7 +1477,7 @@ try {
     const {EditorState}=await import("/node_modules/.vite/deps/@codemirror_state.js");
     const {languageIntelligence}=await import("/src/intelligence.ts");
     const {rust}=await import("/node_modules/.vite/deps/@codemirror_lang-rust.js");
-    const {HighlightStyle,syntaxHighlighting,defaultHighlightStyle}=await import("/node_modules/.vite/deps/@codemirror_language.js");
+    const {basicSetup}=await import("/node_modules/.vite/deps/codemirror.js");
     const state=window.__semanticTest={version:1,requests:0,active:0,maxActive:0,defer:true,reply:null,revision:0,fail:true};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
@@ -1497,12 +1497,12 @@ try {
       throw Error("Unexpected semantic IPC "+command);
     }};
     const client=languageIntelligence("rust",()=>{},()=>{});
-    const view=new EditorView({state:EditorState.create({doc:"fn foo() {}",extensions:[rust(),syntaxHighlighting(HighlightStyle.define(defaultHighlightStyle.specs.map(spec=>({...spec,color:"#ff0000"})))),client.extensions]}),parent:document.querySelector("#editor")});
+    const view=new EditorView({state:EditorState.create({doc:"fn foo() {}",extensions:[basicSetup,rust(),client.extensions]}),parent:document.querySelector("#editor")});
     window.__semanticTest.client=client;window.__semanticTest.view=view;
     await client.connect(view);
   });
   await semanticPage.waitForFunction(()=>typeof window.__semanticTest.reply==="function");
-  assert.equal(await semanticPage.locator(".cm-line span").filter({hasText:/^foo$/}).first().evaluate(el=>getComputedStyle(el).color),"rgb(255, 0, 0)","real lexical highlight exists before semantic reply");
+  assert.equal(await semanticPage.locator(".cm-line span").filter({hasText:/^foo$/}).first().evaluate(el=>getComputedStyle(el).color),"rgb(0, 0, 255)","production basicSetup lexical highlight exists before semantic reply");
   await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=false;s.reply();s.reply=null;});
   await semanticPage.locator(".cm-semantic-function").waitFor();
   assert.equal(await semanticPage.locator(".cm-semantic-function").evaluate(el=>getComputedStyle(el).color),"rgb(76, 114, 140)","semantic mark overrides actual Lezer lexical highlighting");
