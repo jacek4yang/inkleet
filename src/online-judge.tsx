@@ -1,3 +1,4 @@
+import { useResizablePanel } from "./resizable-panel";
 import { IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -30,6 +31,7 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
   const [phase, setPhase] = useState("");
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
+  const resize=useResizablePanel("judge",open,220);
   const [confirm, setConfirm] = useState<Snapshot | null>(null);
   const [ack, setAck] = useState<Job | null>(null);
   const guard = useRef(false);
@@ -113,7 +115,7 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
   const stale = current && (current.snapshot.code !== code || (current.snapshot.kind === "online-run" && current.snapshot.testCase !== input));
   const panel = question && <>
     <div className="judge-toggle"><IconButton icon="tests" label={open ? "收起测试与结果" : "测试用例与结果"} aria-expanded={open} onClick={() => setOpen(!open)} /></div>
-    {open && <section className="judge-panel" aria-label="在线评测">
+    <section ref={resize.panel} style={resize.style} hidden={!open} className="judge-panel resizable-panel" aria-label="在线评测">{resize.handle}<div className="judge-content">
       <label>测试用例<textarea aria-label="在线测试用例" spellCheck={false} value={input} onChange={e => setCases(old => ({ ...old, [question.questionId]: e.target.value }))} /></label>
       {phase && <p role="status">{phase}</p>}
       {error && <p role="alert" className="error">{error}</p>}
@@ -132,7 +134,7 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
         </>}
       </div>}
       {blocked && !current && <p>其他解答有待确认评测，请切回处理。</p>}
-    </section>}
+    </div></section>
     {confirm && <Confirm title="确认正式提交" dismiss={() => setConfirm(null)} accept={() => send(confirm)}>
       <p>将这份 {confirm.language} 代码快照发送给 leetcode.cn，记入账号 {identity?.username} 的正式提交记录。</p>
       <p>题目：{confirm.slug}；代码 {confirm.code.length} 字符。不会上传笔记。</p>

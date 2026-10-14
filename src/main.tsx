@@ -1,3 +1,4 @@
+import type { DebugPosition } from "./debug-position";
 import { officialTemplate } from "./official-template";
 import { SolutionPicker } from "./solution-picker";
 import { QuestionSidebar } from "./question-sidebar";
@@ -43,7 +44,8 @@ function App() {
   const [reconnectToken, setReconnectToken] = useState(0);
   const points = useRef(new Map<string, number[]>());
   const [, updatePoints] = useState(0);
-  const [paused, setPaused] = useState({ key: "", line: 0 });
+  const [paused, setPaused] = useState<{key:string;position:DebugPosition|null}>({key:"",position:null});
+  const [localOpened,setLocalOpened]=useState(false);
   const [localRunner, setLocalRunner] = useState(false);
   const [environments, setEnvironments] = useState(false);
   const [problems, setProblems] = useState<WorkbenchProblem[]>([]);
@@ -313,10 +315,10 @@ function App() {
         const key=draftKey({account:"local",problem:problemId,language,solution:entry.id});
         documents.current.set(key,{code:text,notes:notes.current.get(problemId)??""});
         persisted.current.set(key,isTauri()?text:null);selectSolution(entry.id);
-      }} />}</div><div className="actions"><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
+      }} />}</div><div className="actions"><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} aria-expanded={localRunner} onClick={() => {setLocalOpened(true);setLocalRunner(v => !v);}} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
       {problem && baseTemplate===null && !doc.code.trim() && <p className="error" role="alert">官方模板不可用</p>}
-      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
-      {localRunner && problem && <LocalRunner onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={activeKey} documentKey={activeKey} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} onClose={() => setLocalRunner(false)} />}
+      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
+      {localOpened && problem && <LocalRunner onReveal={()=>setLocalRunner(true)} hidden={!localRunner} onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={position => setPaused({ key: activeKey, position })} key={activeKey} documentKey={activeKey} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} onClose={() => {setLocalRunner(false);document.querySelector<HTMLElement>('.code-pane .cm-content')?.focus();}} />}
       {judge.panel}
     </section>
     {settings && <SettingsHub initial={settings} languageStatus={languageStatus} onClose={() => setSettings(null)} actions={settingsActions} />}

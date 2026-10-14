@@ -1,3 +1,5 @@
+import { useResizablePanel } from "./resizable-panel";
+import type { DebugPosition } from "./debug-position";
 import { IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -6,9 +8,10 @@ import type { Language } from "./domain";
 type Snapshot = { documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "compiling", "running", "canceling"].includes(r.phase);
-export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine, onSettings }: {
-  documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (line: number) => void;
+export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
+  onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
 }) {
+  const resize=useResizablePanel("local",!hidden);
   const [input, setInput] = useState(sampleInput);
   const [pane, setPane] = useState<"run" | "debug">("run");
   const [result, setResult] = useState<Result | null>(null);
@@ -53,8 +56,9 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     finally { guard.current = false; }
   }
   const stale = snapshot && (snapshot.documentKey !== documentKey || snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
-  return <section className="local-runner" aria-label="本地运行">
-    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><div className="local-actions"><IconButton icon="settings" label="运行与调试设置" onClick={onSettings} /><IconButton icon="close" label="收起" onClick={onClose} /></div></header>
+  return <section ref={resize.panel} style={resize.style} hidden={hidden} className="local-runner resizable-panel" aria-label="本地运行">
+    {resize.handle}
+    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><div className="local-actions"><IconButton icon="settings" label="运行与调试设置" onClick={onSettings} /><IconButton icon="collapse" label="收起" onClick={onClose} /></div></header>
 
     <div data-runner-pane="run" hidden={pane !== "run"}>
     <label>测试输入<textarea aria-label="本地测试输入" value={input} onChange={e => setInput(e.target.value)} spellCheck={false} placeholder="" /></label>
@@ -69,6 +73,6 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
 
     {result && !busy(result) && <small className="exit-code" title="本地结果不代表通过力扣判题">退出码 {result.exitCode ?? "无"}</small>}
     </div>
-    <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel snapshot={{ documentKey, code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
+    <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel onReveal={()=>{setPane("debug");onReveal?.();}} snapshot={{ documentKey, code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
   </section>;
 }

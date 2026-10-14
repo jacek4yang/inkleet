@@ -1,5 +1,5 @@
 export type DebugVariable = { name: string; value: string; type?: string; variablesReference: number; namedVariables?: number; indexedVariables?: number; presentationHint?: { lazy?: boolean } };
-export type DebugFrame = { id: number; name: string; line: number; source?: { name?: string; path?: string } };
+export type DebugFrame = { id: number; name: string; line: number; column?: number; endLine?: number; endColumn?: number; inkleetSource?: boolean; source?: { name?: string; path?: string; sourceReference?: number } };
 export type DebugScope = { name: string; variablesReference: number; expensive?: boolean };
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const integer = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -19,8 +19,8 @@ export function debugFrames(value: unknown): DebugFrame[] {
   return list(value).slice(0, 64).flatMap(item => {
     if (!record(item) || !integer(item.id) || seen.has(item.id) || typeof item.name !== "string") return [];
     seen.add(item.id);
-    const source = record(item.source) ? {name: typeof item.source.name === "string" ? item.source.name.slice(0, 1024) : undefined, path: typeof item.source.path === "string" ? item.source.path.slice(0, 4096) : undefined} : undefined;
-    return [{id: item.id, name: item.name.slice(0, 200), line: integer(item.line) ? item.line : 0, source}];
+    const source = record(item.source) ? {name: typeof item.source.name === "string" ? item.source.name.slice(0, 1024) : undefined, sourceReference: integer(item.source.sourceReference) ? item.source.sourceReference : undefined, path: typeof item.source.path === "string" ? item.source.path.slice(0, 4096) : undefined} : undefined;
+    return [{id: item.id, name: item.name.slice(0, 200), line: integer(item.line) ? item.line : 0, column:integer(item.column)?item.column:undefined, endLine:integer(item.endLine)?item.endLine:undefined, endColumn:integer(item.endColumn)?item.endColumn:undefined, inkleetSource:typeof item.inkleetSource==="boolean"?item.inkleetSource:undefined, source}];
   });
 }
 export function debugScopes(value: unknown): DebugScope[] {

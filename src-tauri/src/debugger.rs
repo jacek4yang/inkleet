@@ -7,7 +7,9 @@ type Result<T>=std::result::Result<T,String>;
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct View{pub id:u64,pub phase:String,pub title:String,pub thread_id:Option<i64>,pub epoch:u64,pub output:String,pub truncated:bool,pub reason:String,pub error:String,pub breakpoints:Vec<Value>,pub capabilities:Value}
-struct Session{client:Mutex<Option<Arc<Client>>>,view:Arc<Mutex<View>>,source:PathBuf,source_code:String,language:String,evaluating:AtomicBool,operation:Mutex<()>,points_gate:Mutex<()>,_work:tempfile::TempDir,closed:Arc<AtomicBool>}
+struct TargetList{epoch:u64,thread:i64,frame:i64,ids:Vec<i64>}
+impl TargetList{fn permits(&self,epoch:u64,thread:i64,target:i64)->bool{self.epoch==epoch&&self.thread==thread&&self.frame>=0&&self.ids.contains(&target)}}
+struct Session{targets:Mutex<Option<TargetList>>,client:Mutex<Option<Arc<Client>>>,view:Arc<Mutex<View>>,source:PathBuf,source_code:String,language:String,evaluating:AtomicBool,operation:Mutex<()>,points_gate:Mutex<()>,_work:tempfile::TempDir,closed:Arc<AtomicBool>}
 impl Session{
     fn client(&self)->Result<Arc<Client>>{self.client.lock().map_err(|_|"调试连接不可用")?.clone().ok_or("调试器尚未连接".into())}
     fn stop(&self,reason:&str){
@@ -53,6 +55,7 @@ impl Debugger{
             let view=session.view.lock().map_err(|_|"调试状态不可用")?;
             if view.epoch!=epoch||view.phase!="paused"||session.closed.load(Ordering::Acquire){return Err("只能在当前暂停的调用栈中求值".into());}
         }
+        *session.targets.lock().map_err(|_|"步入目标不可用")?=None;
         // Explicit requests only; never replay an expression, which can call
         // user functions and change debuggee state. Kill on an uncertain timeout.
         let response=session.client()?.request("evaluate",json!({"expression":expression,"frameId":frame,"context":"watch"}),Duration::from_secs(3));
@@ -75,15 +78,30 @@ impl Debugger{
     }
     pub fn request(&self,id:u64,epoch:u64,kind:&str,reference:i64)->Result<Value>{
         let session=self.session(id)?;
-        let _operation=if matches!(kind,"next"|"stepIn"|"stepOut"|"continue"|"pause"){Some(session.operation.try_lock().map_err(|_|"已有调试操作正在处理")?)}else{None};
-        if session.evaluating.load(Ordering::Acquire)&&matches!(kind,"next"|"stepIn"|"stepOut"|"continue"|"pause"){return Err("请等待表达式完成，或停止调试".into());}
-        let (thread,phase)={
+        let _operation=if matches!(kind,"next"|"stepIn"|"stepInTarget"|"stepInTargets"|"stepOut"|"continue"|"pause"){Some(session.operation.try_lock().map_err(|_|"已有调试操作正在处理")?)}else{None};
+        if session.evaluating.load(Ordering::Acquire)&&matches!(kind,"next"|"stepIn"|"stepInTarget"|"stepOut"|"continue"|"pause"){return Err("请等待表达式完成，或停止调试".into());}
+        let (thread,phase,targets)={
             let view=session.view.lock().map_err(|_|"调试状态不可用")?;
             if view.epoch!=epoch{return Err("调试状态已经改变，请重试".into());}
-            (view.thread_id,view.phase.clone())
+            (view.thread_id,view.phase.clone(),view.capabilities["supportsStepInTargetsRequest"].as_bool()==Some(true))
         };
         let paused=phase=="paused";
+        if kind=="stepInTarget"{
+            let list=session.targets.lock().map_err(|_|"步入目标不可用")?.take();
+            if !list.is_some_and(|list|list.permits(epoch,thread.unwrap_or(-1),reference)){return Err("步入目标已失效，请重新选择".into());}
+        }else if matches!(kind,"next"|"stepIn"|"stepOut"|"continue"|"stepInTargets"){
+            *session.targets.lock().map_err(|_|"步入目标不可用")?=None;
+        }
+        if kind=="stepInTargets"{
+            if !paused||!targets{return Err("当前调试器不支持选择函数步入".into());}
+            let stack=session.client()?.request("stackTrace",json!({"threadId":thread.ok_or("暂停线程缺失")?,"startFrame":0,"levels":1}),Duration::from_secs(5))?;
+            if stack.pointer("/stackFrames/0/id").and_then(Value::as_i64)!=Some(reference){return Err("只能选择当前执行顶帧中的函数".into());}
+            let view=session.view.lock().map_err(|_|"调试状态不可用")?;
+            if view.epoch!=epoch||view.phase!="paused"{return Err("暂停位置已改变".into());}
+        }
         let args=match kind{
+            "stepInTargets" if paused&&targets&&reference>=0=>json!({"frameId":reference}),
+            "stepInTarget" if paused&&targets&&reference>=0=>json!({"threadId":thread.ok_or("暂停线程缺失")?,"targetId":reference}),
             "threads" if paused=>json!({}),
             "stackTrace" if paused=>json!({"threadId":if reference>0{reference}else{thread.ok_or("暂停线程缺失")?},"startFrame":0,"levels":64}),
             "scopes" if paused&&reference>=0=>json!({"frameId":reference}),
@@ -92,19 +110,34 @@ impl Debugger{
             "pause" if phase=="running"=>json!({"threadId":thread.unwrap_or(1)}),
             _=>return Err("当前调试状态不支持该操作".into())
         };
-        let response=session.client()?.request(kind,args,Duration::from_secs(10))?;
+        let mut response=session.client()?.request(if kind=="stepInTarget"{"stepIn"}else{kind},args,Duration::from_secs(10))?;
+        if kind=="stackTrace" {
+            if let Some(frames)=response.get_mut("stackFrames").and_then(Value::as_array_mut){
+                for frame in frames {
+                    let matches=frame.pointer("/source/sourceReference").and_then(Value::as_i64).unwrap_or(0)==0 && frame.pointer("/source/path").and_then(Value::as_str)
+                        .and_then(|path|std::fs::canonicalize(path).ok())
+                        .zip(std::fs::canonicalize(&session.source).ok())
+                        .is_some_and(|(actual,owned)|actual==owned);
+                    frame["inkleetSource"]=json!(matches);
+                }
+            }
+        }
         // A successful resume request need not emit ContinuedEvent. Never overwrite
         // a newer stopped/terminated event that arrived before the response.
-        if matches!(kind,"next"|"stepIn"|"stepOut"|"continue"){
+        if matches!(kind,"next"|"stepIn"|"stepInTarget"|"stepOut"|"continue"){
             self.session(id)?;
             if !session.closed.load(Ordering::Acquire){
                 let mut view=session.view.lock().map_err(|_|"调试状态不可用")?;
                 resume_acknowledged(&mut view,epoch);
             }
         }
-        if matches!(kind,"threads"|"stackTrace"|"scopes"|"variables"){
+        if matches!(kind,"threads"|"stackTrace"|"scopes"|"variables"|"stepInTargets"){
             self.session(id)?;
             if session.closed.load(Ordering::Acquire)||session.view.lock().map_err(|_|"调试状态不可用")?.epoch!=epoch{return Err("忽略上一次暂停的结果".into());}
+        }
+        if kind=="stepInTargets"{
+            let ids=response.get("targets").and_then(Value::as_array).map(|items|items.iter().take(100).filter_map(|item|item.get("id").and_then(Value::as_i64).filter(|id|*id>=0)).collect()).unwrap_or_default();
+            *session.targets.lock().map_err(|_|"步入目标不可用")?=Some(TargetList{epoch,thread:thread.ok_or("暂停线程缺失")?,frame:reference,ids});
         }
         Ok(response)
     }
@@ -127,7 +160,7 @@ pub async fn start(app:tauri::AppHandle,snapshot:crate::local_run::Snapshot,line
         let root=inkleet_managed_env::process::tool_path(&std::fs::canonicalize(work.path()).map_err(|_|"无法解析调试目录")?);
         let source=root.join(match snapshot.language.as_str(){"golang"=>"solution.go","cpp"=>"solution.cpp","c"=>"solution.c","rust"=>"solution.rs","java"=>"Solution.java",_=>"solution.py"});
         let id=state.next.fetch_add(1,Ordering::Relaxed);
-        let session=Arc::new(Session{
+        let session=Arc::new(Session{targets:Mutex::new(None),
             client:Mutex::new(None),view:Arc::new(Mutex::new(View{id,phase:if snapshot.language!="python3"{"compiling"}else{"starting"}.into(),title:snapshot.title.clone(),thread_id:None,epoch:0,output:String::new(),truncated:false,reason:String::new(),error:String::new(),breakpoints:Vec::new(),capabilities:json!({})})),
             source,source_code:snapshot.code.clone(),language:snapshot.language.clone(),evaluating:AtomicBool::new(false),operation:Mutex::new(()),points_gate:Mutex::new(()),_work:work,closed:Arc::new(AtomicBool::new(false))
         });
@@ -282,7 +315,7 @@ fn validate_expression(frame:i64,expression:&str)->Result<()>{
 
 fn capability_flags(value:&Value)->Value{
     let mut flags=serde_json::Map::new();
-    for name in ["supportsConditionalBreakpoints","supportsHitConditionalBreakpoints","supportsLogPoints","supportsStepInTargetsRequest","supportsSingleThreadExecutionRequests","supportsEvaluateForHovers","supportsSetVariable","supportsSetExpression","supportsRestartFrame","supportsExceptionInfoRequest"]{
+    for name in ["supportsConditionalBreakpoints","supportsHitConditionalBreakpoints","supportsLogPoints","supportsStepInTargetsRequest","supportsSteppingGranularity","supportsSingleThreadExecutionRequests","supportsEvaluateForHovers","supportsSetVariable","supportsSetExpression","supportsRestartFrame","supportsExceptionInfoRequest"]{
         flags.insert(name.into(),json!(value.get(name).and_then(Value::as_bool).unwrap_or(false)));
     }
     Value::Object(flags)
@@ -315,4 +348,13 @@ fn resume_acknowledged(view:&mut View,requested_epoch:u64){
             resume_acknowledged(&mut view,3);assert_eq!(view.phase,phase);assert_eq!(view.epoch,5);
         }
     }
+}
+
+#[cfg(test)]mod target_tests{
+ use super::*;
+ #[test]fn targets_are_bound_to_pause_thread_and_adapter_membership(){
+  let list=TargetList{epoch:3,thread:7,frame:0,ids:vec![0,9]};
+  assert!(list.permits(3,7,0));assert!(list.permits(3,7,9));
+  assert!(!list.permits(4,7,9));assert!(!list.permits(3,8,9));assert!(!list.permits(3,7,8));assert!(!list.permits(3,7,-1));
+ }
 }
