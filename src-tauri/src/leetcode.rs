@@ -8,7 +8,7 @@ use std::time::Duration;
 const ENDPOINT: &str = "https://leetcode.cn/graphql/";
 const LIST_QUERY: &str = r#"query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
   problemsetQuestionList(categorySlug: $categorySlug, limit: $limit, skip: $skip, filters: $filters) {
-    hasMore total questions { frontendQuestionId title titleCn titleSlug difficulty paidOnly }
+    hasMore total questions { frontendQuestionId title titleCn titleSlug difficulty paidOnly status }
   }
 }"#;
 const QUESTION_QUERY: &str = r#"query questionData($titleSlug: String!) {
@@ -27,6 +27,7 @@ pub struct Identity { pub username: String, pub account: String, pub persistence
 pub struct QuestionSummary {
     pub frontend_question_id: String, pub title: String, pub title_cn: Option<String>,
     pub title_slug: String, pub difficulty: String, pub paid_only: bool,
+    #[serde(default)] pub status: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +59,21 @@ fn decode_data(bytes: &[u8]) -> Result<Value, String> {
         return Err("中国站接口返回错误；接口可能变化或需要登录".into());
     }
     response.get("data").filter(|d| d.is_object()).cloned().ok_or("中国站响应缺少数据".into())
+}
+fn search_filters(keyword: &str, offset: u32, difficulty: Option<&str>, status: Option<&str>, authenticated: bool) -> Result<Value,String> {
+    if keyword.chars().count() > 100 || offset > 100_000 || offset % 25 != 0 { return Err("搜索参数超出限制".into()); }
+    let mut filters = serde_json::Map::new();
+    if !keyword.trim().is_empty() { filters.insert("searchKeywords".into(), json!(keyword.trim())); }
+    if let Some(value) = difficulty.filter(|s| !s.is_empty()) {
+        if !matches!(value, "EASY" | "MEDIUM" | "HARD") { return Err("题目难度无效".into()); }
+        filters.insert("difficulty".into(),json!(value));
+    }
+    if let Some(value) = status.filter(|s| !s.is_empty()) {
+        if !authenticated { return Err("登录后才能筛选完成状态".into()); }
+        if !matches!(value, "AC" | "TRIED" | "NOT_STARTED") { return Err("完成状态筛选无效".into()); }
+        filters.insert("status".into(),json!(value));
+    }
+    Ok(Value::Object(filters))
 }
 impl Leetcode {
     pub fn new() -> Result<Self, String> {
@@ -110,13 +126,23 @@ impl Leetcode {
         Ok(Identity { username: username.into(), account: slug.into(), persistence: "memory-only".into() })
     }
     pub async fn search(&self, keyword: &str, offset: u32) -> Result<QuestionList, String> {
-        if keyword.chars().count() > 100 || offset > 100_000 { return Err("搜索参数超出限制".into()); }
-        let data = self.query(LIST_QUERY, json!({
-            "categorySlug": "", "limit": 25, "skip": offset,
-            "filters": if keyword.trim().is_empty() { json!({}) } else { json!({"searchKeywords": keyword.trim()}) }
-        })).await?;
-        serde_json::from_value(data.get("problemsetQuestionList").cloned().unwrap_or(Value::Null))
-            .map_err(|_| "题目列表格式变化，请更新应用".into())
+        self.search_filtered(keyword, offset, None, None, None).await
+    }
+    pub async fn search_filtered(&self, keyword: &str, offset: u32, difficulty: Option<&str>, status: Option<&str>, session: Option<(&str,&str)>) -> Result<QuestionList, String> {
+        let filters = search_filters(keyword, offset, difficulty, status, session.is_some())?;
+        let data = self.query_with_session(LIST_QUERY, json!({
+            "categorySlug": "", "limit": 25, "skip": offset, "filters": filters
+        }), session).await?;
+        let mut list: QuestionList = serde_json::from_value(data.get("problemsetQuestionList").cloned().unwrap_or(Value::Null))
+            .map_err(|_| "题目列表格式变化，请更新应用".to_owned())?;
+        if list.questions.len() > 25 || list.total > 1_000_000 || list.questions.iter().any(|q| validate_slug(&q.title_slug).is_err() || q.frontend_question_id.len() > 40 || q.title.len() > 1024 || q.title_cn.as_ref().is_some_and(|s| s.len() > 1024) || !matches!(q.difficulty.as_str(), "Easy" | "Medium" | "Hard")) {
+            return Err("题目列表字段超出支持范围".into());
+        }
+        for q in &mut list.questions {
+            if session.is_none() { q.status = None; }
+            else if q.status.as_deref().is_some_and(|s| !matches!(s, "AC" | "TRIED")) { return Err("完成状态格式变化，请更新应用".into()); }
+        }
+        Ok(list)
     }
     pub async fn question(&self, slug: &str) -> Result<Question, String> {
         validate_slug(slug)?;
@@ -133,6 +159,16 @@ impl Leetcode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn list_filters_are_bounded_and_account_scoped() {
+        assert_eq!(search_filters(" two sum ", 25, Some("EASY"), Some("AC"), true).unwrap(), json!({"searchKeywords":"two sum","difficulty":"EASY","status":"AC"}));
+        assert!(search_filters("",0,None,Some("AC"),false).is_err());
+        assert!(search_filters("",1,None,None,false).is_err());
+        assert!(search_filters("",0,Some("easy"),None,false).is_err());
+        assert!(search_filters("",0,None,Some("anything"),true).is_err());
+        assert!(search_filters(&"字".repeat(101),0,None,None,false).is_err());
+        assert_eq!(search_filters("",0,Some(""),Some(""),false).unwrap(),json!({}));
+    }
     #[test]
     fn slug_cannot_change_destination() {
         for bad in ["", "../x", "https://example.com", "a?x=1", "x/y"] { assert!(validate_slug(bad).is_err()); }
@@ -159,6 +195,9 @@ mod tests {
             }
             let list = api.search("two sum", 0).await.expect("public Chinese search protocol");
             assert!(list.total > 0 && !list.questions.is_empty());
+            assert!(list.questions.iter().all(|q| q.status.is_none()));
+            let easy = api.search_filtered("",0,Some("EASY"),None,None).await.expect("live public difficulty filter");
+            assert!(!easy.questions.is_empty() && easy.questions.iter().all(|q| q.difficulty == "Easy"));
         });
     }
 

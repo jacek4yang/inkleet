@@ -127,11 +127,11 @@ def screenshot(name):
         with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
             log.write(f"WebKit screenshot reset; captured real X11 desktop instead: {name}\n")
         subprocess.run(["scrot", str(evidence/name)], check=True)
-def start():
+def start(empty=False):
     global session
     result = request("POST","/session",{"capabilities":{"alwaysMatch":{"browserName":"wry","tauri:options":{"application":str(pathlib.Path(os.environ.get("INKLEET_TEST_BINARY", "src-tauri/target/debug/inkleet")).resolve())}}}})
     session = result["sessionId"]
-    wait_for(lambda: "已读取本机文件" in text('.statusbar[role="status"]'), "native IPC initial load")
+    wait_for(lambda: ("选择题目" if empty else "已读取本机文件") in text('.statusbar[role="status"]'), "native IPC initial load")
 def stop():
     global session
     if session:
@@ -140,11 +140,20 @@ def stop():
 driver = subprocess.Popen(["tauri-driver"], stdout=open(evidence/"driver.log","w"), stderr=subprocess.STDOUT)
 try:
     wait_for(lambda: request("GET","/status"), "driver ready")
+    start(empty=True)
+    assert not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="代码编辑器"]'}), "fresh installation must not create a sample document"
+    assert "整数数组求和" not in text("body") and "寻找最大值" not in text("body")
+    screenshot("empty-real-workspace-native.png")
+    stop()
+    # Isolated authored regression fixture enters only via the real cache format.
+    cache_path=pathlib.Path(os.environ["XDG_CACHE_HOME"])/"top.jacek.inkleet/public-questions.json"
+    cache_path.parent.mkdir(parents=True,exist_ok=True)
+    cache_path.write_text(pathlib.Path("tests/fixtures/public-questions.json").read_text())
     start()
     code = '[aria-label="代码编辑器"]'
     marker = "// native restart persistence"
     fill(code, marker)
-    source = data / "top.jacek.inkleet/notebook/sample-sum/solution.rs"
+    source = data / "top.jacek.inkleet/notebook/lc-900000001/solution.rs"
     wait_for(lambda: source.exists() and source.read_text() == marker, "plain source persisted")
     wait_for(lambda: "已保存到本机文件" in text('.statusbar[role="status"]'), "save acknowledgement")
     screenshot("desktop-code-native.png")
@@ -402,7 +411,7 @@ try:
         click('[data-action="local-execute"]')
         wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),"Java private compilation and exact typed result",seconds=150)
         screenshot("java-local-run-native.png")
-        java_saved=data/"top.jacek.inkleet/notebook/sample-sum/solution.java"
+        java_saved=data/"top.jacek.inkleet/notebook/lc-900000001/solution.java"
         wait_for(lambda: java_saved.exists() and java_saved.read_text()==java_solution,"Java run preserves original saved source")
         (evidence/"JAVA_LOCAL_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK compiles the typed Java Solution harness, computes exact value 10 and preserves original draft. No debugger or online verdict.\n")
         click('[data-local-tab="debug"]')
@@ -490,7 +499,7 @@ try:
                 click('[data-action="local-execute"]')
                 wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),f"{group} private compilation and typed local result",seconds=280)
                 screenshot(group+"-local-run-native.png")
-                saved_solution=data/("top.jacek.inkleet/notebook/sample-sum/solution."+({"golang":"go","cpp":"cpp","c":"c","rust":"rs"}[group]))
+                saved_solution=data/("top.jacek.inkleet/notebook/lc-900000001/solution."+({"golang":"go","cpp":"cpp","c":"c","rust":"rs"}[group]))
                 wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
                 (evidence/(group.upper()+"_LOCAL_GUI_RESULT.txt")).write_text(f"PASS: actual Linux GUI compiles a {group} solution using its private downloaded toolchain, executes the bounded typed harness and returns exact value 10. No online judge verdict.\n")
                 click('[data-local-tab="debug"]')
@@ -544,7 +553,7 @@ try:
         if outcome=="blocked":
             screenshot("public-unavailable-native.png")
             assert text(code)==marker, "Denied search changed current editor draft"
-            preserved=data/"top.jacek.inkleet/notebook/sample-sum/solution.rs"
+            preserved=data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs"
             wait_for(lambda: preserved.read_text()==marker,"Denied search preserves saved source")
             click(".catalogue-heading button")
             raise PublicServiceUnavailable(reason)
@@ -596,6 +605,8 @@ try:
         driver = subprocess.Popen(["tauri-driver"], stdout=open(evidence/"driver-offline.log","w"), stderr=subprocess.STDOUT)
         wait_for(lambda: request("GET","/status"), "offline driver ready")
         start()
+        recent_tab=cmd("POST","/element",{"using":"xpath","value":"//aside[@aria-label='题目导航']//button[text()='最近']"})[EID]
+        cmd("POST",f"/element/{recent_tab}/click",{})
         wait_for(lambda: element('[data-problem="lc-1"]'), "cached question restored without live search")
         click('[data-problem="lc-1"]')
         wait_for(lambda: "两数之和" in text("article h1"), "cached Chinese statement restored")

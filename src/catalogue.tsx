@@ -10,11 +10,21 @@ export type RemoteQuestion = {
   exampleTestcases: string | null; metaData: string | null;
   codeSnippets: { langSlug: string; code: string }[] | null;
 };
-type Summary = {
+export type QuestionSummary = {
   frontendQuestionId: string; title: string; titleCn: string | null;
-  titleSlug: string; difficulty: string; paidOnly: boolean;
+  titleSlug: string; difficulty: string; paidOnly: boolean; status?: "AC" | "TRIED" | null;
 };
-type Result = { questions: Summary[]; total: number; hasMore: boolean };
+export type QuestionList = { questions: QuestionSummary[]; total: number; hasMore: boolean };
+type Result = QuestionList;
+
+export async function readQuestion(slug: string) {
+  const fetched = await invoke<{ question: RemoteQuestion; cacheWarning: string | null; fromCache?: boolean }>("get_question", { slug });
+  const data = fetched.question;
+  if (!/^[0-9]{1,20}$/.test(data.questionId)) throw new Error("题目标识格式变化，未创建本机文件");
+  if (data.titleSlug !== slug) throw new Error("返回的题目与链接不一致，未切换题目");
+  if (!data.translatedContent && !data.content) throw new Error("题面不可访问，可能需要会员权限");
+  return fetched;
+}
 
 // 题面是不可信远程 HTML。仅保留排版，无脚本、表单、链接导航、远程资源或自定义元素。
 export function QuestionStatement({ question }: { question: RemoteQuestion }) {
@@ -80,12 +90,9 @@ export function Catalogue({ onChoose, onClose, initialMode = "search" }: {
   async function choose(slug: string) {
     const token = beginRequest(); if (token === null) return;
     try {
-      const fetched = await invoke<{ question: RemoteQuestion; cacheWarning: string | null; fromCache?: boolean }>("get_question", { slug });
+      const fetched = await readQuestion(slug);
       if (token !== generation.current) return;
       const data = fetched.question;
-      if (!/^[0-9]{1,20}$/.test(data.questionId)) throw new Error("题目标识格式变化，未创建本机文件");
-      if (data.titleSlug !== slug) throw new Error("返回的题目与链接不一致，未切换题目");
-      if (!data.translatedContent && !data.content) throw new Error("题面不可访问，可能需要会员权限");
       onChoose(data, fetched.cacheWarning, fetched.fromCache ?? false); close();
     } catch (e) { if (token === generation.current) setError(String(e)); }
     finally { endRequest(token); }
@@ -107,7 +114,7 @@ export function Catalogue({ onChoose, onClose, initialMode = "search" }: {
         <input key="search" autoFocus aria-label="搜索中国站题目" placeholder="题号、名称或关键词" maxLength={100} value={keyword} onChange={e => { invalidate(); setKeyword(e.target.value); }} />}
       <button disabled={busy} type="submit">{busy ? "读取中…" : mode === "link" ? "打开题目" : "搜索"}</button>
     </form>
-    <p className="muted">{mode === "link" ? "支持中国站题面、题解、该题提交记录和竞赛题目链接。只取题目标识，忽略分享参数；不打开网页、不上传代码或笔记。" : "按需从 leetcode.cn 读取公开题目，不上传代码或笔记。空关键词可浏览题库。"}</p>
+
     {error && <p role="alert" className="error">{error}</p>}
     {mode === "search" && <>
       <div className="catalogue-results" aria-busy={busy}>
