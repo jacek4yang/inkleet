@@ -134,7 +134,7 @@ def focus_code_editor():
 def click(css):
     # Only known visible transport-sensitive controls use one OS click.
     # WebDriver retains auto-scroll for other controls and native options.
-    if css in (".pane-heading .actions button", '[data-action="local-execute"]'):
+    if css in (".pane-heading .actions button", '[data-action="local-execute"]', '[data-action="open-settings"]'):
         return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
