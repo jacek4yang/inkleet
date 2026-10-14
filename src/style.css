@@ -293,3 +293,5 @@ select:not([multiple]):not([size]):focus-visible{outline:1px solid #ae735280;out
 select:disabled{opacity:.5;cursor:not-allowed}
 select option,select optgroup{background:#faf9f5;color:#302b26}
 @media(forced-colors:active){select:not([multiple]):not([size]){appearance:auto;background-image:none;border:1px solid ButtonText;padding-right:7px}}
+
+.user-manual{width:min(760px,94vw);max-height:86vh;padding:0;border:1px solid #ded8cf;border-radius:6px;background:#faf9f5;color:#302b26}.user-manual>header{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid #e5ded5}.user-manual h2{font-size:14px}.user-manual>.notes-preview{padding:16px 28px}.user-manual::backdrop{background:#302b2630}.settings-hub>header>h2{margin-right:auto}

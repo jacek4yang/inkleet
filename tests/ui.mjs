@@ -767,7 +767,10 @@ try {
   assert.match(await runPanel.innerText(), /9007199254740993/);
   assert.match(await runPanel.locator(".exit-code").getAttribute("title"), /不代表通过力扣判题/, "local result distinction remains available on hover");
   await runPanel.getByRole("button", { name: "运行与调试设置", exact: true }).click();
-  await runPage.getByRole("dialog", { name: "设置", exact: true }).getByText(/本地输出不代表力扣判题结果/).waitFor();
+  assert.equal(await runPage.getByRole("dialog",{name:"设置",exact:true}).locator(".settings-reference").count(),0);
+  await runPage.getByRole("button",{name:"使用手册",exact:true}).click();
+  await runPage.getByRole("dialog",{name:"使用手册",exact:true}).getByText(/本地输出不代表力扣判题结论/).waitFor();
+  await runPage.getByRole("button",{name:"关闭使用手册",exact:true}).click();
   await runPage.getByRole("button", { name: "关闭设置", exact: true }).click();
 
   await runPanel.locator('[data-local-tab="debug"]').click();
