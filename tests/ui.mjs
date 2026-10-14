@@ -1478,7 +1478,7 @@ try {
     const {languageIntelligence}=await import("/src/intelligence.ts");
     const {rust}=await import("/node_modules/.vite/deps/@codemirror_lang-rust.js");
     const {HighlightStyle,syntaxHighlighting,defaultHighlightStyle}=await import("/node_modules/.vite/deps/@codemirror_language.js");
-    const state=window.__semanticTest={version:1,requests:0,active:0,maxActive:0,defer:false,reply:null,revision:0,fail:true};
+    const state=window.__semanticTest={version:1,requests:0,active:0,maxActive:0,defer:true,reply:null,revision:0,fail:true};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
       if(command==="start_language_service")return {id:91,version:1,server:"fixture",uri:"file:///solution.rs",semanticTokens:true};
@@ -1489,7 +1489,7 @@ try {
         state.requests++;state.active++;state.maxActive=Math.max(state.active,state.maxActive);
         try{
           if(state.fail){state.fail=false;throw Error("Indexing fixture");}
-          const result={version:args.version,tokens:[{line:0,start:0,end:3,kind:"function",modifiers:[]}]};
+          const result={version:args.version,tokens:[{line:0,start:3,end:6,kind:"function",modifiers:[]}]};
           if(state.defer)return await new Promise(resolve=>{state.reply=()=>resolve(result);});
           return result;
         }finally{state.active--;}
@@ -1497,19 +1497,20 @@ try {
       throw Error("Unexpected semantic IPC "+command);
     }};
     const client=languageIntelligence("rust",()=>{},()=>{});
-    const view=new EditorView({state:EditorState.create({doc:"foo()",extensions:[rust(),syntaxHighlighting(HighlightStyle.define(defaultHighlightStyle.specs.map(spec=>({...spec,color:"#ff0000"})))),client.extensions]}),parent:document.querySelector("#editor")});
+    const view=new EditorView({state:EditorState.create({doc:"fn foo() {}",extensions:[rust(),syntaxHighlighting(HighlightStyle.define(defaultHighlightStyle.specs.map(spec=>({...spec,color:"#ff0000"})))),client.extensions]}),parent:document.querySelector("#editor")});
     window.__semanticTest.client=client;window.__semanticTest.view=view;
     await client.connect(view);
   });
-  await semanticPage.waitForFunction(()=>window.__semanticTest.requests===1);
-  assert.equal(await semanticPage.locator(".cm-line span").first().evaluate(el=>getComputedStyle(el).color),"rgb(255, 0, 0)","real lexical highlight exists before semantic reply");
+  await semanticPage.waitForFunction(()=>typeof window.__semanticTest.reply==="function");
+  assert.equal(await semanticPage.locator(".cm-line span").filter({hasText:/^foo$/}).first().evaluate(el=>getComputedStyle(el).color),"rgb(255, 0, 0)","real lexical highlight exists before semantic reply");
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=false;s.reply();s.reply=null;});
   await semanticPage.locator(".cm-semantic-function").waitFor();
   assert.equal(await semanticPage.locator(".cm-semantic-function").evaluate(el=>getComputedStyle(el).color),"rgb(76, 114, 140)","semantic mark overrides actual Lezer lexical highlighting");
   assert.equal(await semanticPage.evaluate(()=>window.__semanticTest.requests),2,"bounded readiness retry recovers without edits");
-  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=true;s.view.dispatch({changes:{from:0,to:3,insert:"bar"}});});
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=true;s.view.dispatch({changes:{from:3,to:6,insert:"bar"}});});
   assert.equal(await semanticPage.locator(".cm-semantic").count(),0,"edit clears semantic classification immediately");
   await semanticPage.waitForFunction(()=>typeof window.__semanticTest.reply==="function");
-  await semanticPage.evaluate(()=>{const s=window.__semanticTest;for(const text of ["baz","qux","end"])s.view.dispatch({changes:{from:0,to:3,insert:text}});});
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;for(const text of ["baz","qux","end"])s.view.dispatch({changes:{from:3,to:6,insert:text}});});
   await semanticPage.waitForTimeout(400);
   assert.equal(await semanticPage.evaluate(()=>window.__semanticTest.maxActive),1);
   await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=false;s.reply();s.reply=null;});
@@ -1518,7 +1519,7 @@ try {
   const beforeRefresh=await semanticPage.evaluate(()=>window.__semanticTest.requests);
   await semanticPage.evaluate(()=>window.__semanticTest.revision++);
   await semanticPage.waitForFunction(count=>window.__semanticTest.requests>count,beforeRefresh);
-  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=true;s.view.dispatch({changes:{from:0,to:3,insert:"new"}});});
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=true;s.view.dispatch({changes:{from:3,to:6,insert:"new"}});});
   await semanticPage.waitForFunction(()=>typeof window.__semanticTest.reply==="function");
   await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.client.destroy();s.reply();s.view.destroy();});
   await semanticPage.waitForTimeout(500);
