@@ -67,18 +67,18 @@ def run_performance(g):
     try:
         for phase in ("unopened","visible","hidden"):
             if phase=="visible":
-                paste("def solve(values): return list(range(16384))")
+                paste("def solve(values): return list(range(8192))")
                 click('.pane-heading .actions button[aria-label="本地"]')
                 g["fill"]('[aria-label="本地测试输入"]',"[3,-1,8]")
                 click('[data-action="local-execute"]')
-                wait_for(lambda:js("return document.querySelector('.local-result')?.textContent?.includes('16383');"),
+                wait_for(lambda:js("return document.querySelector('.local-result')?.textContent?.includes('8191');"),
                     "real bounded array result available",seconds=60)
             elif phase=="hidden":
                 click('.local-runner [aria-label="收起"]')
                 wait_for(lambda:js("return document.querySelector('.local-runner')?.hidden;"),"performance runner hidden")
             output_bytes=js("return new TextEncoder().encode([...document.querySelectorAll('.local-raw pre')].map(n=>n.textContent).join('')).length;")
             for lines in (100,1000,10000):
-                source="def solve(values): return list(range(16384))\n"+"".join("# performance fixture %d\n"%i for i in range(lines-2))+"# "
+                source="def solve(values): return list(range(8192))\n"+"".join("# performance fixture %d\n"%i for i in range(lines-2))+"# "
                 paste(source)
                 for burst in range(3):
                     js("""

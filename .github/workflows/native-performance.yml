@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: native-performance-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   native-performance:
     runs-on: ubuntu-24.04
