@@ -53,7 +53,7 @@ def cmd(method, path, payload=None):
         return request(method, f"/session/{session}" + path, payload)
 def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
 def text(css):
-    suffix = "/attribute/data-status" if css == ".lsp-status" else "/text"
+    suffix = "/attribute/data-status" if css == ".lsp-status" else "/attribute/data-storage-state" if css == '.statusbar[role="status"]' else "/text"
     return cmd("GET",f"/element/{element(css)}" + suffix)
 def settings_action(category, css):
     click('[data-action="open-settings"]')

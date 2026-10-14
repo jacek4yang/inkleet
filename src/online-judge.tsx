@@ -111,8 +111,7 @@ export function useOnlineJudge({ identity, question, language, code }: {
   }
   const stale = current && (current.snapshot.code !== code || (current.snapshot.kind === "online-run" && current.snapshot.testCase !== input));
   const panel = question && <>
-    <div className="judge-toggle"><button onClick={() => setOpen(!open)}>{open ? "收起测试与结果" : "测试用例与结果"}</button>
-      <span>{identity ? "仅点击运行或提交时上传代码" : "在线评测需要登录中国站"}</span></div>
+    <div className="judge-toggle"><button onClick={() => setOpen(!open)}>{open ? "收起测试与结果" : "测试用例与结果"}</button></div>
     {open && <section className="judge-panel" aria-label="在线评测">
       <label>测试用例<textarea aria-label="在线测试用例" spellCheck={false} value={input} onChange={e => setCases(old => ({ ...old, [question.questionId]: e.target.value }))} /></label>
       {phase && <p role="status">{phase}</p>}

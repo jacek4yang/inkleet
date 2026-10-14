@@ -58,6 +58,7 @@ try {
   await cataloguePage.locator('.question-sidebar [data-slug="inkleet-test-fixture"]').click();
   await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).waitFor();
   await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).fill("// retained while filtering");
+  assert.equal(await cataloguePage.getByRole("combobox",{name:"题目难度"}).evaluate(node => getComputedStyle(node).appearance),"none","compact select keeps semantic native control with quiet appearance");
   await cataloguePage.getByRole("combobox",{name:"题目难度"}).selectOption("EASY");
   await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===2);
   await cataloguePage.getByRole("textbox",{name:"搜索题目",exact:true}).fill("new");
@@ -922,7 +923,9 @@ try {
   });
   await conflictPage.goto("http://127.0.0.1:5173");
   const conflictEditor = conflictPage.getByRole("textbox", { name: "代码编辑器", exact: true });
-  await conflictPage.getByText("已读取本机文件", { exact: true }).waitFor();
+  await conflictPage.locator('.statusbar[data-storage-state="已读取本机文件"]').waitFor();
+  assert.equal(await conflictPage.locator(".statusbar").innerText(),"","successful file loading adds no persistent sentence");
+  assert.equal(await conflictPage.getByText("在线评测需要登录中国站",{exact:true}).count(),0,"login explanation is not permanent workbench clutter");
   await conflictPage.evaluate(() => { window.__conflictTest.file = "external"; });
   await conflictEditor.fill("local draft");
   await conflictPage.locator('[data-action="review-code-conflict"]').waitFor();
@@ -996,7 +999,7 @@ try {
     }};
   });
   await externalPage.goto("http://127.0.0.1:5173");
-  await externalPage.getByText("已读取本机文件", { exact: true }).waitFor();
+  await externalPage.locator('.statusbar[data-storage-state="已读取本机文件"]').waitFor();
   await externalPage.getByRole("button", { name: "笔记", exact: true }).click();
   const externalNote = externalPage.getByRole("textbox", { name: "Markdown 笔记", exact: true });
   await externalNote.fill("# Saved");
