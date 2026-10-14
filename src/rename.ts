@@ -1,6 +1,6 @@
 import { isolateHistory } from "@codemirror/commands";
 import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
-import { EditorView, keymap, showTooltip, type Tooltip } from "@codemirror/view";
+import { EditorView, keymap, showTooltip, repositionTooltips, type Tooltip } from "@codemirror/view";
 
 type Request = (pos: number, doc: Text, name: string) => Promise<unknown>;
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -71,7 +71,7 @@ export function renameSymbol(
       const review=document.createElement("section"); review.className="lsp-rename-preview";review.hidden=true;review.setAttribute("aria-label","重命名预览");
       const heading=document.createElement("div");heading.className="lsp-rename-summary";heading.tabIndex=-1;
       const rows=document.createElement("div");rows.className="lsp-rename-changes";
-      const commit=document.createElement("button");commit.type="button";commit.textContent="应用";
+      const commit=document.createElement("button");commit.type="button";commit.textContent="应用";commit.dataset.action="rename-apply";
       const back=document.createElement("button");back.type="button";back.textContent="返回";
       review.append(heading,rows,commit,back);
       const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "取消"; cancel.onclick = dismiss;
@@ -101,7 +101,10 @@ export function renameSymbol(
         }
         const restore=dom.contains(document.activeElement);
         proposed=changes;heading.textContent="本题源码 · "+changes.length+" 处修改";
-        editing.hidden=true;review.hidden=false;review.append(cancel);if(restore)heading.focus();
+        dom.style.visibility="hidden";
+        editing.hidden=true;review.hidden=false;review.append(cancel);
+        repositionTooltips(view);
+        view.requestMeasure({read:()=>null,write:()=>{if(current()&&dom.isConnected){dom.style.visibility="";if(restore&&dom.contains(document.activeElement))heading.focus();}}});
       }
       async function submit(previewOnly:boolean){
         if(!ready||pending||composing||view.composing||!current()||!review.hidden)return;

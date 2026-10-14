@@ -511,7 +511,19 @@ try:
         assert text(code)=="def solve(values): return sum(values)","preview must leave original source unchanged"
         assert len(cmd("POST","/elements",{"using":"css selector","value":".lsp-rename-change"}))==2,"both semantic occurrences are previewed"
         screenshot("python-rename-preview-native.png")
-        click(".lsp-rename-preview button:first-of-type")
+        apply_selector='[data-action="rename-apply"]'
+        last_rect=None
+        stable_samples=0
+        def stable_rename_apply():
+            global last_rect, stable_samples
+            target=element(apply_selector)
+            if not cmd("GET",f"/element/{target}/displayed"): return False
+            rect=cmd("GET",f"/element/{target}/rect")
+            stable_samples=stable_samples+1 if rect==last_rect else 0
+            last_rect=rect
+            return stable_samples>=2
+        wait_for(stable_rename_apply,"rename Apply has stable visible geometry")
+        click(apply_selector)
         wait_for(lambda:text(code)=="def solve(previewed): return sum(previewed)","reviewed rename applied")
         focus_code_editor()
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
