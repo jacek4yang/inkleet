@@ -841,7 +841,12 @@ try:
                     wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashMap exposes two logical pairs")
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"], '+map_node+' button[aria-label="[raw]"]'}),"internal map layout hidden by default"
                     pair_buttons=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-variable > button'})
-                    for pair in pair_buttons: cmd("POST",f"/element/{pair[EID]}/click",{})
+                    pair_names=[cmd("GET",f"/element/{pair[EID]}/attribute/aria-label") for pair in pair_buttons]
+                    for pair_name in pair_names:
+                        pair_selector=map_node+' > .debug-tree-children > .debug-tree-node:has(> .debug-variable > button[aria-label="'+pair_name+'"])'
+                        click(pair_selector+' > .debug-variable > button')
+                        wait_for(lambda:cmd("GET",f"/element/{element(pair_selector+' > .debug-variable > button')}/attribute/aria-expanded")=="true","pair visibly expanded")
+                        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":pair_selector+' > .debug-tree-children > .debug-tree-node > .debug-variable > code'}))==2,"pair children loaded before next layout-dependent click")
                     def map_values():
                         nodes=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-tree-children > .debug-tree-node > .debug-variable > code'})
                         return sorted(cmd("GET",f"/element/{item[EID]}/text") for item in nodes)
