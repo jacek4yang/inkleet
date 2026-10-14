@@ -74,9 +74,21 @@ export function debugGutter(initial: number[], onChange: (lines: number[]) => vo
   return {
     extensions: [
       points, line, pointer,
+      EditorView.decorations.compute([points],state=>{
+        const marks:ReturnType<Decoration["range"]>[]=[];
+        state.field(points).between(0,state.doc.length,from=>{marks.push(Decoration.line({class:"cm-breakpoint-line"}).range(from));});
+        return Decoration.set(marks,true);
+      }),
+      gutter({ class:"cm-debug-gutter",renderEmptyElements:true,markers:view=>view.state.field(points),initialSpacer:()=>dot,
+        domEventHandlers:{mousedown(view,block,event){
+          const mouse=event as MouseEvent;
+          if(mouse.button!==0||mouse.ctrlKey||mouse.metaKey||mouse.altKey||mouse.shiftKey)return false;
+          const top=view.documentTop+block.top;
+          if(mouse.clientY<top||mouse.clientY>=top+block.height)return false;
+          toggleLine(view,view.state.doc.lineAt(block.from).from);view.focus();return true;
+        }}
+      }),
       gutter({class:"cm-execution-gutter",markers:view=>view.state.field(pointer),initialSpacer:()=>new ExecutionSpacer()}),
-      gutter({ class: "cm-debug-gutter", markers: view => view.state.field(points), initialSpacer: () => dot,
-        domEventHandlers: { mousedown(view, line) { toggleLine(view, line.from); return true; } } }),
       keymap.of([{ key: "F9", run(view) { toggleLine(view, view.state.doc.lineAt(view.state.selection.main.head).from); return true; } }]),
       EditorView.updateListener.of(update => {
         if (update.docChanged || update.transactions.some(t => t.effects.some(e => e.is(toggle)))) {
@@ -84,7 +96,9 @@ export function debugGutter(initial: number[], onChange: (lines: number[]) => vo
           onChange([...new Set(lines)]);
         }
       }),
-      EditorView.theme({ ".cm-debug-gutter": { color: "#bc4d43", width: "18px", cursor: "pointer" }, ".cm-debug-gutter .cm-gutterElement": { padding: "0 3px" }, ".cm-execution-gutter":{width:"16px",color:"#ab7816"}, ".cm-execution-gutter .cm-gutterElement":{padding:"0 1px"}, ".cm-execution-pointer,.cm-inspection-pointer":{display:"inline-flex",verticalAlign:"middle"}, ".cm-inspection-pointer":{color:"#64849f"}, ".cm-debug-column": {display:"inline-block",width:"0",height:"0",position:"relative",color:"#ab7816",pointerEvents:"none"}, ".cm-inspection-column":{color:"#64849f"}, ".cm-debug-column svg":{position:"absolute",left:"-4px",top:"-21px"}, ".cm-debug-range": {backgroundColor:"#e7bd4b66",textDecoration:"underline",textDecorationColor:"#956a12",textUnderlineOffset:"3px"}, ".cm-debug-frame": {backgroundColor:"#7891ac22",boxShadow:"inset 3px 0 #7891ac"}, ".cm-debug-frame-range": {backgroundColor:"#7891ac44",textDecoration:"underline"}, ".cm-debug-stopped": { backgroundColor: "#e8bd4b35", boxShadow: "inset 3px 0 #bc8e22" } }),
+      EditorView.theme({ ".cm-debug-gutter": { color: "#bc4d43", width: "18px", cursor: "pointer" }, ".cm-debug-gutter .cm-gutterElement":{padding:"0 3px",position:"relative"},
+        ".cm-debug-gutter .cm-gutterElement:empty:hover::before":{content:'""',position:"absolute",width:"8px",height:"8px",borderRadius:"50%",backgroundColor:"currentColor",opacity:"0.35",left:"5px",top:"calc(0.875em - 4px)"},
+        ".cm-breakpoint-line":{backgroundColor:"#bc4d4309"}, ".cm-execution-gutter":{width:"16px",color:"#ab7816"}, ".cm-execution-gutter .cm-gutterElement":{padding:"0 1px"}, ".cm-execution-pointer,.cm-inspection-pointer":{display:"inline-flex",verticalAlign:"middle"}, ".cm-inspection-pointer":{color:"#64849f"}, ".cm-debug-column": {display:"inline-block",width:"0",height:"0",position:"relative",color:"#ab7816",pointerEvents:"none"}, ".cm-inspection-column":{color:"#64849f"}, ".cm-debug-column svg":{position:"absolute",left:"-4px",top:"-21px"}, ".cm-debug-range": {backgroundColor:"#e7bd4b66",textDecoration:"underline",textDecorationColor:"#956a12",textUnderlineOffset:"3px"}, ".cm-line.cm-debug-frame": {backgroundColor:"#7891ac22",boxShadow:"inset 3px 0 #7891ac"}, ".cm-debug-frame-range": {backgroundColor:"#7891ac44",textDecoration:"underline"}, ".cm-line.cm-debug-stopped": { backgroundColor: "#e8bd4b35", boxShadow: "inset 3px 0 #bc8e22" } }),
     ],
     toggle(view:EditorView){if(view.composing)return false;toggleLine(view,view.state.doc.lineAt(view.state.selection.main.head).from);return true;},
     stopped(view: EditorView, position: DebugPosition|null) {

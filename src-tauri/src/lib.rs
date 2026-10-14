@@ -1,4 +1,5 @@
 mod storage;
+mod drafts;
 mod solutions;
 mod recovery;
 mod external;
@@ -24,10 +25,11 @@ mod judge;
 use std::{path::PathBuf, sync::Mutex};
 use tauri::Manager;
 
-struct Store { root: PathBuf, gate: Mutex<()> }
+struct Store { root: PathBuf, gate: Mutex<()>, draft_session:Mutex<drafts::Session> }
 #[derive(Default)]struct Formatting(std::sync::atomic::AtomicBool);
 #[derive(serde::Serialize)]
-struct Document { code: Option<String>, notes: Option<String> }
+#[serde(rename_all="camelCase")]
+struct Document { code: Option<String>, notes: Option<String>, code_draft:Option<drafts::Record>, notes_draft:Option<drafts::Record>,draft_warnings:Vec<String> }
 
 fn check_origin(window: &tauri::WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|_| "无法验证来源")?;
@@ -39,13 +41,38 @@ fn check_origin(window: &tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn load_document(window: tauri::WebviewWindow, state: tauri::State<'_, Store>, problem: String, language: String, solution: Option<String>) -> Result<Document, String> {
+async fn load_document(window: tauri::WebviewWindow, app:tauri::AppHandle, problem: String, language: String, solution: Option<String>) -> Result<Document, String> {
     check_origin(&window)?;
-    let code = solutions::file_path(&state.root, &problem, &language, "code", solution.as_deref())?;
-    let notes = storage::file_path(&state.root, &problem, &language, "notes")?;
-    tauri::async_runtime::spawn_blocking(move || Ok(Document {
-        code: storage::read(&code)?, notes: storage::read(&notes)?,
-    })).await.map_err(|_| "读取任务中断".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        let state=app.state::<Store>();let _gate=state.gate.lock().map_err(|_|"读取队列不可用")?;
+        let code = solutions::file_path(&state.root, &problem, &language, "code", solution.as_deref())?;
+        let notes = storage::file_path(&state.root, &problem, &language, "notes")?;
+        let mut draft_warnings=Vec::new();
+        let code_draft=match drafts::read(&code){Ok(value)=>value,Err(error)=>{draft_warnings.push(error);None}};
+        let notes_draft=match drafts::read(&notes){Ok(value)=>value,Err(error)=>{draft_warnings.push(error);None}};
+        Ok(Document{code:storage::read(&code)?,notes:storage::read(&notes)?,code_draft,notes_draft,draft_warnings})
+    }).await.map_err(|_| "读取任务中断".to_string())?
+}
+
+#[tauri::command]
+async fn begin_draft_session(window:tauri::WebviewWindow,app:tauri::AppHandle)->Result<u64,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||{
+        let store=app.state::<Store>();let _gate=store.gate.lock().map_err(|_|"草稿队列不可用")?;
+        let mut session=store.draft_session.lock().map_err(|_|"草稿会话不可用")?;session.begin()
+    }).await.map_err(|_|"草稿会话任务中断".to_owned())?
+}
+#[tauri::command]
+async fn checkpoint_draft(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,solution:Option<String>,kind:String,text:String,baseline:Option<String>,epoch:u64,revision:u64)->Result<(),String>{
+    check_origin(&window)?;
+    if revision==0{return Err("草稿版本无效".into());}
+    tauri::async_runtime::spawn_blocking(move||{
+        let store=app.state::<Store>();let _gate=store.gate.lock().map_err(|_|"草稿队列不可用")?;
+        let path=solutions::file_path(&store.root,&problem,&language,&kind,solution.as_deref())?;
+        let mut session=store.draft_session.lock().map_err(|_|"草稿版本不可用")?;
+        if !session.should_write(&path,epoch,revision)?{return Ok(());}
+        drafts::write(&path,text,baseline)?;session.committed(path,revision);Ok(())
+    }).await.map_err(|_|"恢复草稿任务中断".to_owned())?
 }
 
 #[tauri::command]
@@ -356,7 +383,7 @@ pub fn run() {
         .setup(|app| {
             let root = app.path().app_data_dir()?.join("notebook");
             std::fs::create_dir_all(&root)?;
-            app.manage(Store { root, gate: Mutex::new(()) });
+            app.manage(Store { root, gate: Mutex::new(()), draft_session:Mutex::new(drafts::Session::default()) });
             app.manage(auth::Auth::default());
             app.manage(Formatting::default());
             app.manage(download_settings::DownloadSettings::new(app.path().app_config_dir()?));
@@ -370,7 +397,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_completion_resolve, language_semantic_tokens, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_completion_resolve, language_semantic_tokens, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, begin_draft_session, checkpoint_draft, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {

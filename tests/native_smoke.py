@@ -170,6 +170,12 @@ def fill(css, value):
             if attempt: raise
             cmd("DELETE","/actions")  # release any modifier whose key-up was uncertain
             time.sleep(.3)
+def save_editor(css):
+    node=element(css)
+    if cmd("GET","/element/active").get(EID)!=node: click(css)
+    assert cmd("GET","/element/active").get(EID)==node,"explicit save target owns focus"
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+s"],check=True)
+
 def fill_once(css, value):
     node=wait_for(lambda:element(css),"input target available after document switch")
     try:
@@ -268,12 +274,50 @@ try:
     click('[aria-label="关闭设置"]')
     (evidence/"DOWNLOAD_SETTINGS_GUI_RESULT.txt").write_text("PASS: native Settings save, app-only config persistence, restart restore, explicit reset before real downloads; no system proxy change. Proxy CONNECT routing covered by isolated Rust test.\n")
     code = '[aria-label="代码编辑器"]'
+    fill(code,"// first gutter row\n// second gutter row\n// third gutter row")
+    lane_rect=cmd("GET",f"/element/{element('.cm-debug-gutter')}/rect")
+    row_rect=cmd("GET",f"/element/{element('[aria-label=\"代码编辑器\"] .cm-line:nth-child(2)')}/rect")
+    window_rect=cmd("GET","/window/rect")
+    glyph_x=int(window_rect["x"]+lane_rect["x"]+lane_rect["width"]/2)
+    glyph_y=int(window_rect["y"]+row_rect["y"]+row_rect["height"]/2)
+    subprocess.run(["xdotool","mousemove","--sync",str(glyph_x),str(glyph_y),"click","1"],check=True)
+    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".cm-breakpoint-line"}))==1,"native pointer sets exact second-row breakpoint")
+    assert cmd("GET",f"/element/{element('.cm-breakpoint-line')}/property/textContent")=="// second gutter row"
+    assert element(".cm-execution-gutter")
+    pointer_rect=cmd("GET",f"/element/{element('.cm-execution-gutter')}/rect")
+    assert lane_rect["x"]+lane_rect["width"]<=pointer_rect["x"],"breakpoint and arrow lanes do not overlap"
+    screenshot("compact-breakpoint-native.png")
+    subprocess.run(["xdotool","click","1"],check=True)
+    wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".cm-breakpoint-line"}),"native second click removes breakpoint")
     marker = "// native restart persistence"
     fill(code, marker)
+    save_editor(code)
     source = data / "top.jacek.inkleet/notebook/lc-900000001/solution.rs"
     wait_for(lambda: source.exists() and source.read_text() == marker, "plain source persisted")
     wait_for(lambda: "已保存到本机文件" in text('.statusbar[role="status"]'), "save acknowledgement")
     screenshot("desktop-code-native.png")
+    recovery_file=source.parent/".inkleet-drafts"/"solution.rs.json"
+    unsaved="// unsaved recovery only"
+    fill(code,unsaved)
+    wait_for(lambda:recovery_file.exists() and json.loads(recovery_file.read_text())["text"]==unsaved,"recovery snapshot persisted separately")
+    time.sleep(1.5)
+    assert source.read_text()==marker,"idle draft overwrote canonical"
+    assert element('[aria-label="源码未保存"]')
+    stop();start()
+    wait_for(lambda:source_text(code)==unsaved,"restart restores unsaved draft")
+    assert source.read_text()==marker
+    assert element('[aria-label="源码未保存"]')
+    fill(code,marker);save_editor(code)
+    wait_for(lambda:json.loads(recovery_file.read_text())["text"]==marker and json.loads(recovery_file.read_text())["baseline"]==marker,"saved recovery record becomes clean")
+    stop()
+    source.write_text("// external after clean save")
+    start()
+    wait_for(lambda:source_text(code)=="// external after clean save","clean sidecar does not resurrect old source")
+    assert not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="源码未保存"]'})
+    fill(code,marker);save_editor(code)
+    wait_for(lambda:source.read_text()==marker,"restore baseline through explicit save")
+    (evidence/"EXPLICIT_SAVE_RECOVERY_NATIVE_RESULT.txt").write_text("PASS: idle source unchanged, separate recovery file, restart restores unsaved buffer and dirty marker, clean sidecar does not replace later external canonical update.\\n")
+
 
     def named_action(action,name):
         click(".solution-menu>summary")
@@ -288,6 +332,7 @@ try:
     named_source=source.parent/".solutions"/"rust"/first_id/"solution.rs"
     wait_for(lambda:named_source.exists() and named_source.read_text()==marker,"native duplicate preserves current source")
     fill(code,"// named solution")
+    save_editor(code)
     wait_for(lambda:named_source.read_text()=="// named solution","named source saves independently")
     assert source.read_text()==marker
     named_action("重命名","优化版")
@@ -308,13 +353,14 @@ try:
     click('nav[aria-label="工作区"] button:last-child')
     note = '[aria-label="Markdown 笔记"]'
     fill(note, "# Native note")
+    save_editor(note)
     notes = source.with_name("notes.md")
     wait_for(lambda: notes.exists() and notes.read_text() == "# Native note", "notes persisted")
     screenshot("desktop-notes-native.png")
-    click(".notes-heading button:first-child")
+    click('button[aria-label="预览笔记"]')
     wait_for(lambda: text(".notes-rendered h1") == "Native note", "bundled native Worker Markdown preview")
     screenshot("notes-preview-native.png")
-    click(".notes-heading button:first-child")
+    click('button[aria-label="返回编辑"]')
     wait_for(lambda: text(note) == "# Native note", "return from preview preserves original Markdown")
 
     notes.write_text("# Real external note update")
@@ -333,6 +379,7 @@ try:
     wait_for(lambda: text(note) == "# Native note", "restart restored Markdown")
     notes.write_text("# External editor")
     fill(note, "# Pending local edit")
+    save_editor(note)
     wait_for(lambda: "保存失败" in text('.statusbar[role="status"]'), "external conflict visible")
     assert notes.read_text() == "# External editor", "external content overwritten"
     assert text(note) == "# Pending local edit", "pending draft lost"
@@ -359,6 +406,7 @@ try:
     backup=json.loads(backups[0].read_text())
     assert backup["local"]=="# Pending local edit" and backup["external"]=="# Changed externally again"
     fill(note,"# Resolved note")
+    save_editor(note)
     wait_for(lambda: notes.read_text()=="# Resolved note","blocked save queue resumes on reviewed baseline")
     (evidence/"CONFLICT_GUI_RESULT.txt").write_text("PASS: actual native comparison, concurrent external-change refusal, explicit file-version choice, two-version recovery snapshot, editor reload and subsequent atomic save.\n")
 
@@ -399,6 +447,7 @@ try:
         subprocess.run(["xdotool","type","--clearmodifiers","--delay","5",typed],check=True)
         (evidence/"indent-input-observation.json").write_text(json.dumps({"rendered":text(code),"lines":source_text(code)},ensure_ascii=False))
         wait_for(lambda:source_text(code)=="def solve(values):\n    return len(values)","native Python Enter produces four-space indentation")
+        save_editor(code)
         python_saved=source.with_name("solution.py")
         wait_for(lambda:python_saved.exists() and python_saved.read_text()=="def solve(values):\n    return len(values)","native auto-indented source saved byte-for-byte")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"python-dedent","actions":[
@@ -427,6 +476,7 @@ try:
         assert source_text(code)=="def solve(values):\npass","palette preserves source"
         (evidence/"COMMAND_NATIVE_RESULT.txt").write_text("PASS: native CtrlShiftP command discovery, actual LSP action search, Escape and unchanged source.\n")
         fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
+        save_editor(code)
         python_source=source.with_name("solution.py")
         wait_for(lambda: python_source.exists() and python_source.read_text() == "from collections import deque\nitems = deque([1, 2])\nitems.pop", "multiline Python source persisted exactly")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
@@ -511,7 +561,7 @@ try:
         assert text(code)=="def solve(values): return sum(values)"
         (evidence/"REFERENCES_GUI_RESULT.txt").write_text("PASS: actual native Shift+F12 real private Pyright declaration/reference lookup, two original source locations and navigation without modifying the draft.\n")
         fill(code, "def solve(values):\n    return sum(values)")
-        click(".actions button:first-child")
+        click('.pane-heading .actions button[aria-label="本地"]')
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
         wait_for(lambda: '"value": 10' in text(".local-result"), "real private Python harness result", seconds=30)
@@ -533,6 +583,18 @@ try:
         click(".debug-inspector > div:first-child > button")
         wait_for(lambda: element(".debug-variable"), "real variable values loaded")
         wait_for(lambda: element(".cm-debug-stopped"), "paused source line highlighted")
+        paused_node=element(".cm-debug-stopped")
+        paused_color=cmd("GET",f"/element/{paused_node}/css/background-color")
+        paused_text=cmd("GET",f"/element/{paused_node}/property/textContent")
+        paused_rect=cmd("GET",f"/element/{paused_node}/rect")
+        native_window=cmd("GET","/window/rect")
+        subprocess.run(["xdotool","mousemove","--sync",str(int(native_window["x"]+paused_rect["x"]+min(60,paused_rect["width"]/2))),str(int(native_window["y"]+paused_rect["y"]+paused_rect["height"]/2)),"click","1"],check=True)
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/css/background-color")==paused_color,"click must preserve paused row background"
+        subprocess.run(["xdotool","key","--clearmodifiers","shift+Right"],check=True)
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/css/background-color")==paused_color,"selection must preserve paused row background"
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/property/textContent")==paused_text
+        screenshot("paused-selection-native.png")
+
         wait_for(lambda:element(".cm-execution-pointer svg"),"native SVG execution arrow")
         expression_input=element('[aria-label="调试表达式输入"]')
         cmd("POST",f"/element/{expression_input}/value",{"text":"len(values)","value":list("len(values)")})
@@ -688,7 +750,8 @@ try:
         click(".source-viewer header button")
         java_solution="class Solution {\n public int solve(int[] values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n }\n}"
         fill(code,java_solution)
-        click(".pane-heading .actions button")
+        save_editor(code)
+        click('.pane-heading .actions button[aria-label="本地"]')
         click('[data-local-tab="run"]')
         fill('[aria-label="本地测试输入"]',"[3,-1,8]")
         click('[data-action="local-execute"]')
@@ -798,6 +861,7 @@ try:
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
                 if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
+                save_editor(code)
                 if group=="golang":
                     wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function"}),"real gopls semantic function classification",seconds=45)
                     assert "solve" in text(".code-pane .cm-semantic-function"),"gopls resolves source function"
@@ -810,7 +874,7 @@ try:
                     screenshot("golang-semantic-native.png")
                     (evidence/"SEMANTIC_NATIVE_RESULT.txt").write_text("PASS: real private gopls semantic function highlighting in native CodeMirror. Other language semantic capabilities unverified.\\n")
                 if not cmd("POST","/elements",{"using":"css selector","value":".local-runner:not([hidden])"}):
-                    click(".pane-heading .actions button")
+                    click('.pane-heading .actions button[aria-label="本地"]')
                 click('[data-local-tab="run"]')
                 fill('[aria-label="本地测试输入"]',"[3,-1,8]")
                 click('[data-action="local-execute"]')
@@ -849,6 +913,7 @@ try:
 
         click('select[aria-label="编程语言"] option[value="rust"]')
         fill(code,marker)
+        save_editor(code)
 
 
         # Actual formatter processes/LSP inside the real WebView, never mocked IPC.
@@ -875,19 +940,25 @@ try:
             click(f'select[aria-label="编程语言"] option[value="{language}"]')
             if language in ("c","cpp","java"):
                 wait_for(lambda:"已连接" in text(".lsp-status"),language+" formatting service ready",seconds=100)
-            fill(code,unformatted)
             source_file=data/("top.jacek.inkleet/notebook/lc-900000001/"+("solution."+extension))
-            wait_for(lambda:source_file.exists() and source_file.read_text()==unformatted,language+" raw source saved before formatting")
-            wait_for(lambda:source_file.read_text()!=unformatted and "solve" in source_file.read_text(),language+" real format-on-save applied",seconds=25)
+            canonical_before=source_file.read_text() if source_file.exists() else None
+            fill(code,unformatted)
+            time.sleep(1.5)
+            assert source_text(code)==unformatted,language+" idle must not format editor"
+            assert (source_file.read_text() if source_file.exists() else None)==canonical_before,language+" idle must not save canonical"
+            assert element('[aria-label="源码未保存"]')
+            save_editor(code)
+            wait_for(lambda:source_file.exists() and source_file.read_text()!=unformatted and source_file.read_text()!=canonical_before and "solve" in source_file.read_text(),language+" explicit format-on-save applied",seconds=25)
             formatted=source_file.read_text()
             wait_for(lambda:source_text(code)==formatted.rstrip("\n") or source_text(code)==formatted,language+" formatted file and editor agree")
             time.sleep(1.5)
             assert source_file.read_text()==formatted,language+" formatter loop or unexpected write"
             screenshot(language+"-formatted-native.png")
-            (evidence/(language.upper()+"_FORMAT_NATIVE_RESULT.txt")).write_text("PASS: real Linux Tauri GUI default-on preference, raw source save, private formatter/LSP result applied and persisted, stable subsequent contents.\n")
+            (evidence/(language.upper()+"_FORMAT_NATIVE_RESULT.txt")).write_text("PASS: real Linux Tauri GUI default-on preference, idle preserves raw draft and canonical, explicit Ctrl+S applies and persists private formatter/LSP result, stable subsequent contents.\n")
         set_auto_format(False)
         click('select[aria-label="编程语言"] option[value="rust"]')
         fill(code,marker)
+        save_editor(code)
 
         (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")
     if os.environ.get("INKLEET_LIVE_CN") == "1":
@@ -919,6 +990,7 @@ try:
         wait_for(lambda: "impl Solution" in text(code), "official Rust template loaded")
         screenshot("real-cn-question-native.png")
         fill(code, "// live CN draft persistence")
+        save_editor(code)
         live_source = data / "top.jacek.inkleet/notebook/lc-1/solution.rs"
         wait_for(lambda: live_source.exists() and live_source.read_text() == "// live CN draft persistence", "real question local source saved")
         click('[data-action="open-link"]')

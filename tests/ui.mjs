@@ -25,6 +25,8 @@ async function testPage(options) {
       configurable:true,get:()=>internals,set:value=>{
         const invoke=value.invoke;
         internals={...value,invoke:(command,args)=>{
+          if(command==="begin_draft_session"&&!window.__recoveryTest)return Promise.resolve(1);
+          if(command==="checkpoint_draft"&&!window.__recoveryTest)return Promise.resolve();
           if(command==="get_editor_settings"&&!window.__formatTest)return Promise.resolve({settings:{version:1,formatOnSave:false,overrides:{}},revision:null});
           return invoke(command,args);
         }};
@@ -1101,6 +1103,7 @@ try {
   assert.equal(await conflictPage.getByText("在线评测需要登录中国站",{exact:true}).count(),0,"login explanation is not permanent workbench clutter");
   await conflictPage.evaluate(() => { window.__conflictTest.file = "external"; });
   await conflictEditor.fill("local draft");
+  await conflictEditor.press("Control+s");
   await conflictPage.locator('[data-action="review-code-conflict"]').waitFor();
   await conflictPage.locator('[data-action="review-code-conflict"]').click();
   const conflictDialog = conflictPage.getByRole("dialog", { name: "源码文件冲突", exact: true });
@@ -1118,6 +1121,7 @@ try {
   assert.deepEqual(await conflictPage.evaluate(() => window.__conflictTest.backups), [{ local: "local draft", external: "changed again" }]);
   await conflictPage.evaluate(() => { window.__conflictTest.file = null; });
   await conflictEditor.fill("new local draft");
+  await conflictEditor.press("Control+s");
   await conflictPage.locator('[data-action="review-code-conflict"]').waitFor();
   await conflictPage.locator('[data-action="review-code-conflict"]').click();
   await conflictDialog.getByText("文件版本（已删除）", { exact: true }).waitFor();
@@ -1126,6 +1130,7 @@ try {
   assert.equal(await conflictEditor.textContent(), "", "empty CodeMirror line must contain no source characters");
   assert.equal(await conflictPage.evaluate(() => window.__conflictTest.file), null);
   await conflictEditor.fill("after recovery");
+  await conflictEditor.press("Control+s");
   await conflictPage.waitForFunction(() => window.__conflictTest.file === "after recovery");
   await openSettings(conflictPage, "源码");
   await conflictPage.locator('[data-action="code-recovery"]').click();
@@ -1177,6 +1182,11 @@ try {
   await externalPage.getByRole("button", { name: "笔记", exact: true }).click();
   const externalNote = externalPage.getByRole("textbox", { name: "Markdown 笔记", exact: true });
   await externalNote.fill("# Saved");
+  await openSettings(externalPage,"笔记");
+  await externalPage.getByRole("button",{name:"Typora 编辑",exact:true}).click();
+  await externalPage.locator(".statusbar").filter({hasText:"请先保存笔记"}).waitFor();
+  assert.equal(await externalPage.evaluate(()=>window.__externalTest.opened.length),0,"dirty notes cannot open stale external contents");
+  await externalNote.press("Control+s");
   await openSettings(externalPage, "笔记");
   await externalPage.getByRole("button", { name: "Typora 编辑", exact: true }).click();
   await externalPage.waitForFunction(() => window.__externalTest.opened.length === 1);
@@ -1190,6 +1200,7 @@ try {
   await externalPage.waitForFunction(() => document.querySelector('[aria-label="Markdown 笔记"]').innerText === "# Focus refresh");
   await externalPage.evaluate(() => { window.__externalTest.fail = true; });
   await externalNote.fill("# Unsaved");
+  await externalNote.press("Control+s");
   await externalPage.locator('[data-action="review-notes-conflict"]').waitFor();
   await externalPage.evaluate(() => { window.__externalTest.notes = "# Concurrent external"; });
   await openSettings(externalPage, "笔记");
@@ -1292,6 +1303,7 @@ try {
   await solutionsPage.goto("http://127.0.0.1:5173");
   const solutionCode=solutionsPage.getByRole("textbox",{name:"代码编辑器",exact:true});
   await solutionCode.fill("// default source");
+  await solutionCode.press("Control+s");
   await solutionsPage.waitForFunction(()=>window.__solutionsTest.writes.some(w=>w.text==="// default source"));
   async function namedAction(action,name){
     await solutionsPage.locator(".solution-menu>summary").click();
@@ -1306,6 +1318,7 @@ try {
   assert.match(first,/^[a-f0-9]{32}$/);
   assert.equal(await solutionCode.innerText(),"// default source","copy is the captured draft");
   await solutionCode.fill("// named source");
+  await solutionCode.press("Control+s");
   await solutionsPage.waitForFunction(()=>window.__solutionsTest.writes.some(w=>w.text==="// named source"));
   await namedAction("重命名","优化版");
   assert.equal(await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).inputValue(),first,"rename preserves immutable ID");
@@ -1366,7 +1379,6 @@ try {
         }return;
       }
       if(command==="format_source"){
-        if(state.docs[args.language]!==args.text)throw Error("format called before exact save");
         state.formats.push(args.text);
         if(state.failFormat)throw Error("测试：格式化器失败");
         const output=args.text.replace(/\s*=\s*/g," = ").trimEnd()+"\n";
@@ -1381,15 +1393,23 @@ try {
   await formatPage.getByRole("combobox",{name:"编程语言"}).selectOption("python3");
   const formattedCode=formatPage.getByRole("textbox",{name:"代码编辑器",exact:true});
   await formattedCode.fill('中文="值"');
+  await formatPage.waitForTimeout(1500);
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),0,"idle never formats");
+  assert.deepEqual(await formatPage.evaluate(()=>window.__formatTest.saves),[],"idle never writes canonical");
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await formattedCode.press("Control+s");
   await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文 = "值"\n');
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1);
-  assert.deepEqual(await formatPage.evaluate(()=>window.__formatTest.saves.slice(-2)),['中文="值"','中文 = "值"\n']);
+  assert.deepEqual(await formatPage.evaluate(()=>window.__formatTest.saves),['中文 = "值"\n']);
   await formattedCode.press("Control+z");
-  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文="值"');
+  assert.equal(await formattedCode.innerText(),'中文="值"');
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),'中文 = "值"\n');
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
   await formatPage.waitForTimeout(1400);
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"undo never triggers format loop");
   await formattedCode.press("Control+y");
-  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文 = "值"\n');
+  assert.equal((await formattedCode.locator(".cm-line").allTextContents()).join("\n"),'中文 = "值"\n');
+  assert.equal(await formatPage.getByLabel("源码未保存",{exact:true}).count(),0);
   await openSettings(formatPage,"编辑器");
   await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
   await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
@@ -1399,7 +1419,8 @@ try {
   await formatPage.waitForTimeout(1400);
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"disabled automatic formatter stays idle");
   await formattedCode.press("Control+s");
-  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==="x = 2\n");
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==="x=2");
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"disabled save skips formatter");
   await openSettings(formatPage,"编辑器");
   await formatPage.evaluate(()=>{window.__formatTest.failSettings=true;});
   await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).check();
@@ -1410,6 +1431,9 @@ try {
   await formatPage.evaluate(()=>{window.__formatTest.failSettings=false;});
   await formatPage.getByRole("button",{name:"重新读取",exact:true}).click();
   await formatPage.waitForFunction(()=>!document.querySelector(".format-switch input").checked);
+  await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).check();
+  await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await formatPage.waitForFunction(()=>window.__formatTest.settings.formatOnSave===true);
   await formatPage.getByRole("button",{name:"关闭设置",exact:true}).click();
   await formatPage.evaluate(()=>{window.__formatTest.defer=true;});
   await formattedCode.fill("old=1");await formattedCode.press("Control+s");
@@ -1418,6 +1442,7 @@ try {
   await formatPage.evaluate(()=>{window.__formatTest.reply();window.__formatTest.defer=false;});
   await formatPage.waitForTimeout(200);
   assert.equal(await formattedCode.innerText(),"new=2","late format cannot replace newer input");
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"x=2","stale format cannot write canonical");
 
 
   await formatPage.evaluate(()=>{window.__formatTest.defer=true;window.__formatTest.reply=null;});
@@ -1435,7 +1460,7 @@ try {
   await formattedCode.fill("queued=1");await formattedCode.press("Control+s");
   await formatPage.waitForFunction(()=>typeof window.__formatTest.reply==="function");
   await formatPage.waitForTimeout(750);
-  await formattedCode.fill("queued=2");
+  await formattedCode.fill("queued=2");await formattedCode.press("Control+s");
   await formatPage.waitForTimeout(1400);
   await formattedCode.press("Control+z");
   assert.equal(await formattedCode.innerText(),"queued=1");
@@ -1443,31 +1468,156 @@ try {
   await formatPage.evaluate(()=>{window.__formatTest.reply();window.__formatTest.defer=false;});
   await formatPage.waitForTimeout(1600);
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),beforeUndoReply,"undo clears a rerun queued while prior formatting was busy");
-  await openSettings(formatPage,"编辑器");
-  await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
-  await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
-  await formatPage.waitForFunction(()=>window.__formatTest.settings.formatOnSave===false);
-  await formatPage.getByRole("button",{name:"关闭设置",exact:true}).click();
   await formattedCode.fill("new=2");
   await formatPage.evaluate(()=>{window.__formatTest.failFormat=true;});
   await formattedCode.press("Control+s");
   await formatPage.getByRole("button",{name:"格式化状态",exact:true}).waitFor();
-  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"new=2","formatter failure preserves saved original");
-  await formatPage.evaluate(()=>{window.__formatTest.failSave=true;});
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"explicit = 2\n","formatter failure preserves canonical");
+  assert.equal(await formattedCode.innerText(),"new=2");
+  await formatPage.evaluate(()=>{window.__formatTest.failFormat=false;window.__formatTest.failSave=true;});
   const formatCount=await formatPage.evaluate(()=>window.__formatTest.formats.length);
   await formattedCode.fill("protected=3");await formattedCode.press("Control+s");
   await formatPage.locator('[data-action="review-code-conflict"]').waitFor();
   await formatPage.waitForTimeout(200);
-  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount,"blocked save prevents formatter invocation");
-  assert.equal(await formattedCode.innerText(),"protected=3","failed write keeps live draft");
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount+1,"first explicit save formats before write attempt");
+  await formattedCode.press("Control+s");await formatPage.waitForTimeout(200);
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount+1,"known blocked save prevents another formatter invocation");
+  assert.equal((await formattedCode.locator(".cm-line").allTextContents()).join("\n"),"protected = 3\n","failed write keeps formatted live draft");
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"explicit = 2\n");
   assert.deepEqual(formatErrors,[]);
   } catch(error){
     await formatPage.screenshot({path:"evidence/format-failure.png",fullPage:true});
     await writeFile("evidence/format-failure.json",JSON.stringify(await formatPage.evaluate(()=>({state:window.__formatTest,body:document.body.innerText})),null,2));
     throw error;
   } finally {await formatPage.close();}
-  await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; raw save before format, Unicode, isolated undo/redo, no loop, disabled preference/manual format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
+  await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; explicit format before canonical save, idle leaves canonical untouched, dirty markers, Unicode, isolated undo/redo, no loop, disabled save skips format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
 
+
+
+  const recoveryPage=await testPage({viewport:{width:1200,height:800}});
+  recoveryPage.on("dialog",dialog=>dialog.accept());
+  await recoveryPage.addInitScript(()=>{
+    window.isTauri=true;
+    const stored=JSON.parse(sessionStorage.getItem("explicitRecovery")||'{"code":"A","notes":"N","codeDraft":null,"notesDraft":null}');
+    const state=window.__recoveryTest={...stored,epoch:0,writes:0,defer:false};
+    const persist=()=>sessionStorage.setItem("explicitRecovery",JSON.stringify({code:state.code,notes:state.notes,codeDraft:state.codeDraft,notesDraft:state.notesDraft}));
+    window.__persistRecovery=persist;
+    window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
+      if(command==="begin_draft_session")return ++state.epoch;
+      if(command==="checkpoint_draft"){
+        if(args.epoch!==state.epoch)throw Error("stale epoch");
+        state[args.kind+"Draft"]={text:args.text,baseline:args.baseline};persist();return;
+      }
+      if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="external_editor_supported")return false;
+      if(command==="login_status")return null;
+      if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+      if(command==="load_document")return JSON.parse(JSON.stringify({code:state.code,notes:state.notes,codeDraft:state.codeDraft,notesDraft:state.notesDraft}));
+      if(command==="start_language_service")throw Error("offline");
+      if(command==="stop_language_service")return;
+      if(command==="save_text"){
+        const commit=()=>{
+          if(state[args.kind]!==args.expected)throw Error("CAS conflict");
+          state[args.kind]=args.text;state.writes++;persist();
+        };
+        if(state.defer)return new Promise((resolve,reject)=>state.reply=()=>{try{commit();resolve();}catch(e){reject(e);}});
+        commit();return;
+      }
+      throw Error("Unexpected recovery IPC "+command);
+    }};
+  });
+  await recoveryPage.goto("http://127.0.0.1:5173");
+  const recoveryCode=recoveryPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await recoveryCode.fill("B");
+  await recoveryPage.waitForFunction(()=>window.__recoveryTest.codeDraft?.text==="B");
+  assert.equal(await recoveryPage.evaluate(()=>window.__recoveryTest.code),"A");
+  await recoveryPage.reload();
+  await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="代码编辑器"]')?.textContent==="B");
+  await recoveryPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.code="C";window.__persistRecovery();});
+  await recoveryPage.reload();
+  await recoveryPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await recoveryPage.locator('[data-action="review-code-conflict"]').waitFor();
+  assert.equal(await recoveryCode.innerText(),"B","external edit preserves conflicting recovered draft");
+  assert.equal(await recoveryPage.evaluate(()=>window.__recoveryTest.code),"C");
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.codeDraft={text:"A",baseline:"A"};window.__recoveryTest.notesDraft={text:"N",baseline:"N"};window.__recoveryTest.notes="External note";window.__persistRecovery();});
+  await recoveryPage.reload();
+  await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="代码编辑器"]')?.textContent==="C");
+  assert.equal(await recoveryPage.getByLabel("源码未保存",{exact:true}).count(),0,"clean sidecar cannot resurrect stale code");
+  await recoveryPage.getByRole("button",{name:"笔记",exact:true}).click();
+  await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="Markdown 笔记"]')?.textContent==="External note");
+  assert.equal(await recoveryPage.getByLabel("笔记未保存",{exact:true}).count(),0,"clean note sidecar cannot resurrect stale note");
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.defer=true;});
+  await recoveryCode.fill("D");await recoveryCode.press("Control+s");
+  await recoveryPage.waitForFunction(()=>typeof window.__recoveryTest.reply==="function");
+  await recoveryCode.fill("E");
+  await recoveryPage.waitForFunction(()=>window.__recoveryTest.codeDraft?.text==="E");
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.reply();});
+  await recoveryPage.waitForFunction(()=>window.__recoveryTest.code==="D"&&window.__recoveryTest.codeDraft?.text==="E"&&window.__recoveryTest.codeDraft?.baseline==="D");
+  await recoveryPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await recoveryPage.reload();
+  await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="代码编辑器"]')?.textContent==="E");
+  assert.equal(await recoveryPage.locator('[data-action="review-code-conflict"]').count(),0,"newer draft rebased against older committed save");
+  await recoveryPage.close();
+  await writeFile("evidence/EXPLICIT_RECOVERY_UI_RESULT.txt","PASS: mocked disk IPC, real CodeMirror dirty recovery and external conflict, clean source/notes sidecars ignored, save D while editing E rebases recovery to D without clearing dirty.\n");
+
+  const gutterPage=await browser.newPage({viewport:{width:1000,height:700}});
+  await gutterPage.route("**/gutter-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body style='margin:0'><div id='editor'></div></body></html>"}));
+  await gutterPage.goto("http://127.0.0.1:5173/gutter-test");
+  await gutterPage.evaluate(async()=>{
+    const {EditorView,EditorState,basicSetup}=await import("/tests/input-harness.ts");
+    const {debugGutter}=await import("/src/debug-gutter.ts");
+    window.__gutterChanges=[];
+    const debug=debugGutter([],lines=>window.__gutterChanges.push(lines));
+    const view=new EditorView({parent:document.getElementById("editor"),state:EditorState.create({
+      doc:"first\nsecond\nthird\nfourth",
+      extensions:[...debug.extensions,basicSetup,EditorView.theme({"&":{height:"300px",fontSize:"14px"},".cm-content":{padding:"8px 0"},".cm-line":{padding:"0 8px"},".cm-scroller":{lineHeight:"1.75"}})]
+    })});
+    window.__gutterView=view;window.__gutterDebug=debug;
+  });
+  const lane=gutterPage.locator(".cm-debug-gutter");
+  assert.equal(await gutterPage.locator(".cm-execution-gutter").count(),1,"execution has its own reserved lane");
+  assert.equal(await gutterPage.locator(".cm-gutters>.cm-gutter").first().getAttribute("class").then(x=>x.includes("cm-debug-gutter")),true,"glyph lane precedes line numbers");
+  const boxes=await gutterPage.evaluate(()=>{
+    const view=window.__gutterView,lane=document.querySelector(".cm-debug-gutter").getBoundingClientRect();
+    return [1,2,3,4].map(n=>{const rect=view.coordsAtPos(view.state.doc.line(n).from);return {x:lane.x+lane.width/2,y:(rect.top+rect.bottom)/2};});
+  });
+  await gutterPage.mouse.move(boxes[1].x,boxes[1].y);
+  await gutterPage.waitForTimeout(30);
+  assert.equal(await gutterPage.locator(".cm-debug-gutter .cm-gutterElement").evaluateAll(nodes=>nodes.some(n=>getComputedStyle(n,"::before").content==='""')),true,"empty row displays hover ghost");
+  await gutterPage.mouse.click(boxes[1].x,boxes[1].y);
+  assert.deepEqual(await gutterPage.evaluate(()=>window.__gutterChanges.at(-1)),[2]);
+  assert.equal(await gutterPage.locator(".cm-breakpoint-line").count(),1);
+  const changes=await gutterPage.evaluate(()=>window.__gutterChanges.length);
+  await gutterPage.mouse.click(boxes[2].x,boxes[2].y,{button:"right"});
+  await gutterPage.keyboard.press("Escape");
+  await gutterPage.mouse.click(boxes[2].x,boxes[2].y,{button:"middle"});
+  assert.equal(await gutterPage.evaluate(()=>window.__gutterChanges.length),changes,"secondary buttons do not toggle breakpoints");
+  await gutterPage.keyboard.down("Control");await gutterPage.mouse.click(boxes[2].x,boxes[2].y);await gutterPage.keyboard.up("Control");
+  assert.equal(await gutterPage.evaluate(()=>window.__gutterChanges.length),changes,"modified click does not toggle breakpoints");
+  await gutterPage.evaluate(()=>window.__gutterDebug.stopped(window.__gutterView,{line:2,column:2,execution:true}));
+  const breakpointBox=await gutterPage.locator(".cm-debug-gutter").boundingBox(),pointerBox=await gutterPage.locator(".cm-execution-gutter").boundingBox();
+  assert.ok(breakpointBox.x+breakpointBox.width<=pointerBox.x,"breakpoint and pointer occupy disjoint reserved lanes");
+  const stopped=gutterPage.locator(".cm-debug-stopped");
+  const pausedColor=await stopped.evaluate(node=>getComputedStyle(node).backgroundColor);
+  await stopped.click();
+  assert.equal(await stopped.evaluate(node=>getComputedStyle(node).backgroundColor),pausedColor,"active line cannot override paused line paint");
+  await gutterPage.keyboard.down("Shift");await gutterPage.keyboard.press("ArrowRight");await gutterPage.keyboard.up("Shift");
+  assert.equal(await stopped.evaluate(node=>getComputedStyle(node).backgroundColor),pausedColor,"text selection preserves paused background");
+  await gutterPage.locator(".cm-line").last().click();
+  assert.equal(await stopped.evaluate(node=>getComputedStyle(node).backgroundColor),pausedColor,"moving cursor leaves paused row intact");
+  await gutterPage.screenshot({path:"evidence/compact-gutter-interaction.png"});
+  await gutterPage.mouse.click(boxes[1].x,boxes[1].y);
+  assert.deepEqual(await gutterPage.evaluate(()=>window.__gutterChanges.at(-1)),[]);
+  assert.equal(await gutterPage.locator(".cm-execution-pointer").count(),1,"removing breakpoint preserves paused arrow");
+  await gutterPage.evaluate(()=>window.__gutterDebug.stopped(window.__gutterView,null));
+  await gutterPage.mouse.click(boxes[0].x,2);
+  await gutterPage.mouse.click(boxes[0].x,260);
+  assert.deepEqual(await gutterPage.evaluate(()=>window.__gutterChanges.at(-1)),[],"padding cannot toggle first or last line");
+  await gutterPage.evaluate(()=>window.__gutterView.destroy());
+  await gutterPage.close();
+  await writeFile("evidence/GUTTER_UI_RESULT.txt","PASS: actual mouse events, separate leading breakpoint and execution lanes, empty-row hover, primary/secondary click isolation, paused+breakpoint composite, row shading and padding exclusion. Native/zoom/wrapping remain separately verified.\n");
 
   const semanticPage=await browser.newPage();
   await semanticPage.route("**/semantic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));

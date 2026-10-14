@@ -2,7 +2,7 @@ import {indentGuides} from "./indent-guides";
 import {editorCommands} from "./editor-commands";
 import {formatBinding,type Command} from "./command-registry";
 import type { DebugPosition } from "./debug-position";
-import { formatOnSave, formatDocument } from "./format-on-save";
+import { formatOnSave, formatDocument, saveDocument } from "./format-on-save";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { EditorState, StateEffect, Prec } from "@codemirror/state";
 import { EditorView, keymap, tooltips } from "@codemirror/view";
@@ -27,8 +27,8 @@ const sessions = new Map<string, { state: EditorState; scroll: number }>();
 const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "var(--surface-editor)", color: "var(--ink)", fontSize: "14px" },
   ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", lineHeight: "1.75" },
-  ".cm-content": { padding: "20px 0", caretColor: "var(--accent)" },
-  ".cm-line": { padding: "0 16px" },
+  ".cm-content": { padding: "8px 0", caretColor: "var(--accent)" },
+  ".cm-line": { padding: "0 8px" },
   ".cm-gutters": { backgroundColor: "var(--surface-editor)", color: "var(--muted)", border: "none" },
   ".cm-activeLineGutter, .cm-activeLine": { backgroundColor: "var(--active-line)" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: "var(--selection)" },
@@ -49,11 +49,13 @@ function syntax(language: Language | "markdown") {
 type Props = {
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void; onStatus?: (status: string) => void; reconnectToken?: number; onSettings?: () => void;
-  formatting?: {enabled:boolean;saved:(text:string)=>Promise<boolean>;report:(message:string)=>void};
+  onSave?:()=>void;onSaveReady?:(save:(()=>boolean)|null)=>void;
+  formatting?: {epoch?:()=>number;ready?:(save:boolean)=>boolean;enabled:boolean;save:(text:string)=>Promise<boolean>;report:(message:string)=>void};
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
-export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings, formatting }: Props) {
+export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
   const formatOptions=useRef(formatting);formatOptions.current=formatting;
+  const saveCallback=useRef(onSave),saveReady=useRef(onSaveReady);saveCallback.current=onSave;saveReady.current=onSaveReady;
   const host = useRef<HTMLDivElement>(null);
   const [lspStatus, setLspStatus] = useState("");
   const connection = reconnectToken;
@@ -65,7 +67,9 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
   useLayoutEffect(() => {
     const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata, true) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
+    const save=(target:EditorView)=>{if(target.composing)return false;if(language==="markdown"){saveCallback.current?.();return true;}return saveDocument(target);};
     const commands:Command<EditorView>[]=[
+      {id:"editor.save",label:"保存",key:"Mod-s",run:save},
       {id:"editor.undo",label:"撤销",run:undo},
       {id:"editor.redo",label:"重做",run:redo},
       {id:"editor.selectAll",label:"全选",run:selectAll},
@@ -79,9 +83,9 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
       ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:formatDocument}]:[]),
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
     ];
-    const extensions = [editorCommands(commands),
+    const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),
       basicSetup, syntax(language), theme, ...(language==="markdown"?[]:[indentGuides]),
-      ...(intelligence&&formatting?formatOnSave({enabled:()=>!!formatOptions.current?.enabled,saved:text=>formatOptions.current?.saved(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
+      ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
       // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。
@@ -93,7 +97,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
           // 即使 Escape 被补全/选区消耗，也保留显式移出编辑器的键盘通道。
           if (event.key === "Escape") view.setTabFocusMode(2000);
         },
-      }), ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
+      }), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
       EditorView.updateListener.of(update => {
         if (update.docChanged) callback.current(update.state.doc.toString());
@@ -106,10 +110,12 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
       ? cached.state.update({ effects: StateEffect.reconfigure.of(extensions) }).state
       : EditorState.create({ doc: value, extensions });
     const view = new EditorView({ state, parent: host.current! });
+    saveReady.current?.(()=>save(view));
     if (debug) debugView.current = { view, stopped: debug.stopped };
     if (cached) view.scrollDOM.scrollTop = cached.scroll;
     if (intelligence) void intelligence.connect(view);
     return () => {
+      saveReady.current?.(null);
       debugView.current = null;
       intelligence?.destroy();
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });

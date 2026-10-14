@@ -438,3 +438,5 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .editor-command-palette:focus-within{border-color:var(--accent)}
 
 .lsp-completion-documentation{max-height:min(320px,40vh);overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
+
+.unsaved-mark{font-size:9px;color:var(--accent);width:12px;text-align:center;flex:none}.close-drafts{max-width:420px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);padding:20px}.close-drafts::backdrop{background:#0005}.close-drafts button{margin-right:8px}
