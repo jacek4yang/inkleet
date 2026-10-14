@@ -212,6 +212,21 @@ try:
         click(".environments header button")
         click('select[aria-label="编程语言"] option[value="python3"]')
         wait_for(lambda: "Pyright 已连接" in text(".lsp-status"), "real private language server connected", seconds=45)
+        fill(code, "def solve(values):")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-indent","actions":[
+            {"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},
+            {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}
+        ]}]})
+        typed="return len(values)"
+        cmd("POST",f"/element/{element(code)}/value",{"text":typed,"value":list(typed)})
+        wait_for(lambda:text(code)=="def solve(values):\n    return len(values)","native Python Enter produces four-space indentation")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-dedent","actions":[
+            {"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue004"},{"type":"keyUp","value":"\ue004"},{"type":"keyUp","value":"\ue008"}
+        ]}]})
+        wait_for(lambda:text(code)=="def solve(values):\nreturn len(values)","native Shift+Tab dedents")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-tab","actions":[{"type":"keyDown","value":"\ue004"},{"type":"keyUp","value":"\ue004"}]}]})
+        wait_for(lambda:text(code)=="def solve(values):\n    return len(values)","native Tab indents")
+        (evidence/"EDITOR_KEYS_RESULT.txt").write_text("PASS: actual native WebKitGTK keyboard input; Python Enter uses four spaces, Shift+Tab dedents and Tab restores indentation. Completion popup click tested separately.\n")
         fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
         python_source=source.with_name("solution.py")
         wait_for(lambda: python_source.exists() and python_source.read_text() == "from collections import deque\nitems = deque([1, 2])\nitems.pop", "multiline Python source persisted exactly")
