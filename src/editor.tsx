@@ -10,7 +10,7 @@ import { EditorState, StateEffect, Prec, Compartment } from "@codemirror/state";
 import { EditorView, keymap, tooltips, panels } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { indentMore, indentLess, undo, redo, selectAll } from "@codemirror/commands";
-import { acceptCompletion, startCompletion, closeCompletion } from "@codemirror/autocomplete";
+import { acceptCompletion, closeCompletion } from "@codemirror/autocomplete";
 import { indentUnit } from "@codemirror/language";
 import { rust } from "@codemirror/lang-rust";
 import { python } from "@codemirror/lang-python";
@@ -83,7 +83,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
         {id:"editor.definition",enabled:()=>intelligence.available(),label:"转到定义",key:"F12",run:intelligence.commands.definition},
         {id:"editor.references",enabled:()=>intelligence.available(),label:"查找引用",key:"Shift-F12",run:intelligence.commands.references},
         {id:"editor.signature",enabled:()=>intelligence.available(),label:"参数提示",key:"Mod-Shift-Space",run:intelligence.commands.signature},
-        {id:"editor.completion",enabled:()=>intelligence.available(),label:"触发补全",run:startCompletion},
+        {id:"editor.completion",enabled:()=>intelligence.available(),label:"触发补全",run:intelligence.commands.completion},
       ]:[]),
       ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:formatDocument}]:[]),
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),

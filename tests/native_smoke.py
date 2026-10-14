@@ -134,7 +134,7 @@ def focus_code_editor():
 def click(css):
     # Only known visible transport-sensitive controls use one OS click.
     # WebDriver retains auto-scroll for other controls and native options.
-    if css in (".pane-heading .actions button", '[data-action="local-execute"]'):
+    if css in (".pane-heading .actions button", '[data-action="local-execute"]', '[data-action="open-settings"]'):
         return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
@@ -941,7 +941,7 @@ try:
             check=element(".format-switch input")
             selected=cmd("GET",f"/element/{check}/selected")
             if bool(selected)!=enabled: cmd("POST",f"/element/{check}/click",{})
-            click(".format-settings .settings-form-actions button")
+            click_debug_action(".format-settings .settings-form-actions button")
             wait_for(lambda:json.loads(editor_config.read_text())["formatOnSave"]==enabled,"native format preference saved")
             click('[aria-label="关闭设置"]')
         set_auto_format(True)
