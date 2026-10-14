@@ -23,6 +23,7 @@ use std::{path::PathBuf, sync::Mutex};
 use tauri::Manager;
 
 struct Store { root: PathBuf, gate: Mutex<()> }
+#[derive(Default)]struct Formatting(std::sync::atomic::AtomicBool);
 #[derive(serde::Serialize)]
 struct Document { code: Option<String>, notes: Option<String> }
 
@@ -309,6 +310,11 @@ async fn format_source(window:tauri::WebviewWindow,app:tauri::AppHandle,language
     check_origin(&window)?;
     if text.len()>1024*1024{return Err("格式化源码超过 1 MiB 限制".into());}
     tauri::async_runtime::spawn_blocking(move||{
+        use std::sync::atomic::Ordering;
+        let formatting=app.state::<Formatting>();
+        if formatting.0.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err(){return Err("格式化正在进行，请稍后保存".into());}
+        struct Guard<'a>(&'a std::sync::atomic::AtomicBool);impl Drop for Guard<'_>{fn drop(&mut self){self.0.store(false,Ordering::Release);}}
+        let _guard=Guard(&formatting.0);
         if matches!(language.as_str(),"c"|"cpp"|"java"){
             app.state::<lsp::Services>().format(id.ok_or("语言服务尚未连接")?,version.ok_or("缺少文档版本")?,&language,&text)
         }else{
@@ -340,6 +346,7 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             app.manage(Store { root, gate: Mutex::new(()) });
             app.manage(auth::Auth::default());
+            app.manage(Formatting::default());
             app.manage(download_settings::DownloadSettings::new(app.path().app_config_dir()?));
             app.manage(editor_settings::EditorSettings::new(app.path().app_config_dir()?));
             app.manage(debugger::Debugger::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("debug-sessions")));

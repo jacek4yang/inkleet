@@ -29,7 +29,8 @@
     "react-dom": "19.3.0",
     "@codemirror/autocomplete": "6.20.3",
     "@codemirror/lint": "6.9.7",
-    "@codemirror/language": "6.13.1"
+    "@codemirror/language": "6.13.1",
+    "@codemirror/merge": "6.12.2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.0",

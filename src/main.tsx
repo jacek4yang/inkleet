@@ -1,3 +1,4 @@
+import { formatEnabled, validateEditorSettings, type EditorSettings, type EditorSettingsSnapshot } from "./format-settings";
 import { officialTemplate } from "./official-template";
 import { SolutionPicker } from "./solution-picker";
 import { QuestionSidebar } from "./question-sidebar";
@@ -39,6 +40,10 @@ function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [fontInfo, setFontInfo] = useState(false);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
+  const [editorSettings,setEditorSettings]=useState<EditorSettingsSnapshot|null>(null);
+  const settingsVersion=useRef(0);
+  const [formatConfigError,setFormatConfigError]=useState("");
+  const [formatMessage,setFormatMessage]=useState("");
   const [languageStatus, setLanguageStatus] = useState("");
   const [reconnectToken, setReconnectToken] = useState(0);
   const points = useRef(new Map<string, number[]>());
@@ -75,6 +80,28 @@ function App() {
 
   const judge = useOnlineJudge({ identity, question: problem?.official, language, solution, code: doc.code });
   const editorLoading = !problem || loading || !documents.current.has(activeKey);
+
+  useEffect(()=>{
+    let alive=true;const token=++settingsVersion.current;
+    if(isTauri())invoke("get_editor_settings").then(value=>{if(alive&&token===settingsVersion.current)setEditorSettings(validateEditorSettings(value));}).catch(error=>{if(alive&&token===settingsVersion.current)setFormatConfigError(String(error));});
+    return()=>{alive=false;};
+  },[]);
+  async function reloadEditorSettings(){
+    const token=++settingsVersion.current;
+    try{const value=validateEditorSettings(await invoke("get_editor_settings"));if(token===settingsVersion.current){setEditorSettings(value);setFormatConfigError("");}}
+    catch(error){if(token===settingsVersion.current)setFormatConfigError(String(error));}
+  }
+  async function saveEditorSettings(settings:EditorSettings){
+    const token=++settingsVersion.current;
+    const saved=validateEditorSettings(await invoke("save_editor_settings",{settings,expected:editorSettings?.revision??null}));
+    if(token===settingsVersion.current){setEditorSettings(saved);setFormatConfigError("");}
+  }
+  async function savedBeforeFormat(text:string){
+    const key=activeKey;
+    await queue.current.idle;
+    return isTauri()&&selected.current===key&&!queue.current.failed(key)&&persisted.current.get(key)===text&&documents.current.get(key)?.code===text;
+  }
+  useEffect(()=>{setFormatMessage("");},[activeKey]);
 
   useEffect(() => {
     let alive = true;
@@ -315,17 +342,17 @@ function App() {
         persisted.current.set(key,isTauri()?text:null);selectSolution(entry.id);
       }} />}</div><div className="actions"><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
       {problem && baseTemplate===null && !doc.code.trim() && <p className="error" role="alert">官方模板不可用</p>}
-      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
+      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor formatting={{enabled:formatEnabled(editorSettings?.settings??null,language),saved:savedBeforeFormat,report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
       {localRunner && problem && <LocalRunner onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={activeKey} documentKey={activeKey} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} onClose={() => setLocalRunner(false)} />}
       {judge.panel}
     </section>
-    {settings && <SettingsHub initial={settings} languageStatus={languageStatus} onClose={() => setSettings(null)} actions={settingsActions} />}
+    {settings && <SettingsHub editorSettings={editorSettings} editorSettingsError={formatConfigError||formatMessage} onReloadEditorSettings={()=>void reloadEditorSettings()} onSaveEditorSettings={saveEditorSettings} initial={settings} languageStatus={languageStatus} onClose={() => setSettings(null)} actions={settingsActions} />}
     {environments && <Environments onClose={() => setEnvironments(false)} />}
     {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
     {catalogue && <Catalogue initialMode={catalogueMode} onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
     {recovery && <RecoveryDialog target={recovery} onClose={() => setRecovery(null)} onRefresh={async () => { setRecovery(await readConflict(recovery)); }} onRestore={restoreRecovery} />}
     {conflict && <ConflictDialog conflict={conflict} onClose={() => { ++conflictSequence.current; setConflict(null); }} onRefresh={async () => { setConflict(await readConflict(conflict)); }} onResolve={resolveConflict} />}
-    <footer className="statusbar" role="status" data-storage-state={status}><span>{["选择题目", "已读取本机文件", "已保存到本机文件", "已处理冲突 · 两份内容已保留", "已恢复所选副本 · 恢复前的两份内容仍已保留", "已重新读取外部笔记", "已请求外部编辑器打开笔记 · 返回时自动检查更新"].includes(status) ? "" : status}{queue.current.failed(activeKey) && <button data-action="review-code-conflict" onClick={() => void openConflict("code")}>对比源码</button>}{queue.current.failed(problemId + "/notes") && <button data-action="review-notes-conflict" onClick={() => void openConflict("notes")}>对比笔记</button>}{(queue.current.failed(activeKey) || queue.current.failed(problemId + "/notes")) && <button onClick={retrySave}>重试保存</button>}</span></footer>
+    <footer className="statusbar" role="status" data-storage-state={status}><span>{["选择题目", "已读取本机文件", "已保存到本机文件", "已处理冲突 · 两份内容已保留", "已恢复所选副本 · 恢复前的两份内容仍已保留", "已重新读取外部笔记", "已请求外部编辑器打开笔记 · 返回时自动检查更新"].includes(status) ? "" : status}{queue.current.failed(activeKey) && <button data-action="review-code-conflict" onClick={() => void openConflict("code")}>对比源码</button>}{queue.current.failed(problemId + "/notes") && <button data-action="review-notes-conflict" onClick={() => void openConflict("notes")}>对比笔记</button>}{(queue.current.failed(activeKey) || queue.current.failed(problemId + "/notes")) && <button onClick={retrySave}>重试保存</button>}</span>{(formatConfigError||formatMessage)&&<IconButton icon="info" label="格式化状态" title={formatConfigError||formatMessage} onClick={()=>setSettings("editor")} />}</footer>
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<App />);

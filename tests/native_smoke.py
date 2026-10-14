@@ -190,6 +190,11 @@ def stop():
     if session:
         cmd("DELETE","")
         session = None
+# Legacy interaction fixtures intentionally opt out; dedicated native formatter
+# cases below enable the real default-on setting through the Settings UI.
+editor_config=pathlib.Path(os.environ["XDG_CONFIG_HOME"])/"top.jacek.inkleet/editor-settings.json"
+editor_config.parent.mkdir(parents=True,exist_ok=True)
+editor_config.write_text(json.dumps({"version":1,"formatOnSave":False,"overrides":{}}))
 driver = subprocess.Popen(["tauri-driver"], stdout=open(evidence/"driver.log","w"), stderr=subprocess.STDOUT)
 try:
     wait_for(lambda: request("GET","/status"), "driver ready")
@@ -534,6 +539,7 @@ try:
             return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
         wait_for(lambda:all(value in child_values() for value in ["3","-1","8"]),"expanded array children preserve exact values")
 
+        reveal_debug_control('[aria-label="调试表达式输入"]')
         fill('[aria-label="调试表达式输入"]',"inner_total")
         reveal_debug_control('[aria-label="添加监视表达式"]')
         click('[aria-label="添加监视表达式"]')
@@ -715,6 +721,45 @@ try:
                 click(".local-runner [aria-label='收起']")
                 fill(code,code_text)
 
+        click('select[aria-label="编程语言"] option[value="rust"]')
+        fill(code,marker)
+
+
+        # Actual formatter processes/LSP inside the real WebView, never mocked IPC.
+        def set_auto_format(enabled):
+            click('[data-action="open-settings"]')
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='编辑器']"})[EID]
+            cmd("POST",f"/element/{category}/click",{})
+            check=element(".format-switch input")
+            selected=cmd("GET",f"/element/{check}/selected")
+            if bool(selected)!=enabled: cmd("POST",f"/element/{check}/click",{})
+            click(".format-settings .settings-form-actions button")
+            wait_for(lambda:json.loads(editor_config.read_text())["formatOnSave"]==enabled,"native format preference saved")
+            click('[aria-label="关闭设置"]')
+        set_auto_format(True)
+        formatter_sources={
+            "python3":("py","def solve(values):\n return sum(values)"),
+            "rust":("rs","fn solve(values:Vec<i32>)->i32{values.iter().sum()}"),
+            "golang":("go","func solve(values []int)int{return len(values)}"),
+            "c":("c","int solve(int* values,int valuesSize){return valuesSize;}"),
+            "cpp":("cpp","int solve(vector<int>& values){return values.size();}"),
+            "java":("java","class Solution{public int solve(int[] values){return values.length;}}"),
+        }
+        for language,(extension,unformatted) in formatter_sources.items():
+            click(f'select[aria-label="编程语言"] option[value="{language}"]')
+            if language in ("c","cpp","java"):
+                wait_for(lambda:"已连接" in text(".lsp-status"),language+" formatting service ready",seconds=100)
+            fill(code,unformatted)
+            source_file=data/("top.jacek.inkleet/notebook/lc-900000001/"+("Solution.java" if language=="java" else "solution."+extension))
+            wait_for(lambda:source_file.exists() and source_file.read_text()==unformatted,language+" raw source saved before formatting")
+            wait_for(lambda:source_file.read_text()!=unformatted and "solve" in source_file.read_text(),language+" real format-on-save applied",seconds=25)
+            formatted=source_file.read_text()
+            wait_for(lambda:source_text(code)==formatted.rstrip("\n") or source_text(code)==formatted,language+" formatted file and editor agree")
+            time.sleep(1.5)
+            assert source_file.read_text()==formatted,language+" formatter loop or unexpected write"
+            screenshot(language+"-formatted-native.png")
+            (evidence/(language.upper()+"_FORMAT_NATIVE_RESULT.txt")).write_text("PASS: real Linux Tauri GUI default-on preference, raw source save, private formatter/LSP result applied and persisted, stable subsequent contents.\n")
+        set_auto_format(False)
         click('select[aria-label="编程语言"] option[value="rust"]')
         fill(code,marker)
 
