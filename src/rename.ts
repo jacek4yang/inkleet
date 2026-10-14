@@ -101,7 +101,7 @@ export function renameSymbol(
         }
         const restore=dom.contains(document.activeElement);
         proposed=changes;heading.textContent="本题源码 · "+changes.length+" 处修改";
-        editing.hidden=true;review.hidden=false;if(restore)heading.focus();
+        editing.hidden=true;review.hidden=false;review.append(cancel);if(restore)heading.focus();
       }
       async function submit(previewOnly:boolean){
         if(!ready||pending||composing||view.composing||!current()||!review.hidden)return;
@@ -135,7 +135,7 @@ export function renameSymbol(
       dom.onsubmit=event=>{event.preventDefault();void submit(false);};
       preview.onclick=()=>{void submit(true);};
       commit.onclick=()=>{if(proposed)applyChanges(proposed);};
-      back.onclick=()=>{proposed=null;review.hidden=true;editing.hidden=false;error.textContent="";input.focus();input.select();};
+      back.onclick=()=>{proposed=null;dom.insertBefore(cancel,error);review.hidden=true;editing.hidden=false;error.textContent="";input.focus();input.select();};
       async function initialize(){
         if(!prepare)return;
         try{

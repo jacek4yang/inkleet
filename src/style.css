@@ -445,3 +445,9 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .lsp-rename-change>span{color:var(--muted);text-align:right}
 .lsp-rename-change pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-family:var(--font-mono)}
 .lsp-rename-before{color:#9b5555}.lsp-rename-after{color:#387451}
+
+/* Refactoring previews are compact code rows, not Markdown code cards. */
+.lsp-rename{border-radius:6px;box-shadow:0 6px 22px #00000012}
+.lsp-rename:has(.lsp-rename-preview:not([hidden])){width:min(420px,80vw)}
+.lsp-rename .lsp-rename-change pre{padding:2px 4px;border:0;border-radius:0;background:transparent;box-shadow:none}
+.lsp-rename button{min-height:24px;padding:3px 8px;font-size:12px}

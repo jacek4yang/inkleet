@@ -745,6 +745,7 @@ try {
   assert.equal(await renameRequests(),previewBefore+1);
   assert.equal(await renamePreview.locator(".lsp-rename-change").count(),2);
   assert.deepEqual(await renamePreview.locator(".lsp-rename-after").allTextContents(),["previewed","previewed"]);
+  assert.deepEqual(await renamePreview.locator(".lsp-rename-before").first().evaluate(el=>{const s=getComputedStyle(el);return {border:s.borderTopWidth,background:s.backgroundColor,padding:s.paddingTop};}),{border:"0px",background:"rgba(0, 0, 0, 0)",padding:"2px"},"rename preview avoids Markdown card styling");
   await lspPage.screenshot({path:"evidence/rename-preview.png"});
   await renamePreview.getByRole("button",{name:"应用",exact:true}).click();
   assert.equal(await lspEditor.innerText(),"previewed = []\npreviewed.append(1)");
