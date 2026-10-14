@@ -1,3 +1,4 @@
+import {steadyVimCursor} from "./steady-cursor";
 import {vim,Vim,getCM} from "@replit/codemirror-vim";
 import {Prec,EditorState,Transaction,type Extension} from "@codemirror/state";
 import {isolateHistory} from "@codemirror/commands";
@@ -34,7 +35,8 @@ export function vimEditing(save:(view:EditorView)=>boolean):Extension{
     ]},tr];
   });
   return [
-    Prec.high(vim({status:true})),
+    Prec.high(vim({status:false})),
+    steadyVimCursor(),
     ViewPlugin.fromClass(class{
       private cm:ReturnType<typeof getCM>;
       private modeChanged=()=>{if(this.cm?.state.vim?.insertMode){if(!pendingOperator)changed=false;pendingOperator=false;}else{changed=false;pendingOperator=false;}};

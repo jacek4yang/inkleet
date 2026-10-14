@@ -156,6 +156,11 @@ try {
   await page.getByRole("heading", { name: "Intel One Mono", exact: true }).waitFor();
   await page.getByRole("button", { name: "关闭字体说明", exact: true }).click();
   assert.equal(await page.locator(".editor-foot").count(), 0, "low-frequency actions are not permanently shown below the editor");
+  assert.equal(await page.locator(".code-pane > .lsp-status").count(),0,"LSP never overlays save toolbar");
+  assert.equal(await page.locator(".statusbar > .lsp-status").count(),1,"LSP belongs to global status");
+  const saveBounds=await page.getByRole("button",{name:"保存源码",exact:true}).boundingBox();
+  const lspBounds=await page.locator(".statusbar > .lsp-status").boundingBox();
+  assert.ok(lspBounds.y>=saveBounds.y+saveBounds.height,"LSP and save hit targets are separate");
   const beforeSettings = await editor.innerText();
   const settingsDialog = await openSettings(page, "语言与环境");
   await settingsDialog.getByRole("textbox", { name: "搜索设置" }).fill("导出");
@@ -503,7 +508,7 @@ try {
   const restorePage=await testPage();
   await restorePage.addInitScript(()=>{
     window.isTauri=true;
-    const state=window.__authRestoreTest={defer:false,cancelled:0};
+    const state=window.__authRestoreTest={defer:sessionStorage.getItem("deferRestore")==="1",cancelled:0};
     const identity={username:"restored-user",account:"restored-account",persistence:"memory-only"};
     window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
       if(command==="login_status")return state.defer?new Promise(resolve=>state.reply=resolve):identity;
@@ -522,6 +527,15 @@ try {
   await restorePage.getByRole("button",{name:"restored-user · 退出",exact:true}).waitFor();
   await restorePage.reload();
   await restorePage.getByRole("button",{name:"restored-user · 退出",exact:true}).waitFor();
+  await restorePage.evaluate(()=>sessionStorage.setItem("deferRestore","1"));
+  await restorePage.reload();
+  await restorePage.waitForFunction(()=>typeof window.__authRestoreTest.reply==="function");
+  await restorePage.getByRole("button",{name:"登录力扣",exact:true}).click();
+  await restorePage.getByRole("button",{name:"取消登录",exact:true}).click();
+  await restorePage.evaluate(()=>window.__authRestoreTest.reply({username:"stale-restored",account:"stale",persistence:"memory-only"}));
+  await restorePage.waitForTimeout(100);
+  assert.equal(await restorePage.getByRole("button",{name:"stale-restored · 退出",exact:true}).count(),0,"late status cannot revive canceled account");
+  await restorePage.getByRole("button",{name:"登录力扣",exact:true}).waitFor();
   await restorePage.close();
 
   // 链接入口协议 fixture：测试竞态与草稿保护，不冒充真实中国站请求。
@@ -902,7 +916,16 @@ try {
   });
   await runPage.goto("http://127.0.0.1:5173");
   await runPage.getByRole("combobox", { name: "编程语言" }).selectOption("python3");
+  await runPage.evaluate(()=>document.fonts.ready);
+  const fontProbe=()=>runPage.locator(".code-pane .cm-content").evaluate(node=>{
+    const style=getComputedStyle(node),rect=node.getBoundingClientRect();
+    return {fontFamily:style.fontFamily,fontSize:style.fontSize,fontWeight:style.fontWeight,fontStyle:style.fontStyle,letterSpacing:style.letterSpacing,textShadow:style.textShadow,transform:style.transform,x:rect.x,y:rect.y,width:rect.width};
+  });
+  const fontBefore=await fontProbe();
   await runPage.getByRole("button", { name: "本地", exact: true }).click();
+  const fontOpen=await fontProbe();
+  for(const key of ["fontFamily","fontSize","fontWeight","fontStyle","letterSpacing","textShadow","transform"])assert.equal(fontOpen[key],fontBefore[key],"dock must not change "+key);
+  await writeFile("evidence/editor-font-dock.json",JSON.stringify({before:fontBefore,open:fontOpen},null,2));
   const runPanel = runPage.getByRole("region", { name: "本地运行", exact: true });
   await runPanel.getByRole("button", { name: "本地执行", exact: true }).evaluate(button => { button.click(); button.click(); });
   await runPage.waitForFunction(() => window.__runTest.starts.length === 1);
@@ -1161,7 +1184,7 @@ try {
   await conflictPage.goto("http://127.0.0.1:5173");
   const conflictEditor = conflictPage.getByRole("textbox", { name: "代码编辑器", exact: true });
   await conflictPage.locator('.statusbar[data-storage-state="已读取本机文件"]').waitFor();
-  assert.equal(await conflictPage.locator(".statusbar").innerText(),"","successful file loading adds no persistent sentence");
+  assert.equal(await conflictPage.locator(".storage-status").innerText(),"","successful file loading adds no persistent sentence");
   assert.equal(await conflictPage.getByText("在线评测需要登录中国站",{exact:true}).count(),0,"login explanation is not permanent workbench clutter");
   await conflictPage.evaluate(() => { window.__conflictTest.file = "external"; });
   await conflictEditor.fill("local draft");
@@ -1631,6 +1654,7 @@ try {
     const state=window.__vimTest={code:"one two\nthree four",saves:[],formats:[],settings:{version:1,formatOnSave:false,vim:false,overrides:{}},revision:null};
     window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
       if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="search_questions")return {questions:[],total:0,hasMore:false};
       if(command==="external_editor_supported")return false;
       if(command==="login_status")return null;
       if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
@@ -1652,7 +1676,25 @@ try {
   await vimPage.getByRole("button",{name:"保存设置",exact:true}).click();
   await vimPage.waitForFunction(()=>window.__vimTest.settings.vim===true);
   await vimPage.getByRole("button",{name:"关闭设置",exact:true}).click();
-  await vimCode.click();await vimPage.keyboard.press("Escape");await vimPage.keyboard.type("gg0ciwONE");await vimPage.keyboard.press("Escape");
+  await vimCode.click();await vimPage.keyboard.press("Escape");
+  await vimPage.waitForFunction(()=>document.querySelector(".editor-status-mode")?.textContent==="NORMAL");
+  assert.equal(await vimPage.locator(".code-pane .cm-vim-panel").count(),0,"no duplicate local mode bar");
+  assert.equal(await vimPage.locator(".statusbar .editor-status-mode").count(),1);
+  assert.equal(await vimPage.locator(".cm-vimCursorLayer").first().evaluate(node=>getComputedStyle(node).animationName),"none");
+  await vimPage.keyboard.type("i");
+  await vimPage.waitForFunction(()=>document.querySelector(".editor-status-mode")?.textContent==="INSERT");
+  const insertBlock=vimPage.locator(".code-pane .inkleet-insert-cursor").first();
+  await insertBlock.waitFor({state:"visible"});
+  const block=await insertBlock.boundingBox();assert.ok(block.width>5&&block.height>10,"INSERT cursor has measured character cell");
+  await vimPage.waitForTimeout(1500);
+  assert.equal(await insertBlock.isVisible(),true,"INSERT block remains steady");
+  assert.equal(await vimCode.locator(".cm-line").allTextContents().then(lines=>lines.join("\n")),"one two\nthree four","visual cursor cannot enable overwrite");
+  await vimPage.screenshot({path:"evidence/vim-insert-status.png"});
+  await vimPage.keyboard.press("Escape");
+  await vimPage.waitForFunction(()=>document.querySelector(".editor-status-mode")?.textContent==="NORMAL");
+  assert.equal(await vimPage.locator(".inkleet-insert-cursor").count(),0,"no stale INSERT cursor in NORMAL");
+  await vimPage.screenshot({path:"evidence/vim-normal-status.png"});
+  await vimPage.keyboard.type("gg0ciwONE");await vimPage.keyboard.press("Escape");
   const vimText=()=>vimCode.locator(".cm-line").allTextContents().then(lines=>lines.join("\n"));
   assert.equal(await vimText(),"ONE two\nthree four","real Vim ciw replaces word");
   await vimPage.keyboard.type("u");assert.equal(await vimText(),"one two\nthree four");
@@ -1667,7 +1709,10 @@ try {
   assert.equal(await vimText(),"中文 ONE two\nthree four","Unicode insertion preserved");
   await vimPage.waitForTimeout(1400);
   assert.deepEqual(await vimPage.evaluate(()=>window.__vimTest.saves),[],"Vim edits never idle-save");
-  await vimPage.keyboard.type(":w");await vimPage.keyboard.press("Enter");
+  await vimPage.keyboard.type(":w");
+  await vimPage.locator(".statusbar .cm-vim-panel input").waitFor({state:"visible"});
+  assert.equal(await vimPage.locator(".code-pane .cm-vim-panel").count(),0,"Ex command lives in bottom status");
+  await vimPage.keyboard.press("Enter");
   await vimPage.waitForFunction(()=>window.__vimTest.saves.length===1);
   assert.equal(await vimPage.evaluate(()=>window.__vimTest.code),await vimText());
   assert.equal(await vimPage.evaluate(()=>window.__vimTest.formats.length),0,"Vim write respects disabled formatter");
@@ -1680,6 +1725,19 @@ try {
   await vimPage.keyboard.press("Escape");
   assert.equal(await vimCode.evaluate(node=>node===document.activeElement),true,"palette restores editor focus");
   const beforeVimToggle=await vimText();
+  await vimPage.getByRole("button",{name:"笔记",exact:true}).click();
+  const vimNotes=vimPage.getByRole("textbox",{name:"Markdown 笔记",exact:true});
+  await vimNotes.click();await vimPage.keyboard.press("Escape");
+  await vimPage.waitForFunction(()=>document.querySelector(".editor-status-meta")?.textContent?.includes("Markdown"));
+  await vimPage.keyboard.type("/note");
+  await vimPage.locator(".statusbar .cm-vim-panel input").waitFor({state:"visible"});
+  await vimPage.keyboard.press("Escape");await vimCode.click();
+  await vimPage.waitForFunction(()=>document.querySelector(".editor-status-meta")?.textContent?.includes("Rust"));
+  assert.equal(await vimText(),beforeVimToggle,"code/notes focus routing preserves code");
+  await vimNotes.click();
+  await vimPage.getByRole("button",{name:"题目",exact:true}).click();
+  await vimPage.waitForFunction(()=>document.querySelector(".editor-status-meta")?.textContent?.includes("Rust"));
+  assert.equal(await vimPage.locator(".editor-status-mode").innerText(),"NORMAL","closing active notes restores remaining code status");
   await openSettings(vimPage,"编辑器");
   await vimPage.getByRole("checkbox",{name:"Vim",exact:true}).uncheck();
   await vimPage.getByRole("button",{name:"保存设置",exact:true}).click();

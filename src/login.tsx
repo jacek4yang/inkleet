@@ -10,7 +10,7 @@ export function Login({ onIdentity }: { onIdentity: (value: Identity | null) => 
   const generation = useRef(0);
   const notify=useRef(onIdentity);notify.current=onIdentity;
   async function restore(token:number){
-    try{const value=await invoke<Identity|null>("login_status");if(token===generation.current){setIdentity(value);notify.current(value);}}
+    try{const value=await invoke<Identity|null>("login_status");if(token===generation.current){setIdentity(value);notify.current(value);if(value)setOpen(false);}}
     catch{if(token===generation.current){setIdentity(null);notify.current(null);}}
   }
   useEffect(()=>{

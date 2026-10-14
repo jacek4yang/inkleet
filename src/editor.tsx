@@ -1,3 +1,4 @@
+import {editorStatus} from "./editor-status";
 import {vimEditing,vimNormal,getCM} from "./vim";
 import {indentGuides} from "./indent-guides";
 import {editorCommands} from "./editor-commands";
@@ -6,7 +7,7 @@ import type { DebugPosition } from "./debug-position";
 import { formatOnSave, formatDocument, saveDocument } from "./format-on-save";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { EditorState, StateEffect, Prec, Compartment } from "@codemirror/state";
-import { EditorView, keymap, tooltips } from "@codemirror/view";
+import { EditorView, keymap, tooltips, panels } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { indentMore, indentLess, undo, redo, selectAll } from "@codemirror/commands";
 import { acceptCompletion, startCompletion, closeCompletion } from "@codemirror/autocomplete";
@@ -26,7 +27,7 @@ import { SourceViewer } from "./source-viewer";
 // 切换题目/语言时保留各自的撤销历史、光标与滚动位置。
 const sessions = new Map<string, { state: EditorState; scroll: number }>();
 const theme = EditorView.theme({
-  "&": { height: "100%", backgroundColor: "var(--surface-editor)", color: "var(--ink)", fontSize: "14px" },
+  "&": { height: "100%", backgroundColor: "var(--surface-editor)", color: "var(--ink)", fontSize: "14px", fontWeight:"400", textShadow:"none" },
   ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", lineHeight: "1.75" },
   ".cm-content": { padding: "8px 0", caretColor: "var(--accent)" },
   ".cm-line": { padding: "0 8px" },
@@ -87,8 +88,11 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:formatDocument}]:[]),
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
     ];
+    const footer=document.getElementById("vim-command-slot");
+    const commandHost=footer?document.createElement("div"):null;
+    if(commandHost){commandHost.className="vim-command-host";footer!.appendChild(commandHost);}
     const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
-      basicSetup, syntax(language), theme, ...(language==="markdown"?[]:[indentGuides]),
+      basicSetup, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), ...(language==="markdown"?[]:[indentGuides]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
@@ -127,9 +131,10 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       intelligence?.destroy();
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
       view.destroy();
+      commandHost?.remove();
     };
   }, [documentKey, language, label, connection, metadata]);
   useLayoutEffect(()=>{const view=liveView.current;if(view)view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});},[vimEnabled]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection, language, label, metadata]);
-  return <><div className="editor-host" ref={host} />{(language !== "markdown") && <button type="button" onClick={onSettings} className={"lsp-status " + (lspStatus.includes("已连接") ? "ready" : "unavailable")} data-status={lspStatus} aria-label="语言服务设置" title={lspStatus}><i /><span>LSP</span></button>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }
