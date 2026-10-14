@@ -1,13 +1,13 @@
-name: Linux polished preview
+name: Linux measured-work performance preview
 on:
   push:
-    branches: [feat/real-use-hardening]
+    branches: [build/performance-preview]
     paths: ['src/**', 'src-tauri/**', 'crates/**', 'public/**', 'package*.json', '.github/workflows/linux-preview.yml', 'scripts/package-linux-portable.sh', 'tests/native_smoke.py']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: linux-real-use-preview
+  group: linux-performance-preview
   cancel-in-progress: false
 jobs:
   linux-preview:
@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          ref: 2679c2749bb6daacacb4f7233f7565c27ec33f7f
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
@@ -33,6 +34,7 @@ jobs:
       - name: Prepare frontend and icon
         shell: bash
         run: |
+          test "$(git rev-parse HEAD)" = 2679c2749bb6daacacb4f7233f7565c27ec33f7f
           npm ci --ignore-scripts
           npm run tauri -- icon icon.svg
           npm run build
@@ -44,6 +46,9 @@ jobs:
       - name: Validate and install Linux package, then test the installed application
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          INKLEET_MANAGED_ENV: "1"
+          INKLEET_LIVE_CN: "1"
         run: |
           mkdir -p evidence/install
           mapfile -d '' packages < <(find src-tauri/target/release/bundle/deb -name '*.deb' -print0)
@@ -63,13 +68,14 @@ jobs:
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export INKLEET_TEST_BINARY=/usr/bin/inkleet
           xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+          mv evidence/native evidence/installed-native
       - name: Build and verify Linux tar distribution
         if: runner.os == 'Linux'
         shell: bash
         run: |
           mapfile -d '' packages < <(find src-tauri/target/release/bundle/deb -name '*.deb' -print0)
           test "${#packages[@]}" -eq 1
-          bash scripts/package-linux-portable.sh "${packages[0]}" "$GITHUB_SHA" src-tauri/target/release/bundle/portable
+          bash scripts/package-linux-portable.sh "${packages[0]}" "$(git rev-parse HEAD)" src-tauri/target/release/bundle/portable
           mkdir -p evidence/tar
           unpacked="$(mktemp -d)"
           tar -xzf src-tauri/target/release/bundle/portable/*.tar.gz -C "$unpacked"
@@ -90,6 +96,7 @@ jobs:
             src-tauri/target/release/bundle/
             src-tauri/Cargo.lock
             evidence/install/
+            evidence/installed-native/
             evidence/native/
             evidence/tar/
           if-no-files-found: warn
