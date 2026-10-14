@@ -849,7 +849,7 @@ try:
                         wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":pair_selector+' > .debug-tree-children > .debug-tree-node > .debug-variable > code'}))==2,"pair children loaded before next layout-dependent click")
                     def map_values():
                         nodes=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-tree-children > .debug-tree-node > .debug-variable > code'})
-                        return sorted(cmd("GET",f"/element/{item[EID]}/text") for item in nodes)
+                        return sorted(cmd("GET",f"/element/{item[EID]}/property/textContent") for item in nodes)
                     wait_for(lambda:map_values()==["3","30","8","80"],"logical HashMap keys and values regardless of iteration order")
                     click(map_node+' > .debug-tree-children > .debug-raw-toggle')
                     wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
