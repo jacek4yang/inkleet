@@ -2,7 +2,7 @@ name: Linux integrated preview
 on:
   push:
     branches: [feat/linux-preview-integrated]
-    paths: ['.github/workflows/linux-preview.yml']
+    paths: ['.github/workflows/linux-preview.yml', 'tests/native_smoke.py']
   workflow_dispatch:
 permissions:
   contents: read
