@@ -89,6 +89,15 @@ pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
         assert_eq!(cache.get(token,7).unwrap()["label"],"B");
         assert_ne!(order.load(Ordering::Relaxed),older);
     }
+    #[test]fn concurrent_admission_keeps_highest_issuer_sequence(){
+        let order=AtomicU64::new(0);let barrier=std::sync::Barrier::new(16);
+        std::thread::scope(|scope|{
+            let mut tasks=Vec::new();
+            for n in 1..=16 {let order=&order;let barrier=&barrier;tasks.push((n,scope.spawn(move||{barrier.wait();admit_sequence(order,Some(n))})));}
+            for (n,task) in tasks {let result=task.join().unwrap();if n==16{assert_eq!(result.unwrap(),16);}}
+        });
+        assert_eq!(order.load(Ordering::Relaxed),16);
+    }
     #[test]fn invalid_sequences_do_not_advance_admission(){
         let order=AtomicU64::new(0);
         for sequence in [None,Some(0),Some(9_007_199_254_740_992),Some(u64::MAX)]{

@@ -121,8 +121,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     await flush();
     if (closed || session?.id!==id || view!==owner || owner.state.doc!==doc || !stillCurrent()) return null;
     const line = doc.lineAt(pos), askedVersion = version;
+    if(kind==="completion"&&completionSequence>=Number.MAX_SAFE_INTEGER)throw Error("补全请求序号已耗尽，请重新连接语言服务");
     const sequence=kind==="completion"?++completionSequence:null;
-    if(sequence!==null&&!Number.isSafeInteger(sequence))throw Error("补全请求序号已耗尽，请重新连接语言服务");
     const result = await invoke("language_request", { id, version: askedVersion, kind, completionSequence:sequence, line: line.number - 1, character: pos - line.from, newName: newName ?? null, completionContext:completionContext??null });
     return !closed && session?.id === id && version === askedVersion && view===owner && owner.state.doc===doc && stillCurrent() ? result : null;
   }
