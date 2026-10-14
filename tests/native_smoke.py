@@ -91,7 +91,8 @@ def click_debug_action(css):
     # A debugger action is not idempotent: emit exactly one real pointer click.
     # Do not fall back to another injection path after an uncertain mutation.
     node=element(css)
-    assert cmd("GET",f"/element/{node}/enabled"), "debug action is disabled: "+css
+    wait_for(lambda:cmd("GET",f"/element/{element(css)}/enabled"),"debug action becomes enabled: "+css)
+    node=element(css)
     rect=cmd("GET",f"/element/{node}/rect")
     window=cmd("GET","/window/rect")
     assert rect["width"]>0 and rect["height"]>0, "debug action has no visible bounds"
