@@ -121,7 +121,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     const result = await invoke("language_request", { id, version: askedVersion, kind, line: line.number - 1, character: pos - line.from, newName: newName ?? null });
     return !closed && session?.id === id && version === askedVersion && view.state.doc === doc ? result : null;
   }
-  let completionApplyGeneration=0;
+  let completionApplyGeneration=0,activeCompletionResolves=0;
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
     const word = context.matchBefore(/\w*/);
@@ -154,15 +154,32 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         if(!result)continue;
         const id=session?.id,askedVersion=version,resolve=session?.completionResolve===true,token=item._inkleetCompletion;
         if(resolve&&(!Number.isSafeInteger(token)||token<=0))continue;
+        let resolution:Promise<unknown>|null=null;
+        const resolveItem=():Promise<unknown>=>{
+          if(!resolve)return Promise.resolve(item);
+          if(resolution)return resolution;
+          if(closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return Promise.reject(Error("补全快照已过期"));
+          if(activeCompletionResolves>=4)return Promise.reject(Error("补全解析繁忙，请重试"));
+          activeCompletionResolves++;
+          resolution=invoke<unknown>("language_completion_resolve",{id,version:askedVersion,token}).catch(error=>{resolution=null;throw error;}).finally(()=>{activeCompletionResolves--;});
+          return resolution;
+        };
         options.push({
           label: typeof item.filterText === "string" ? item.filterText.slice(0, 512) : item.label.trimStart(), displayLabel: item.label.trimStart(), detail: typeof item.detail === "string" ? item.detail.slice(0, 500) : undefined,
-          info: content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
+          info: resolve ? async()=>{
+            try{
+              const resolved=await resolveItem();
+              if(closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return null;
+              const text=object(resolved)?content(resolved.documentation):"";if(!text)return null;
+              const dom=document.createElement("div");dom.className="lsp-completion-documentation";dom.textContent=text;return dom;
+            }catch{return null;}
+          } : content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
           apply(target) {
             const ticket=++completionApplyGeneration;
             const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.main.head===context.pos&&target.state.selection.main.empty&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
             if(!current())return;
             void (async()=>{
-              const resolved=resolve?await invoke<unknown>("language_completion_resolve",{id,version:askedVersion,token}):item;
+              const resolved=await resolveItem();
               if(!current())return;
               const applied=object(resolved)?completionChanges(doc,resolved,word?.from??context.pos,context.pos):null;
               if(!applied)throw Error("补全或导入编辑无效，未修改源码");

@@ -200,7 +200,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             "processId":null,"rootUri":root_uri,"initializationOptions":launch.initialization,
             "capabilities":{
                 "general":{"positionEncodings":["utf-16"]},
-                "textDocument":{"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":if language=="rust"{json!({"snippetSupport":false,"resolveSupport":{"properties":["additionalTextEdits"]}})}else{json!({"snippetSupport":false})}},"publishDiagnostics":{"versionSupport":true}},
+                "textDocument":{"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":if language=="rust"{json!({"snippetSupport":false,"resolveSupport":{"properties":["documentation","additionalTextEdits"]}})}else{json!({"snippetSupport":false})}},"publishDiagnostics":{"versionSupport":true}},
                 "workspace":{"configuration":true,"workspaceFolders":true,"semanticTokens":{"refreshSupport":true}}
             },
             "workspaceFolders":[{"uri":root_uri,"name":"InkLeet"}]
