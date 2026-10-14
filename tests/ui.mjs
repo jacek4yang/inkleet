@@ -1618,9 +1618,9 @@ try {
   assert.match(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),/let _map = HashMap/);
   await inputPage.keyboard.press("Control+z");
   assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","atomic import and primary edit undo together");
+  await inputPage.evaluate(()=>{window.__inputTest.reply=null;});
   await inputPage.keyboard.press("Control+Space");await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
   await inputPage.waitForTimeout(150);
-  await inputPage.evaluate(()=>{window.__inputTest.reply=null;});
   await inputPage.keyboard.press("Enter");
   await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
   await inputPage.keyboard.press("ArrowLeft");
