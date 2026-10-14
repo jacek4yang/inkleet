@@ -577,8 +577,8 @@ try:
         wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
         wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
         def java_total():
-            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='total']]/code"})[EID]
-            return cmd("GET",f"/element/{node}/text")
+            node=element('.debug-variable > button[aria-label="total"] + code')
+            return cmd("GET",f"/element/{node}/property/textContent")
         wait_for(lambda: java_total()=="0","Java initial total")
         wait_for(lambda: "部分断点尚未验证" not in text(".debug-panel"),"Java asynchronous breakpoint verification reaches the UI")
         screenshot("java-debug-native.png")
