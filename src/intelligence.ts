@@ -8,7 +8,7 @@ import { findReferences } from "./references";
 import { renameSymbol } from "./rename";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
-import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
+import { Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
 import { autocompletion, startCompletion, type Completion, type CompletionContext } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
@@ -127,6 +127,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   function invokeCompletion(target:EditorView){
     if(closed||view!==target||!session||target.composing)return false;
     incomplete=null;typing=null;++completionRequestGeneration;
+    // Reset CodeMirror's active source query as well as our request generation.
+    // Starting again alone can leave a stale pending query with no replacement.
+    target.dispatch({selection:target.state.selection});
     return startCompletion(target);
   }
   async function complete(context: CompletionContext) {
@@ -293,9 +296,10 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     signatureField,
     semanticField, semanticTheme,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
+    Prec.highest(keymap.of([{key:"Mod-Space",run:invokeCompletion}])),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventObservers({keydown(event){if((event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&(event.code==="Space"||event.key===" ")&&!event.isComposing){incomplete=null;typing=null;++completionRequestGeneration;}if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;}}}),
+    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;}}}),
     EditorView.domEventHandlers({ blur(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;return false;}, compositionstart(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
