@@ -28,3 +28,11 @@ test("raw view is identified only by adapter metadata, never user field names",(
   assert.deepEqual(values.map(isRawDebugVariable),[true,false,false,false]);
   assert.deepEqual(values[3].presentationHint?.attributes,["virtual"]);
 });
+
+test("bounded collection retains the final adapter raw branch",()=>{
+  const input=Array.from({length:150},(_,i)=>({name:"["+i+"]",value:String(i),variablesReference:0}));
+  const raw={name:"[raw]",value:"raw",variablesReference:42,presentationHint:{attributes:["readOnly","virtual"]}};
+  const values=debugVariables([...input,raw]);
+  assert.equal(values.length,100);assert.equal(values.filter(isRawDebugVariable).length,1);
+  assert.equal(values.at(-1)?.variablesReference,42);
+});

@@ -36,7 +36,7 @@ export function VariableNode({ variable, token, read, depth = 0 }: Props) {
       {error && <small role="alert">{error}</small>}
       {items?.filter(child=>showRaw||!isRawDebugVariable(child)).map((child, index) => <VariableNode key={index + ":" + child.name} variable={child} token={token} read={read} depth={depth + 1} />)}
       {items?.some(isRawDebugVariable) && <button type="button" className="debug-raw-toggle" aria-pressed={showRaw} onClick={()=>setShowRaw(value=>!value)}>{showRaw?"隐藏内部结构":"内部结构"}</button>}
-      {items?.length === 0 && <small>无子项</small>}
+      {items && items.filter(child=>showRaw||!isRawDebugVariable(child)).length===0 && <small>无子项</small>}
       {items && (items.length >= 100 || (variable.namedVariables ?? 0) + (variable.indexedVariables ?? 0) > items.length) && <small>当前显示前 {items.length} 项</small>}
     </div>}
   </div>;

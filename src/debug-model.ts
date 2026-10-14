@@ -5,7 +5,10 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const integer = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 export function debugVariables(value: unknown): DebugVariable[] {
-  return list(value).slice(0, 100).flatMap(item => {
+  const all=list(value), bounded=all.slice(0,100), tail=all.at(-1);
+  // CodeLLDB appends its synthetic raw branch after all logical children.
+  if(all.length>100&&record(tail)&&tail.name==="[raw]"&&record(tail.presentationHint)&&Array.isArray(tail.presentationHint.attributes)&&tail.presentationHint.attributes.includes("readOnly")&&tail.presentationHint.attributes.includes("virtual"))bounded[99]=tail;
+  return bounded.flatMap(item => {
     if (!record(item) || typeof item.name !== "string" || typeof item.value !== "string") return [];
     return [{name: item.name.slice(0, 200), value: item.value.slice(0, 4000), type: typeof item.type === "string" ? item.type.slice(0, 512) : undefined,
       variablesReference: integer(item.variablesReference) ? item.variablesReference : 0,
