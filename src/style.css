@@ -116,3 +116,17 @@
 .local-runner button, .local-runner input { scroll-margin-top: 145px; scroll-margin-bottom: 16px; }
 .debug-panel > .local-actions { position: sticky; top: 48px; z-index: 2; flex-wrap: wrap; justify-content: flex-start; padding: 8px 0; background: #faf9f5; border-bottom: 1px solid #ddd5ca; }
 .debug-panel > .local-actions > strong { width: 100%; }
+
+/* Fixed panel controls + an independently scrolling body: no overlay hit targets. */
+.local-runner { display:flex; flex-direction:column; min-height:0; overflow:hidden; flex-shrink:0; }
+.local-runner > header { position:static; flex-shrink:0; padding:0 0 8px; }
+.local-runner > .local-safety { flex-shrink:0; }
+.local-runner > [data-runner-pane]:not([hidden]) { flex:1; min-height:0; }
+.local-runner > [data-runner-pane="run"]:not([hidden]) { overflow:auto; }
+.local-runner > [data-runner-pane="debug"]:not([hidden]) { display:flex; overflow:hidden; }
+.local-runner .debug-panel { display:flex; flex-direction:column; min-height:0; flex:1; overflow:hidden; }
+.debug-panel > .local-actions { position:static; flex-shrink:0; padding:6px 0; gap:6px; }
+.debug-panel > .local-actions > button { padding:4px 7px; }
+.debug-body { flex:1; min-height:0; overflow:auto; }
+.local-runner button, .local-runner input { scroll-margin-top:8px; scroll-margin-bottom:8px; }
+.debug-help summary { cursor:pointer; font-size:11px; color:#72695e; padding:6px 0; }

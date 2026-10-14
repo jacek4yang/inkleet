@@ -111,13 +111,13 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   },[]);
   const paused = state?.phase === "paused";
   return <div className="debug-panel" aria-label="本地断点调试">
-    <div className="local-actions"><strong>断点调试</strong>
+    <div className="local-actions">
       <button disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")}>{pending && !active(state) ? "启动调试…" : "开始调试"}</button>
       {active(state) && <><button disabled={pending || evaluating || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action(paused ? "continue" : "pause")}>{paused ? "继续" : "暂停"}</button>
         {(["next", "stepIn", "stepOut"] as const).map((kind, index) => <button key={kind} disabled={!paused || pending || evaluating} onClick={() => action(kind)}>{["单步跳过", "单步进入", "单步跳出"][index]}</button>)}
         <button disabled={pending || evaluating || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")}>应用断点</button><button disabled={pending} onClick={() => action("stop")}>停止调试</button></>}
     </div>
-    <p className="muted">点击代码左侧断点栏或按 F9。断点：{breakpoints.join(", ") || "未设置"}。运行中可用“应用断点”更新。F5 开始 / 继续，F10 单步跳过，F11 进入，Shift+F11 跳出，Shift+F5 停止。连续执行限时 30 秒，整个会话最多 30 分钟。</p>
+    <div className="debug-body"><details className="debug-help"><summary>断点：{breakpoints.join(", ") || "未设置"}。 · 快捷键与限制</summary><p className="muted">F9 切换断点；运行中用“应用断点”更新。F5 开始 / 继续，F10 跳过，F11 进入，Shift+F11 跳出，Shift+F5 停止。连续执行限时 30 秒，会话最多 30 分钟。</p></details>
     <p role="status">{state ? state.phase === "paused" ? "已暂停 · " + state.reason : state.phase === "finished" ? "调试结束 · " + state.reason : state.phase === "compiling" ? "正在编译调试快照…" : state.phase === "starting" ? "正在连接调试器…" : "调试运行中" : "尚未调试"}</p>
     {notice && <p role="status">{notice}</p>}
     {stale && <p className="cache-warning">代码或用例已改变，调试仍使用启动时快照；当前编辑器不显示旧快照停靠行。</p>}
@@ -133,5 +133,6 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
       {evaluation && <div className="debug-evaluation-result"><pre>{evaluation.result}</pre>{evaluation.type && <span>{evaluation.type}</span>}{evaluation.truncated && <p>结果过长，已截断显示。</p>}{evaluation.variablesReference > 0 && <button type="button" onClick={() => showVariables(evaluation.variablesReference)}>展开求值结果</button>}</div>}
     </form>}
     {state?.output && <pre>{state.output}</pre>}
+    </div>
   </div>;
 }
