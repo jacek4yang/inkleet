@@ -2,7 +2,7 @@ name: Linux input preview
 on:
   push:
     branches: [feat/linux-preview-input]
-    paths: ['.github/workflows/linux-preview.yml', 'tests/native_smoke.py']
+    paths: ['.github/workflows/linux-preview.yml', 'scripts/package-linux-portable.sh', 'tests/native_smoke.py']
   workflow_dispatch:
 permissions:
   contents: read
