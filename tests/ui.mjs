@@ -58,7 +58,7 @@ try {
       const state=window.__catalogueTest;
       if(command==="load_recent_questions") return [];
       if(command==="search_questions") return new Promise(resolve=>state.requests.push({args,resolve}));
-      if(command==="get_question") return {question:{...window.__fixtureQuestions[0],titleSlug:args.slug},cacheWarning:null,fromCache:false};
+      if(command==="get_question") return {question:{...window.__fixtureQuestions[0],titleSlug:args.slug,...(state.updatedStatement?{translatedContent:state.updatedStatement}:{})},cacheWarning:null,fromCache:false};
       if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if(command==="load_document"){state.documents.push(args);return {code:null,notes:null};}
       if(command==="save_text"){state.saves.push(args);return;}
@@ -83,6 +83,11 @@ try {
   await cataloguePage.locator('.question-sidebar [data-slug="inkleet-test-fixture"]').click();
   await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).waitFor();
   await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).fill("// retained while filtering");
+  await cataloguePage.evaluate(()=>{window.__catalogueTest.updatedStatement="<p>Refreshed same-question statement</p>";});
+  await cataloguePage.locator('.question-sidebar [data-slug="inkleet-test-fixture"]').click();
+  await cataloguePage.getByText("Refreshed same-question statement",{exact:true}).waitFor();
+  assert.equal(await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).innerText(),"// retained while filtering","same question refresh updates memoized statement without replacing draft");
+  assert.equal(await cataloguePage.locator('.question-sidebar [data-slug="inkleet-test-fixture"]').getAttribute("aria-current"),"page");
   assert.equal(await cataloguePage.getByRole("combobox",{name:"题目难度"}).evaluate(node => getComputedStyle(node).appearance),"none","compact select keeps semantic native control with quiet appearance");
   await cataloguePage.getByRole("combobox",{name:"题目难度"}).selectOption("EASY");
   await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===2);
