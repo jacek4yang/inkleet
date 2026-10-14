@@ -470,7 +470,10 @@ try:
         for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
         keys += [{"type":"keyDown","value":"\ue032"},{"type":"keyUp","value":"\ue032"}]
         cmd("POST","/actions",{"actions":[{"type":"key","id":"python-rename","actions":keys}]})
-        rename_input=wait_for(lambda: element('.lsp-rename input'),"native F2 rename input")
+        rename_input=wait_for(lambda: element('.lsp-rename input:not([readonly])'),"native F2 rename input")
+        assert element('.lsp-rename[data-prepared="server"]'),"private Pyright prepareRename validated source symbol"
+        assert text(code)=="def solve(values): return sum(values)","prepareRename must not modify source"
+        (evidence/"PREPARE_RENAME_NATIVE_RESULT.txt").write_text("PASS: real pinned Pyright prepareRename response accepted before name input becomes editable; source unchanged.\\n")
         cmd("POST",f"/element/{rename_input}/clear",{})
         cmd("POST",f"/element/{rename_input}/value",{"text":"numbers","value":list("numbers")})
         click('.lsp-rename button[type="submit"]')
@@ -487,7 +490,7 @@ try:
         wait_for(lambda:element(".editor-command-palette"),"rename palette opens at source selection")
         fill('[aria-label="搜索编辑器命令"]',"重命名符号")
         subprocess.run(["xdotool","key","Return"],check=True)
-        rename_input=wait_for(lambda:element(".lsp-rename input"),"palette invokes same rename controller")
+        rename_input=wait_for(lambda:element(".lsp-rename input:not([readonly])"),"palette invokes same rename controller")
         assert not cmd("POST","/elements",{"using":"css selector","value":".editor-command-palette"}),"executed palette closes"
         cmd("POST",f"/element/{rename_input}/clear",{})
         cmd("POST",f"/element/{rename_input}/value",{"text":"items","value":list("items")})
@@ -501,7 +504,7 @@ try:
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home"],check=True)
         subprocess.run(["xdotool","key","--repeat","11","--repeat-delay","10","Right"],check=True)
         subprocess.run(["xdotool","key","F2"],check=True)
-        wait_for(lambda:element(".lsp-rename input"),"preview rename input")
+        wait_for(lambda:element(".lsp-rename input:not([readonly])"),"preview rename input")
         fill(".lsp-rename input","previewed")
         subprocess.run(["xdotool","key","--clearmodifiers","shift+Return"],check=True)
         wait_for(lambda:element(".lsp-rename-preview:not([hidden])"),"real Pyright rename preview")

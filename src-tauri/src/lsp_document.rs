@@ -290,3 +290,53 @@ pub fn references(value:&Value,uri:&str,prefix:u32,text:&str)->Result<Value,Stri
         assert_eq!(result["locations"].as_array().unwrap().len(),500);assert_eq!(result["omitted"],100);
     }
 }
+
+
+/// Normalize prepareRename ranges into this exact source; never expose scaffolding.
+pub fn prepare_rename(value:&Value,prefix:u32,text:&str,line:u32,character:u32)->Result<Value,String>{
+    use serde_json::json;
+    if value.is_null(){return Err("此位置不能重命名".into());}
+    let object=value.as_object().ok_or("重命名准备结果无效")?;
+    if object.contains_key("defaultBehavior"){return Err("语言服务返回未支持的默认重命名范围".into());}
+    let mut span=if let Some(span)=object.get("range"){span.clone()}else{value.clone()};
+    if !range(&mut span,prefix){return Err("重命名范围涉及语言环境辅助代码".into());}
+    let lines=text.split('\n').collect::<Vec<_>>();
+    fn point(v:&Value,lines:&[&str])->Option<(usize,usize)>{
+        let row=usize::try_from(v.get("line")?.as_u64()?).ok()?;
+        let column=usize::try_from(v.get("character")?.as_u64()?).ok()?;
+        let source=lines.get(row)?;let mut units=0;
+        for ch in source.chars(){if units==column{return Some((row,column));}units+=ch.len_utf16();}
+        (units==column).then_some((row,column))
+    }
+    let start=point(&span["start"],&lines).ok_or("重命名起点越界或拆分 Unicode 字符")?;
+    let end=point(&span["end"],&lines).ok_or("重命名终点越界或拆分 Unicode 字符")?;
+    let cursor=point(&json!({"line":line,"character":character}),&lines).ok_or("重命名光标位置无效")?;
+    if start>=end||cursor<start||cursor>end{return Err("重命名范围不包含当前符号".into());}
+    let placeholder=match object.get("placeholder"){
+        None=>Value::Null,
+        Some(Value::String(name)) if !name.is_empty()&&name.len()<=512=>Value::String(name.clone()),
+        _=>return Err("重命名占位名称无效".into()),
+    };
+    Ok(json!({"supported":true,"range":span,"placeholder":placeholder}))
+}
+#[cfg(test)]mod prepare_rename_tests{
+    use super::*;use serde_json::json;
+    fn span(line:u32,start:u32,end:u32)->Value{json!({"start":{"line":line,"character":start},"end":{"line":line,"character":end}})}
+    #[test]fn prepare_maps_valid_range_and_placeholder(){
+        let direct=prepare_rename(&span(2,0,3),2,"old",0,1).unwrap();
+        assert_eq!(direct["range"]["start"]["line"],0);assert_eq!(direct["supported"],true);
+        let named=prepare_rename(&json!({"range":span(2,0,3),"placeholder":"old"}),2,"old",0,3).unwrap();
+        assert_eq!(named["placeholder"],"old");
+    }
+    #[test]fn prepare_rejects_helpers_malformed_ranges_and_unsupported_default_behavior(){
+        for bad in [Value::Null,json!([]),json!({"defaultBehavior":true}),span(1,0,1),span(3,0,1),span(2,2,1),span(2,1,1),span(2,0,4),json!({"range":span(2,0,3),"placeholder":false}),json!({"range":span(2,0,3),"placeholder":"x".repeat(513)})]{
+            assert!(prepare_rename(&bad,2,"old",0,1).is_err(),"{bad}");
+        }
+        assert!(prepare_rename(&span(0,0,1),0,"old",0,2).is_err());
+    }
+    #[test]fn prepare_checks_utf16_boundaries(){
+        assert!(prepare_rename(&span(0,0,2),0,"🦀x",0,1).is_err());
+        assert!(prepare_rename(&span(0,1,2),0,"🦀x",0,2).is_err());
+        assert!(prepare_rename(&span(0,2,3),0,"🦀x",0,2).is_ok());
+    }
+}

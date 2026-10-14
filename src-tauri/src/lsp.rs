@@ -8,11 +8,11 @@ pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, a
 struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
     id:u64, client:Client, uri:String, language:String, context:inkleet_managed_env::lsp_scaffold::Context, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
-    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
+    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, prepare_rename:bool, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct Started { id:u64, version:u32, server:String, uri:String, semantic_tokens:bool }
+pub struct Started { id:u64, version:u32, server:String, uri:String, semantic_tokens:bool, prepare_rename:bool }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Source { text:String, name:String, declaration:bool, language:String }
@@ -40,7 +40,7 @@ impl Services {
         Ok(())
     }
     pub fn request(&self,id:u64,version:u32,kind:&str,line:u32,character:u32,new_name:Option<String>)->Result<Value>{
-        let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition","signatureHelp"=>"textDocument/signatureHelp","rename"=>"textDocument/rename","references"=>"textDocument/references",_=>return Err("不支持此语言服务请求".into())};
+        let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition","signatureHelp"=>"textDocument/signatureHelp","rename"=>"textDocument/rename","prepareRename"=>"textDocument/prepareRename","references"=>"textDocument/references",_=>return Err("不支持此语言服务请求".into())};
         let session=self.session(id)?;
         let prefix={
             let document=session.document.lock().map_err(|_|"文档状态不可用")?;
@@ -49,6 +49,7 @@ impl Services {
             if character as usize>current.encode_utf16().count(){return Err("列号越界".into());}
             document.prefix
         };
+        if kind=="prepareRename"&&!session.prepare_rename{return Ok(json!({"supported":false}));}
         let mut params=json!({"textDocument":{"uri":session.uri},"position":{"line":line+prefix,"character":character}});
         if kind=="references"{params["context"]=json!({"includeDeclaration":true});}
         if kind=="rename"{
@@ -59,6 +60,11 @@ impl Services {
         let mut response=session.client.request(method,params,Duration::from_secs(8))?;
         if session.document.lock().map_err(|_|"文档状态不可用")?.version!=version{return Err("忽略旧版本的语言服务结果".into());}
         self.session(id)?;
+        if kind=="prepareRename"{
+            let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+            if document.version!=version{return Err("源码已改变，请重新准备重命名".into());}
+            return crate::lsp_document::prepare_rename(&response,prefix,&document.text,line,character);
+        }
         if kind=="rename"{
             let document=session.document.lock().map_err(|_|"文档状态不可用")?;
             if document.version!=version{return Err("源码已改变，请重新发起重命名".into());}
@@ -182,7 +188,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             "processId":null,"rootUri":root_uri,"initializationOptions":launch.initialization,
             "capabilities":{
                 "general":{"positionEncodings":["utf-16"]},
-                "textDocument":{"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}},"publishDiagnostics":{"versionSupport":true}},
+                "textDocument":{"rename":{"dynamicRegistration":false,"prepareSupport":true},"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}},"publishDiagnostics":{"versionSupport":true}},
                 "workspace":{"configuration":true,"workspaceFolders":true,"semanticTokens":{"refreshSupport":true}}
             },
             "workspaceFolders":[{"uri":root_uri,"name":"InkLeet"}]
@@ -190,6 +196,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         if initialized["capabilities"].get("positionEncoding").is_some_and(|v|v.as_str()!=Some("utf-16")){return Err("语言服务返回不支持的位置编码".into())}
         let semantic_legend=crate::semantic_tokens::provider(&initialized["capabilities"]);
         let semantic_tokens=semantic_legend.is_some();
+        let prepare_rename=initialized["capabilities"]["renameProvider"]["prepareProvider"]==Value::Bool(true);
         let range_provider=&initialized["capabilities"]["documentRangeFormattingProvider"];
         let range_formatting=range_provider==&Value::Bool(true)||range_provider.is_object();
         client.notify("initialized",json!({}))?;
@@ -197,14 +204,14 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let roots=launch.roots;
         let started_uri=uri.clone();
-        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,prepare_rename,semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
             active.replace(session)
         };
         if let Some(previous)=previous{previous.client.stop();}
-        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens})
+        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens,prepare_rename})
     }).await.map_err(|_|"语言服务启动任务中断".to_owned())?
 }
 
