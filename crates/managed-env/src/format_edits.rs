@@ -28,7 +28,7 @@ pub fn apply(text:&str,prefix:u32,value:&Value)->Result<String>{
     let mut edits=Vec::new();let mut size=text.len();
     for value in values{
         let range=value.get("range").ok_or("缺少格式化范围")?;
-        let from=offset(text,&range["start"],prefix)?,to=offset(text,&range["end"],prefix)?;
+        let from=offset(text,&range["start"],prefix)?; let to=offset(text,&range["end"],prefix)?;
         if from>to{return Err("格式化范围倒置".into());}
         let new=value.get("newText").and_then(Value::as_str).ok_or("格式化正文无效")?;
         size=size.checked_add(new.len()).ok_or("格式化正文过大")?;
