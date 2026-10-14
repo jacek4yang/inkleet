@@ -114,13 +114,16 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       }
     });
   }
+  let completionSequence=0;
   async function request(kind: string, pos: number, doc: Text, newName?: string, completionContext?:CompletionTrigger, stillCurrent:()=>boolean=()=>true): Promise<unknown> {
     if (!session || closed || !view || !stillCurrent()) return null;
     const owner=view,id=session.id;
     await flush();
     if (closed || session?.id!==id || view!==owner || owner.state.doc!==doc || !stillCurrent()) return null;
     const line = doc.lineAt(pos), askedVersion = version;
-    const result = await invoke("language_request", { id, version: askedVersion, kind, line: line.number - 1, character: pos - line.from, newName: newName ?? null, completionContext:completionContext??null });
+    const sequence=kind==="completion"?++completionSequence:null;
+    if(sequence!==null&&!Number.isSafeInteger(sequence))throw Error("补全请求序号已耗尽，请重新连接语言服务");
+    const result = await invoke("language_request", { id, version: askedVersion, kind, completionSequence:sequence, line: line.number - 1, character: pos - line.from, newName: newName ?? null, completionContext:completionContext??null });
     return !closed && session?.id === id && version === askedVersion && view===owner && owner.state.doc===doc && stillCurrent() ? result : null;
   }
   let completionApplyGeneration=0,activeCompletionResolves=0;

@@ -1920,14 +1920,14 @@ try {
   await providerPage.goto("http://127.0.0.1:5173/provider-test");
   await providerPage.evaluate(async()=>{
     const {EditorView,EditorState,basicSetup,languageIntelligence}=await import("/tests/input-harness.ts");
-    const s=window.__providerTest={calls:[],statuses:[],version:1};
+    const s=window.__providerTest={calls:[],sequences:[],statuses:[],version:1};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
       if(command==="start_language_service")return {id:89,version:1,server:"provider-fixture",uri:"file:///s.cpp",completionResolve:false,completionTriggerCharacters:[".",">","@"]};
       if(command==="update_language_document"){if(s.deferSync)await new Promise(resolve=>{s.syncReply=resolve;});s.version=args.version;return;}
       if(command==="stop_language_service")return;
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
-      if(command==="language_request"){if(args.kind==="completion"){s.calls.push(args.completionContext);const result={isIncomplete:s.incomplete!==false,items:[{label:"itemName"}]};if(s.defer)return new Promise((resolve,reject)=>{s.reply=()=>resolve(result);s.reject=reject;});return result;}return null;}
+      if(command==="language_request"){if(args.kind==="completion"){s.calls.push(args.completionContext);s.sequences.push(args.completionSequence);const result={isIncomplete:s.incomplete!==false,items:[{label:"itemName"}]};if(s.defer)return new Promise((resolve,reject)=>{s.reply=()=>resolve(result);s.reject=reject;});return result;}return null;}
       throw Error(command);
     }};
     s.client=languageIntelligence("cpp",message=>s.statuses.push(message),()=>{});
@@ -2017,6 +2017,9 @@ try {
   await providerPage.keyboard.press("Control+Space");
   await providerPage.getByRole("option",{name:"itemName",exact:true}).waitFor();
   assert.equal(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1)?.triggerKind),1,"current completion still works after canceled flush");
+  const issuedSequences=await providerPage.evaluate(()=>window.__providerTest.sequences);
+  assert.ok(issuedSequences.length>8,"exercise multiple completion intents and retries");
+  assert.ok(issuedSequences.every((n,i)=>Number.isSafeInteger(n)&&n>0&&(i===0||n>issuedSequences[i-1])),"outbound completion sequences are positive, safe and strictly increasing");
   await providerPage.evaluate(()=>{window.__providerTest.client.destroy();window.__providerTest.view.destroy();});
   await providerPage.close();
   await writeFile("evidence/COMPLETION_CONTEXT_UI_RESULT.txt","PASS: actual CodeMirror keyboard manual context1, adjacent incomplete context3, provider-specific > context2 and manual override. Mocked IPC; native adapter verification is a separate required check.\\n");
