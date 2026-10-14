@@ -1,4 +1,4 @@
-import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
+import { Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
 import { EditorView, keymap, showTooltip, type Tooltip } from "@codemirror/view";
 
 type Request = (pos: number, doc: Text) => Promise<unknown>;
@@ -77,9 +77,9 @@ export function findReferences(request: Request, status: (text: string) => void)
       if (!destroyed && token === generation && view.state.doc === doc) status("查找引用失败：" + String(error).slice(0, 300));
     } finally { if (token === generation) pending = false; }
   }
-  const extensions: Extension[] = [field, keymap.of([
+  const extensions: Extension[] = [field, Prec.highest(keymap.of([
     { key: "Shift-F12", run(view) { void open(view); return true; } },
     { key: "Escape", run: close },
-  ])];
+  ]))];
   return { extensions, destroy() { destroyed = true; ++generation; pending = false; } };
 }

@@ -141,6 +141,15 @@ try:
     click(".notes-heading button:first-child")
     wait_for(lambda: text(note) == "# Native note", "return from preview preserves original Markdown")
 
+    notes.write_text("# Real external note update")
+    click(".notes-heading button:last-child")
+    wait_for(lambda:text(note)=="# Real external note update","manual refresh adopts actual external notes file")
+    assert source.read_text()==marker,"refreshing notes changed source"
+    notes.write_text("# Native note")
+    click(".notes-heading button:last-child")
+    wait_for(lambda:text(note)=="# Native note","second external refresh keeps fresh persisted baseline")
+    (evidence/"EXTERNAL_NOTES_RESULT.txt").write_text("PASS: actual native notes file changed outside the editor, explicit refresh adopts it without modifying source; subsequent refresh and restart retain the correct baseline. Actual Typora process launching is not verified.\n")
+
     stop()
     start()
     wait_for(lambda: text(code) == marker, "restart restored Rust source")
