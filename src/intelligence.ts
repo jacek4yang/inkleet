@@ -9,7 +9,7 @@ import { renameSymbol } from "./rename";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
 import { Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
-import { autocompletion, startCompletion, type Completion, type CompletionContext } from "@codemirror/autocomplete";
+import { autocompletion, completionKeymap, startCompletion, type Completion, type CompletionContext } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
@@ -295,8 +295,10 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     ...rename.extensions,
     signatureField,
     semanticField, semanticTheme,
-    autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
-    Prec.highest(keymap.of([{key:"Mod-Space",run:invokeCompletion}])),
+    autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60, defaultKeymap:false }),
+    // Keep all native completion bindings, but route explicit starts through the
+    // same reset boundary as commands. Disable the earlier basicSetup copy.
+    Prec.highest(keymap.of(completionKeymap.map(binding=>binding.run===startCompletion?{...binding,run:invokeCompletion}:binding))),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
     EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;}}}),
