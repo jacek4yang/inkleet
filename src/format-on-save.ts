@@ -16,7 +16,7 @@ export function formatOnSave(options:Options){
     update(update:ViewUpdate){
       if(!update.docChanged)return;
       ++this.generation;this.pending=null;clearTimeout(this.timer);this.cancelDiff();
-      if(update.transactions.some(t=>t.annotation(formattedTransaction)||t.isUserEvent("undo")||t.isUserEvent("redo")))return;
+      if(update.transactions.some(t=>t.annotation(formattedTransaction)||t.isUserEvent("undo")||t.isUserEvent("redo")||t.isUserEvent("input.rename")))return;
       this.schedule();
     }
     schedule(){

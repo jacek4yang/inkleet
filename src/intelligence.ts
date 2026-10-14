@@ -234,7 +234,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
   const references = findReferences((pos, doc) => request("references", pos, doc), status, !commandsOwned);
-  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned);
+  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned, () => { const id=session?.id; return () => !closed && id!==undefined && session?.id===id; });
   const extensions: Extension[] = [
     ...references.extensions,
     ...rename.extensions,
