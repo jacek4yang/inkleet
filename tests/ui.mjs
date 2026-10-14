@@ -718,9 +718,16 @@ try {
       }
       if (command === "debug_request") {
         state.debugCalls.push(args.kind);
-        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, source: { name: "solution.py", path: "/fixture/solution.py" } }] };
-        if (args.kind === "scopes") return { scopes: [{ name: "Locals", variablesReference: 1 }] };
-        if (args.kind === "variables") return { variables: [{ name: "values", value: "[3, -1, 8]", variablesReference: 0 }] };
+        if (args.kind === "threads") return { threads: [{id: 1, name: "MainThread"}, {id: 2, name: "Worker"}] };
+        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, source: { name: "solution.py", path: "/fixture/solution.py" } }, { id: 0, name: "caller", line: 1, source: { name: "solution.py" } }] };
+        if (args.kind === "scopes") return { scopes: [{ name: "Locals", variablesReference: args.reference === 0 ? 4 : 1 }] };
+        if (args.kind === "variables") {
+          if (args.reference === 4) return { variables: [{name: "caller_only", value: "42", variablesReference: 0}] };
+          if (args.reference === 2 && state.deferVariables) return new Promise(resolve => { state.variablesReply = () => resolve({variables: [{name: "late_child", value: "stale", variablesReference: 0}]}); });
+          if (args.reference === 2) return {variables: [{name: "0", value: "3", variablesReference: 0}, {name: "nested", value: "{x: 7}", variablesReference: 3}]};
+          if (args.reference === 3) return {variables: [{name: "x", value: "7", variablesReference: 0}]};
+          return { variables: [{ name: "values", value: "[3, -1, 8]", variablesReference: 2, indexedVariables: 3 }] };
+        }
         if (args.kind === "next") { state.debug.epoch++; return {}; }
         if (args.kind === "continue") { state.debug.phase = "finished"; state.debug.epoch++; return {}; }
         return {};
@@ -779,10 +786,35 @@ try {
   await runPanel.getByRole("button", { name: "求值一次", exact: true }).click();
   await runPanel.locator(".debug-evaluation-result pre").filter({ hasText: "3" }).waitFor();
   assert.equal(await runPage.evaluate(() => window.__runTest.evaluations), 1);
+  await runPanel.getByRole("button", {name: "values", exact: true}).click();
+  await runPanel.getByRole("button", {name: "nested", exact: true}).click();
+  await runPanel.getByRole("button", {name: "x", exact: true}).waitFor();
+  assert.equal(await runPanel.getByRole("button", {name: "values", exact: true}).count(), 1, "expanding descendants preserves parent variable");
+  await runPanel.getByRole("button", {name: "添加监视表达式", exact: true}).click();
+  await runPanel.getByRole("button", {name: "刷新监视 len(values)", exact: true}).click();
+  await runPage.waitForFunction(() => window.__runTest.evaluations === 2);
+  assert.match(await runPanel.locator(".debug-watch").innerText(), /3/);
+  await runPage.screenshot({path: "evidence/debugger-variable-tree-watches.png", fullPage:true});
+  await runPanel.getByRole("button", {name: "caller · 1", exact: true}).click();
+  await runPanel.getByRole("button", {name: "caller_only", exact:true}).waitFor();
+  assert.equal(await runPanel.getByRole("button", {name: "x", exact: true}).count(),0,"frame switch discards old child references");
+  assert.match(await runPanel.locator(".debug-watch").innerText(), /—/, "watch never presents previous frame result as current");
+  await runPanel.getByRole("button", {name: "solve · 1", exact:true}).click();
+  await runPanel.getByRole("button", {name:"values",exact:true}).waitFor();
+  await runPage.evaluate(() => { window.__runTest.deferVariables = true; });
+  await runPanel.getByRole("button", {name:"values",exact:true}).click();
+  await runPage.waitForFunction(() => typeof window.__runTest.variablesReply === "function");
+  await runPanel.getByRole("button", {name:"caller · 1",exact:true}).click();
+  await runPanel.getByRole("button", {name:"caller_only",exact:true}).waitFor();
+  await runPage.evaluate(() => window.__runTest.variablesReply());
+  assert.equal(await runPanel.getByRole("button", {name:"late_child",exact:true}).count(),0,"late child response discarded after frame switch");
+  await runPage.evaluate(() => { window.__runTest.deferVariables = false; });
+  await runPanel.getByRole("button", {name:"solve · 1",exact:true}).click();
+  await runPanel.getByRole("button", {name:"values",exact:true}).waitFor();
   await runPage.evaluate(() => { window.__runTest.deferEvaluation = true; });
   await runPanel.getByRole("button", { name: "求值一次", exact: true }).evaluate(button => { button.click(); button.click(); });
   await runPage.waitForFunction(() => typeof window.__runTest.evaluationReply === "function");
-  assert.equal(await runPage.evaluate(() => window.__runTest.evaluations), 2, "duplicate expression evaluation must be blocked");
+  assert.equal(await runPage.evaluate(() => window.__runTest.evaluations), 3, "duplicate expression evaluation must be blocked");
   assert.equal(await runPanel.getByRole("button", { name: "停止调试", exact: true }).isDisabled(), false, "stop remains available during evaluation");
   await runPage.evaluate(() => { window.__runTest.debug.epoch++; });
   await runPage.waitForTimeout(350);
