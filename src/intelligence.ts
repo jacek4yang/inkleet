@@ -127,12 +127,11 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
     const generation=++completionRequestGeneration;
-    if(context.explicit)incomplete=null;
     const word = context.matchBefore(identifierTail);
     const triggers=session.completionTriggerCharacters??[".",":"];
     const before=context.state.sliceDoc(Math.max(0,context.pos-2),context.pos);
-    const continued=!!incomplete&&incomplete.session===session.id&&incomplete.doc===context.state.doc&&incomplete.from===(word?.from??context.pos)&&incomplete.pos===context.pos;
-    const trigger=completionTrigger(context.explicit,before,triggers,continued);
+    const continued=!!incomplete?.continued&&incomplete.session===session.id&&incomplete.doc===context.state.doc&&incomplete.from===(word?.from??context.pos)&&incomplete.pos===context.pos;
+    const trigger=completionTrigger(context.explicit&&!continued,before,triggers,continued);
     if(!context.explicit&&!word?.text&&trigger.triggerKind!==2)return null;
     context.addEventListener("abort", () => {}, { onDocChange: true });
     const doc = context.state.doc;
@@ -290,7 +289,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;}}}),
+    EditorView.domEventObservers({keydown(event){if((event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&(event.code==="Space"||event.key===" ")&&!event.isComposing){incomplete=null;++completionRequestGeneration;}if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;}}}),
     EditorView.domEventHandlers({ blur(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;return false;}, compositionstart(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });

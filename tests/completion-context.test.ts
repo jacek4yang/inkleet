@@ -15,7 +15,7 @@ test("provider-specific triggers and explicit/incomplete precedence",()=>{
 test("incomplete continuation accepts only one adjacent identifier insertion",()=>{
   const before=Text.of(["Hash"]),after=Text.of(["HashM"]);
   const previous={doc:before,from:0,pos:4,session:9};
-  assert.deepEqual(advanceIncomplete(previous,before,after,[{from:4,to:4,text:"M"}]),{...previous,doc:after,pos:5});
+  assert.deepEqual(advanceIncomplete(previous,before,after,[{from:4,to:4,text:"M"}]),{...previous,doc:after,pos:5,continued:true});
   for(const changes of [[],[{from:4,to:4,text:"."}],[{from:3,to:4,text:"M"}],[{from:0,to:0,text:"x"}],[{from:4,to:4,text:"M"},{from:0,to:0,text:"x"}]]){
     assert.equal(advanceIncomplete(previous,before,after,changes),null);
   }
