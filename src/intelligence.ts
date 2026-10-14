@@ -261,6 +261,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   ];
   return {
     extensions,
+    available:()=>!closed&&session!==null,
     commands:{rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
     async format(text:string):Promise<string>{
       if(queuedFormats>=8)throw Error("格式化请求过多，请稍后保存");

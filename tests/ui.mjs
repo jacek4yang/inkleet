@@ -1529,26 +1529,39 @@ try {
 
 
   const commandPage=await testPage({viewport:{width:1440,height:900}});
+  await commandPage.addInitScript(() => {
+    window.isTauri = true;
+    window.__TAURI_INTERNALS__ = { invoke: async (command) => {
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
+      if (command === "search_questions") return { questions:[],total:0,hasMore:false };
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+      if (command === "load_document") return { code:null,notes:null };
+      if (command === "save_text" || command === "stop_language_service") return;
+      if (command === "external_editor_supported") return false;
+      if (command === "login_status") return null;
+      throw new Error("No native service in editor-only test fixture: " + command);
+    }};
+  });
   await commandPage.goto("http://127.0.0.1:5173");
   const commandCode=commandPage.getByRole("textbox",{name:"代码编辑器",exact:true});
   await commandCode.fill("command palette draft");
   await commandCode.press("Control+Shift+p");
   const commandDialog=commandPage.getByRole("dialog",{name:"编辑器命令",exact:true});
   await commandDialog.waitFor();
-  await commandDialog.getByRole("searchbox",{name:"搜索编辑器命令"}).fill("全选");
-  await commandDialog.getByRole("searchbox",{name:"搜索编辑器命令"}).press("Enter");
+  await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).fill("全选");
+  await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).press("Enter");
   assert.equal(await commandDialog.count(),0);
   // Selection is checked directly; clipboard permissions are not part of this test.
   assert.equal(await commandPage.evaluate(()=>window.getSelection()?.toString()),"command palette draft");
   await commandCode.press("Control+Shift+p");
-  await commandDialog.getByRole("searchbox",{name:"搜索编辑器命令"}).press("Escape");
+  await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).press("Escape");
   assert.equal(await commandDialog.count(),0);
   assert.equal(await commandCode.innerText(),"command palette draft");
   assert.equal(await commandCode.evaluate(el=>el===document.activeElement),true);
   await commandCode.press("Control+Shift+p");
-  await commandDialog.getByRole("searchbox",{name:"搜索编辑器命令"}).fill("不存在的命令");
+  await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).fill("不存在的命令");
   assert.equal(await commandDialog.getByRole("option").count(),0);
-  await commandDialog.getByRole("searchbox",{name:"搜索编辑器命令"}).press("Escape");
+  await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).press("Escape");
   await commandPage.screenshot({path:"evidence/editor-command-palette-closed.png"});
   await commandPage.close();
   await writeFile("evidence/COMMAND_UI_RESULT.txt","PASS: real editor palette search and shared select-all execution, Escape focus restoration, no placeholder commands. Global workbench registry remains future work.\n");

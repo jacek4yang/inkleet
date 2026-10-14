@@ -56,7 +56,7 @@ export function renameSymbol(request: Request, status: (text: string) => void) {
       const error = document.createElement("p"); error.setAttribute("role", "alert");
       dom.append(label, apply, cancel, error);
       let pending = false, composing = false;
-      input.oncompositionstart=()=>{composing=true;};input.oncompositionend=()=>{composing=false;};
+      input.addEventListener("compositionstart",()=>{composing=true;});input.addEventListener("compositionend",()=>{composing=false;});
       dom.onkeydown = event => { event.stopPropagation(); if(event.isComposing||event.keyCode===229)return; if (event.key === "Escape") { event.preventDefault(); dismiss(); } };
       dom.onsubmit = async event => {
         event.preventDefault(); if (pending || composing || view.composing) return;
