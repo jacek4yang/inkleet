@@ -89,7 +89,7 @@ fn parse_check(value: Value) -> Result<CheckResult, String> {
             let mut filtered = serde_json::Map::new();
             let mut remaining = 256 * 1024usize;
             let mut truncated = false;
-            for key in ["status_code", "status_msg", "run_success", "compare_result", "total_correct",
+            for key in ["status_code", "status_msg", "run_success", "correct_answer", "compare_result", "total_correct",
                 "total_testcases", "status_runtime", "status_memory", "display_runtime", "memory",
                 "full_compile_error", "compile_error", "full_runtime_error", "runtime_error",
                 "code_answer", "expected_code_answer", "expected_code_output", "expected_output", "display_memory", "last_testcase", "code_output", "std_output_list", "std_output", "task_finish_time"] {
@@ -205,10 +205,12 @@ mod tests {
     #[test]
     fn preserves_run_answers_separately_from_stdout() {
         let CheckResult::Finished { result } = parse_check(json!({
-            "state":"SUCCESS","status_msg":"Accepted","code_answer":["[7,0]"],
+            "state":"SUCCESS","status_msg":"Accepted","correct_answer":false,"compare_result":"01","code_answer":["[7,0]"],
             "expected_code_answer":["[0,1]"],"code_output":["debug output"],
             "display_runtime":0,"unrelated":"discard"
         })).unwrap() else { panic!("expected result"); };
+        assert_eq!(result["correct_answer"],false);
+        assert_eq!(result["compare_result"],"01");
         assert_eq!(result["code_answer"],json!(["[7,0]"]));
         assert_eq!(result["expected_code_answer"],json!(["[0,1]"]));
         assert_eq!(result["code_output"],json!(["debug output"]));

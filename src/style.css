@@ -518,3 +518,5 @@ button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(
 @media(max-width:760px){.statusbar{padding:0 6px 0 0;gap:5px}.statusbar .editor-status-meta{gap:8px}.statusbar .editor-status-mode{min-width:60px;padding:0 7px}.statusbar .storage-status{max-width:45vw}}
 
 .statusbar>.lsp-status{position:static;display:inline-flex;align-items:center;gap:5px;order:3;flex:none;height:23px;max-height:23px;padding:0 7px;border:0;background:transparent;font-size:10px;line-height:23px}.statusbar>.lsp-status>span{display:inline}.statusbar>.lsp-status i{display:block;flex:none}
+
+.judge-wide{grid-column:1/-1}

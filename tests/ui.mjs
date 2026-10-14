@@ -488,6 +488,7 @@ try {
   assert.equal(await authPage.locator(".judge-field").filter({has:authPage.getByRole("heading",{name:"失败输入",exact:true})}).locator("pre").innerText(),"[2,7,11,15]\n9");
   await authPage.getByText("0 ms",{exact:true}).waitFor();
   assert.equal(await authPage.locator(".judge-raw pre").isVisible(),false);
+  await authPage.getByRole("separator",{name:"调整测试结果高度",exact:true}).press("End");
   await authPage.screenshot({path:"evidence/online-verdict-readable.png",fullPage:true});
   await authPage.evaluate(()=>{const old=window.__inkAuthTest.jobs.at(-1);window.__inkAuthTest.jobs.push({...old,snapshot:{...old.snapshot,id:"other-pending",language:"rust",solution:"alternate"},state:{state:"waiting",server_id:"other-server"}});});
   await authPage.getByRole("button",{name:"fixture-user · 退出",exact:true}).click();

@@ -9,7 +9,10 @@ export function present(value:unknown){return value!==null&&value!==undefined;}
 export function resultSummary(result:Result,submission:boolean){
  const status=typeof result.status_msg==="string"?result.status_msg:"";
  const accepted=submission&&status==="Accepted";
- const verdict=!submission&&status==="Accepted"?"运行完成":(verdicts[status]??status)||"评测已结束";
+ const comparison=typeof result.compare_result==="string"&&/^[01]+$/.test(result.compare_result)?result.compare_result:null;
+ const failedTest=result.correct_answer===false||(comparison!==null&&comparison.includes("0"));
+ const passedTest=!failedTest&&(result.correct_answer===true||(comparison!==null&&/^1+$/.test(comparison)));
+ const verdict=!submission&&status==="Accepted"?(failedTest?"测试答案错误":passedTest?"测试通过":"运行完成"):(verdicts[status]??status)||"评测已结束";
  const runtime=result.status_runtime??result.display_runtime;
  const memory=result.status_memory??result.display_memory;
  return {verdict,accepted,runtime:present(runtime)&&String(runtime)!=="N/A"?String(runtime)+(/^[\d.]+$/.test(String(runtime))?" ms":""):null,memory:present(memory)?String(memory):null};
