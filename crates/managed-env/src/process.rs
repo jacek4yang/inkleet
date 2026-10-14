@@ -1,7 +1,7 @@
 //! Bounded local execution for the user's own code. This is NOT a security sandbox.
 use process_wrap::std::{ChildWrapper,CommandWrap};
 use serde::Serialize;
-use std::{io::Read,process::{Command,Stdio},sync::{Arc,Mutex,OnceLock,Weak,atomic::{AtomicBool,AtomicUsize,Ordering},mpsc},time::{Duration,Instant}};
+use std::{io::{Read,Write},process::{Command,Stdio},sync::{Arc,Mutex,OnceLock,Weak,atomic::{AtomicBool,AtomicUsize,Ordering},mpsc},time::{Duration,Instant}};
 struct ChildState { child:Box<dyn ChildWrapper>, stopped:bool }
 pub struct OwnedChild { state:Mutex<ChildState> }
 #[derive(Default)]struct Registry { closing:bool, children:Vec<Weak<OwnedChild>> }
@@ -81,26 +81,35 @@ fn drain(mut pipe:impl Read+Send+'static,used:Arc<AtomicUsize>,over:Arc<AtomicBo
     rx
 }
 pub fn run(command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
-    run_limited(command,cancel,timeout,output_limit,120)
+    run_limited(command,cancel,timeout,output_limit,120,None)
 }
 /// Separate, cancelable compilation budget for a user's trusted source.
 /// This does not extend the ordinary execution deadline or provide a sandbox.
 pub fn compile(command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
-    run_limited(command,cancel,timeout,output_limit,300)
+    run_limited(command,cancel,timeout,output_limit,300,None)
 }
 /// Only for hash-pinned tool provisioning and authored compiler readiness checks.
 /// Ordinary user-code execution must keep using run() and its 120-second ceiling.
 pub fn provision(command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
-    run_limited(command,cancel,timeout,output_limit,600)
+    run_limited(command,cancel,timeout,output_limit,600,None)
 }
-fn run_limited(mut command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize,ceiling:u64)->Result<Output,String>{
+/// Bounded stdin for formatters. Writer never blocks the timeout/cleanup owner.
+pub fn run_with_input(command:Command,input:Vec<u8>,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize)->Result<Output,String>{
+    if input.len()>1024*1024{return Err("格式化源码超过 1 MiB 限制".into());}
+    run_limited(command,cancel,timeout,output_limit,10,Some(input))
+}
+fn run_limited(mut command:Command,cancel:Arc<AtomicBool>,timeout:Duration,output_limit:usize,ceiling:u64,input:Option<Vec<u8>>)->Result<Output,String>{
     if timeout.is_zero()||timeout>Duration::from_secs(ceiling)||output_limit==0||output_limit>1024*1024{return Err("本地运行限制无效".into());}
     if cancel.load(Ordering::Relaxed){return Err("运行已取消".into());}
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.stdin(if input.is_some(){Stdio::piped()}else{Stdio::null()}).stdout(Stdio::piped()).stderr(Stdio::piped());
     let child=spawn(command).map_err(|e|format!("无法启动本地进程：{e}"))?;
     let used=Arc::new(AtomicUsize::new(0));let over=Arc::new(AtomicBool::new(false));
     let out=drain(child.take_stdout().map_err(|_|"进程已停止")?.ok_or("没有输出管道")?,used.clone(),over.clone(),output_limit);
     let err=drain(child.take_stderr().map_err(|_|"进程已停止")?.ok_or("没有错误输出管道")?,used,over.clone(),output_limit);
+    if let Some(input)=input{
+        let mut stdin=child.take_stdin().map_err(|_|"进程已停止")?.ok_or("没有输入管道")?;
+        std::thread::spawn(move||{let _=stdin.write_all(&input);});
+    }
     let started=Instant::now();let mut timed_out=false;let mut canceled=false;let mut exit_code=None;
     loop{
         if let Some(status)=child.try_wait().map_err(|e|format!("检查本地进程失败：{e}"))?{exit_code=status.code();break;}
