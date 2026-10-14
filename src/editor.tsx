@@ -28,8 +28,8 @@ const sessions = new Map<string, { state: EditorState; scroll: number }>();
 const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "var(--surface-editor)", color: "var(--ink)", fontSize: "14px" },
   ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", lineHeight: "1.75" },
-  ".cm-content": { padding: "20px 0", caretColor: "var(--accent)" },
-  ".cm-line": { padding: "0 16px" },
+  ".cm-content": { padding: "8px 0", caretColor: "var(--accent)" },
+  ".cm-line": { padding: "0 8px" },
   ".cm-gutters": { backgroundColor: "var(--surface-editor)", color: "var(--muted)", border: "none" },
   ".cm-activeLineGutter, .cm-activeLine": { backgroundColor: "var(--active-line)" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: "var(--selection)" },
@@ -87,7 +87,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:formatDocument}]:[]),
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
     ];
-    const extensions = [editorCommands(commands),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
+    const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
       basicSetup, syntax(language), theme, ...(language==="markdown"?[]:[indentGuides]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
@@ -102,7 +102,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
           // 即使 Escape 被补全/选区消耗，也保留显式移出编辑器的键盘通道。
           if (event.key === "Escape") {if(getCM(view)){closeCompletion(view);view.setTabFocusMode(false);}else view.setTabFocusMode(2000);}
         },
-      }), ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
+      }), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
       EditorView.updateListener.of(update => {
         if (update.docChanged) callback.current(update.state.doc.toString());

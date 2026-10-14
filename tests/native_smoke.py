@@ -274,6 +274,21 @@ try:
     click('[aria-label="关闭设置"]')
     (evidence/"DOWNLOAD_SETTINGS_GUI_RESULT.txt").write_text("PASS: native Settings save, app-only config persistence, restart restore, explicit reset before real downloads; no system proxy change. Proxy CONNECT routing covered by isolated Rust test.\n")
     code = '[aria-label="代码编辑器"]'
+    fill(code,"// first gutter row\n// second gutter row\n// third gutter row")
+    lane_rect=cmd("GET",f"/element/{element('.cm-debug-gutter')}/rect")
+    row_rect=cmd("GET",f"/element/{element('[aria-label=\"代码编辑器\"] .cm-line:nth-child(2)')}/rect")
+    window_rect=cmd("GET","/window/rect")
+    glyph_x=int(window_rect["x"]+lane_rect["x"]+lane_rect["width"]/2)
+    glyph_y=int(window_rect["y"]+row_rect["y"]+row_rect["height"]/2)
+    subprocess.run(["xdotool","mousemove","--sync",str(glyph_x),str(glyph_y),"click","1"],check=True)
+    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".cm-breakpoint-line"}))==1,"native pointer sets exact second-row breakpoint")
+    assert cmd("GET",f"/element/{element('.cm-breakpoint-line')}/property/textContent")=="// second gutter row"
+    assert element(".cm-execution-gutter")
+    pointer_rect=cmd("GET",f"/element/{element('.cm-execution-gutter')}/rect")
+    assert lane_rect["x"]+lane_rect["width"]<=pointer_rect["x"],"breakpoint and arrow lanes do not overlap"
+    screenshot("compact-breakpoint-native.png")
+    subprocess.run(["xdotool","click","1"],check=True)
+    wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".cm-breakpoint-line"}),"native second click removes breakpoint")
     marker = "// native restart persistence"
     fill(code, marker)
     save_editor(code)
@@ -568,6 +583,18 @@ try:
         click(".debug-inspector > div:first-child > button")
         wait_for(lambda: element(".debug-variable"), "real variable values loaded")
         wait_for(lambda: element(".cm-debug-stopped"), "paused source line highlighted")
+        paused_node=element(".cm-debug-stopped")
+        paused_color=cmd("GET",f"/element/{paused_node}/css/background-color")
+        paused_text=cmd("GET",f"/element/{paused_node}/property/textContent")
+        paused_rect=cmd("GET",f"/element/{paused_node}/rect")
+        native_window=cmd("GET","/window/rect")
+        subprocess.run(["xdotool","mousemove","--sync",str(int(native_window["x"]+paused_rect["x"]+min(60,paused_rect["width"]/2))),str(int(native_window["y"]+paused_rect["y"]+paused_rect["height"]/2)),"click","1"],check=True)
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/css/background-color")==paused_color,"click must preserve paused row background"
+        subprocess.run(["xdotool","key","--clearmodifiers","shift+Right"],check=True)
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/css/background-color")==paused_color,"selection must preserve paused row background"
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/property/textContent")==paused_text
+        screenshot("paused-selection-native.png")
+
         wait_for(lambda:element(".cm-execution-pointer svg"),"native SVG execution arrow")
         expression_input=element('[aria-label="调试表达式输入"]')
         cmd("POST",f"/element/{expression_input}/value",{"text":"len(values)","value":list("len(values)")})
