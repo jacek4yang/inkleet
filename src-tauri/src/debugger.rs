@@ -7,7 +7,7 @@ type Result<T>=std::result::Result<T,String>;
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct View{pub id:u64,pub phase:String,pub title:String,pub thread_id:Option<i64>,pub epoch:u64,pub output:String,pub truncated:bool,pub reason:String,pub error:String,pub breakpoints:Vec<Value>,pub capabilities:Value}
-struct Session{client:Mutex<Option<Arc<Client>>>,view:Arc<Mutex<View>>,source:PathBuf,source_code:String,language:String,evaluating:AtomicBool,points_gate:Mutex<()>,_work:tempfile::TempDir,closed:Arc<AtomicBool>}
+struct Session{client:Mutex<Option<Arc<Client>>>,view:Arc<Mutex<View>>,source:PathBuf,source_code:String,language:String,evaluating:AtomicBool,operation:Mutex<()>,points_gate:Mutex<()>,_work:tempfile::TempDir,closed:Arc<AtomicBool>}
 impl Session{
     fn client(&self)->Result<Arc<Client>>{self.client.lock().map_err(|_|"调试连接不可用")?.clone().ok_or("调试器尚未连接".into())}
     fn stop(&self,reason:&str){
@@ -44,6 +44,7 @@ impl Debugger{
     pub fn evaluate(&self,id:u64,epoch:u64,frame:i64,expression:&str)->Result<Value>{
         validate_expression(frame,expression)?;
         let session=self.session(id)?;
+        let _operation=session.operation.try_lock().map_err(|_|"已有调试操作正在处理")?;
         if session.language=="java"{return Err("当前 Java 调试核心尚未接入表达式求值".into());}
         if session.evaluating.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire).is_err(){return Err("已有表达式正在求值".into());}
         struct Evaluating<'a>(&'a AtomicBool);impl Drop for Evaluating<'_>{fn drop(&mut self){self.0.store(false,Ordering::Release);}}
@@ -74,19 +75,21 @@ impl Debugger{
     }
     pub fn request(&self,id:u64,epoch:u64,kind:&str,reference:i64)->Result<Value>{
         let session=self.session(id)?;
+        let _operation=if matches!(kind,"next"|"stepIn"|"stepOut"|"continue"|"pause"){Some(session.operation.try_lock().map_err(|_|"已有调试操作正在处理")?)}else{None};
         if session.evaluating.load(Ordering::Acquire)&&matches!(kind,"next"|"stepIn"|"stepOut"|"continue"|"pause"){return Err("请等待表达式完成，或停止调试".into());}
-        let (thread,paused)={
+        let (thread,phase)={
             let view=session.view.lock().map_err(|_|"调试状态不可用")?;
             if view.epoch!=epoch{return Err("调试状态已经改变，请重试".into());}
-            (view.thread_id,view.phase=="paused")
+            (view.thread_id,view.phase.clone())
         };
+        let paused=phase=="paused";
         let args=match kind{
             "threads" if paused=>json!({}),
             "stackTrace" if paused=>json!({"threadId":if reference>0{reference}else{thread.ok_or("暂停线程缺失")?},"startFrame":0,"levels":64}),
             "scopes" if paused&&reference>=0=>json!({"frameId":reference}),
             "variables" if paused&&reference>0=>json!({"variablesReference":reference,"start":0,"count":100}),
             "next"|"stepIn"|"stepOut"|"continue" if paused=>json!({"threadId":thread.ok_or("暂停线程缺失")?}),
-            "pause" if !paused=>json!({"threadId":thread.unwrap_or(1)}),
+            "pause" if phase=="running"=>json!({"threadId":thread.unwrap_or(1)}),
             _=>return Err("当前调试状态不支持该操作".into())
         };
         let response=session.client()?.request(kind,args,Duration::from_secs(10))?;
@@ -117,7 +120,7 @@ pub async fn start(app:tauri::AppHandle,snapshot:crate::local_run::Snapshot,line
         let id=state.next.fetch_add(1,Ordering::Relaxed);
         let session=Arc::new(Session{
             client:Mutex::new(None),view:Arc::new(Mutex::new(View{id,phase:if snapshot.language!="python3"{"compiling"}else{"starting"}.into(),title:snapshot.title.clone(),thread_id:None,epoch:0,output:String::new(),truncated:false,reason:String::new(),error:String::new(),breakpoints:Vec::new(),capabilities:json!({})})),
-            source,source_code:snapshot.code.clone(),language:snapshot.language.clone(),evaluating:AtomicBool::new(false),points_gate:Mutex::new(()),_work:work,closed:Arc::new(AtomicBool::new(false))
+            source,source_code:snapshot.code.clone(),language:snapshot.language.clone(),evaluating:AtomicBool::new(false),operation:Mutex::new(()),points_gate:Mutex::new(()),_work:work,closed:Arc::new(AtomicBool::new(false))
         });
         let previous=state.active.lock().map_err(|_|"调试状态不可用")?.replace(session.clone());
         if let Some(previous)=previous{previous.stop("新调试会话");}

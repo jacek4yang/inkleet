@@ -772,11 +772,13 @@ try {
   await runPanel.locator('[data-local-tab="debug"]').click();
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).press("F9");
   await runPanel.getByText(/断点：1。/).waitFor();
+  assert.equal(await runPanel.getByRole("button", {name:"开始调试",exact:true}).locator("svg[aria-hidden=true]").count(),1,"start uses accessible SVG");
   await runPanel.getByRole("button", { name: "开始调试", exact: true }).evaluate(button => { button.click(); button.click(); });
   await runPage.waitForFunction(() => window.__runTest.debugStarts === 1);
   await runPanel.getByText("已暂停", { exact: true }).waitFor();
   assert.equal(await runPanel.getByText("已暂停", { exact: true }).getAttribute("title"), "breakpoint");
-  for (const label of ["开始调试", "继续", "单步跳过", "单步进入", "单步跳出", "应用断点", "停止调试"]) {
+  assert.equal(await runPanel.getByRole("button", {name:"开始调试",exact:true}).count(),0,"active session has one primary execution control");
+  for (const label of ["继续", "单步跳过", "单步进入", "单步跳出", "应用断点", "停止调试"]) {
     assert.equal(await runPanel.getByRole("button", { name: label, exact: true }).locator("svg[aria-hidden=true]").count(), 1, label + " has an accessible SVG control");
   }
   await runPage.screenshot({ path: "evidence/debug-svg-toolbar.png", fullPage: true });

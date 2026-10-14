@@ -1,12 +1,11 @@
-import { VariableNode, type DebugVariable } from "./debug-variable-tree";
+import { VariableNode } from "./debug-variable-tree";
+import { debugVariables, debugFrames, debugScopes, debugThreads, type DebugVariable, type DebugFrame as Frame, type DebugScope as Scope } from "./debug-model";
 import { IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { Language } from "./domain";
 type Snapshot = { code: string; input: string; metadata: string; title: string; language: Language };
 type State = { id: number; phase: string; title: string; threadId: number | null; epoch: number; output: string; truncated: boolean; reason: string; error: string; breakpoints: { line?: number; verified?: boolean; message?: string }[] };
-type Frame = { id: number; name: string; line: number; source?: { name?: string; path?: string } };
-type Scope = { name: string; variablesReference: number; expensive?: boolean };
 type Variable = DebugVariable;
 type Watch = { id: number; expression: string; result?: string; error?: string; token?: string };
 const active = (state: State | null) => state && state.phase !== "finished";
@@ -48,14 +47,14 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     if (!current || !currentPause(current)) throw new Error("暂停位置已改变");
     const response = await inspect("variables", reference, current);
     if (!currentPause(current) || frameRef.current !== frame) throw new Error("忽略旧调用栈的变量");
-    return (response.variables as Variable[] ?? []).slice(0, 100);
+    return debugVariables(response.variables);
   }
   async function showVariables(reference: number, current = latest.current) {
     if (!current || current.phase !== "paused") return;
     const request = ++version.current;
     try {
       const response = await inspect("variables", reference, current);
-      if (alive.current && request === version.current && currentPause(current)) setVariables((response.variables as Variable[] ?? []).slice(0, 100));
+      if (alive.current && request === version.current && currentPause(current)) setVariables(debugVariables(response.variables));
     } catch (e) { if (alive.current && request === version.current) setError(String(e)); }
   }
   async function showFrame(frame: Frame, current = latest.current) {
@@ -66,7 +65,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     try {
       const response = await inspect("scopes", frame.id, current);
       if (!alive.current || request !== version.current || !currentPause(current)) return;
-      const items = (response.scopes as Scope[] ?? []).slice(0, 20); setScopes(items);
+      const items = debugScopes(response.scopes); setScopes(items);
       const first = items.find(item => !item.expensive); if (first) await showVariables(first.variablesReference, current);
     } catch (e) { if (alive.current && request === version.current) setError(String(e)); }
   }
@@ -77,7 +76,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     try {
       const response = await inspect("stackTrace", thread, current);
       if (request !== version.current || !currentPause(current)) return;
-      const items = (response.stackFrames as Frame[] ?? []).slice(0, 64); setFrames(items);
+      const items = debugFrames(response.stackFrames); setFrames(items);
       if (items[0]) await showFrame(items[0], current);
     } catch (e) { if (request === version.current && currentPause(current)) setError(String(e)); }
   }
@@ -87,7 +86,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     const current = state;
     void showThread(current.threadId ?? 0, current);
     void inspect("threads", 0, current).then(response => {
-      if (currentPause(current)) setThreads((response.threads as {id:number;name:string}[] ?? []).slice(0, 100));
+      if (currentPause(current)) setThreads(debugThreads(response.threads));
     }).catch(() => { /* Stack inspection remains usable if an adapter omits thread enumeration. */ });
   }, [state?.id, state?.epoch, stale, original?.code]);
   async function evaluate(value = expression, watchId?: number) {
@@ -145,7 +144,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   function addWatch() { const value = expression.trim(); if (value && watches.length < 20 && !watches.some(w => w.expression === value)) setWatches(items => [...items, {id: ++watchNext.current, expression: value}]); }
   return <div className="debug-panel" aria-label="本地断点调试">
     <div className="local-actions">
-      <IconButton icon="play" label="开始调试" shortcut="F5" disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")} />
+      {!active(state) && <IconButton icon="play" label="开始调试" shortcut="F5" disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")} />}
       {active(state) && <><IconButton icon={paused ? "play" : "pause"} label={paused ? "继续" : "暂停"} shortcut={paused ? "F5" : undefined} disabled={pending || evaluating || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action(paused ? "continue" : "pause")} />
         {(["next", "stepIn", "stepOut"] as const).map((kind, index) => <IconButton key={kind} icon={(["next","into","out"] as const)[index]} label={["单步跳过", "单步进入", "单步跳出"][index]} shortcut={["F10","F11","Shift+F11"][index]} title={inspectionOnly ? "先选择当前暂停线程，再执行单步" : undefined} disabled={!paused || pending || evaluating || inspectionOnly} onClick={() => action(kind)} />)}
         <IconButton icon="breakpoint" label="应用断点" disabled={pending || evaluating || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")} /><IconButton icon="stop" label="停止调试" shortcut="Shift+F5" disabled={pending} onClick={() => action("stop")} /></>}

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
-export type DebugVariable = { name: string; value: string; type?: string; variablesReference: number; namedVariables?: number; indexedVariables?: number; presentationHint?: { lazy?: boolean } };
+import type { DebugVariable } from "./debug-model";
 type Props = { variable: DebugVariable; token: string; read: (reference: number) => Promise<DebugVariable[]>; depth?: number };
 /** DAP references are scoped to a single suspended session/frame, never persisted. */
 export function VariableNode({ variable, token, read, depth = 0 }: Props) {
