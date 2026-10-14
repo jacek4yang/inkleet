@@ -63,12 +63,20 @@ fn payload(snapshot: &Snapshot) -> Value {
     if snapshot.kind == Kind::OnlineRun { value["data_input"] = json!(snapshot.test_case); }
     value
 }
+fn server_identifier(value:&str)->bool{
+    !value.is_empty() && value.len()<=120 && !matches!(value,"."|"..")
+        && value.bytes().all(|b|b.is_ascii_alphanumeric()||matches!(b,b'-'|b'_'|b'.'))
+}
+fn check_endpoint(server_id:&str,slug:&str)->Result<String,String>{
+    if !server_identifier(server_id)||!identifier(slug,160){return Err("评测编号无效".into());}
+    Ok(format!("https://leetcode.cn/submissions/detail/{server_id}/check/"))
+}
 fn parse_start(kind: Kind, value: &Value) -> StartResult {
     let key = if kind == Kind::OnlineRun { "interpret_id" } else { "submission_id" };
     let id = value.get(key).and_then(|v| match v {
         Value::String(s) => Some(s.clone()), Value::Number(n) if n.is_u64() => Some(n.to_string()), _ => None,
     });
-    match id.filter(|id| identifier(id, 120)) {
+    match id.filter(|id| server_identifier(id)) {
         Some(server_id) => StartResult::Waiting { server_id },
         None => StartResult::Unknown { message: "未收到有效评测编号，发送状态未知；请核查后再决定是否重发".into() },
     }
@@ -84,7 +92,7 @@ fn parse_check(value: Value) -> Result<CheckResult, String> {
             for key in ["status_code", "status_msg", "run_success", "compare_result", "total_correct",
                 "total_testcases", "status_runtime", "status_memory", "display_runtime", "memory",
                 "full_compile_error", "compile_error", "full_runtime_error", "runtime_error",
-                "code_output", "std_output", "expected_output", "last_testcase", "task_finish_time"] {
+                "code_output", "code_answer", "std_output", "expected_output", "expected_code_answer", "expected_code_output", "display_memory", "last_testcase", "task_finish_time"] {
                 if let Some(field) = value.get(key) {
                     let encoded = serde_json::to_string(field).map_err(|_| "判题字段编码失败")?;
                     if encoded.len() <= remaining {
@@ -149,8 +157,7 @@ impl Transport {
         }
     }
     pub async fn check(&self, server_id: &str, slug: &str, credentials: &Credentials) -> Result<CheckResult, String> {
-        if !identifier(server_id, 120) || !identifier(slug, 160) { return Err("评测编号无效".into()); }
-        let url = format!("https://leetcode.cn/submissions/detail/{server_id}/check/");
+        let url = check_endpoint(server_id,slug)?;
         let response = self.headers(self.client.get(url), credentials, slug)?.send().await
             .map_err(|_| "查询中断，已保留评测编号；可稍后继续查询")?;
         if !response.status().is_success() {
@@ -174,6 +181,32 @@ mod tests {
         Snapshot { solution:None, id: "test-1".into(), account: "test-user".into(), question_id: "1".into(),
             slug: "fixture".into(), language: "rust".into(), code: "// authored fixture".into(),
             test_case: "[1,2]".into(), kind: Kind::OnlineRun }
+    }
+    #[test]
+    fn interpretation_ids_with_decimal_timestamps_are_safe_and_queryable(){
+        let id="runcode_1627219627.5662382_EI7iasnhLm";
+        let StartResult::Waiting{server_id}=parse_start(Kind::OnlineRun,&json!({"interpret_id":id})).clone() else {panic!("valid run id rejected");};
+        assert_eq!(server_id,id);
+        assert_eq!(check_endpoint(&server_id,"two-sum").unwrap(),format!("https://leetcode.cn/submissions/detail/{id}/check/"));
+        for bad in ["","..",".","../x","a/b","%2e%2e","id?x=1","id#fragment","id\\x","id\n"]{
+            assert!(!server_identifier(bad));
+            assert!(check_endpoint(bad,"two-sum").is_err());
+            assert!(matches!(parse_start(Kind::OnlineRun,&json!({"interpret_id":bad})),StartResult::Unknown{..}));
+        }
+        assert!(!identifier(id,120),"snapshot validator is not loosened");
+    }
+    #[test]
+    fn preserves_run_answers_separately_from_stdout() {
+        let CheckResult::Finished { result } = parse_check(json!({
+            "state":"SUCCESS","status_msg":"Accepted","code_answer":["[7,0]"],
+            "expected_code_answer":["[0,1]"],"code_output":["debug output"],
+            "display_runtime":0,"unrelated":"discard"
+        })).unwrap() else { panic!("expected result"); };
+        assert_eq!(result["code_answer"],json!(["[7,0]"]));
+        assert_eq!(result["expected_code_answer"],json!(["[0,1]"]));
+        assert_eq!(result["code_output"],json!(["debug output"]));
+        assert_eq!(result["display_runtime"],0);
+        assert!(result.get("unrelated").is_none());
     }
     #[test]
     fn six_language_payloads_keep_submission_separate_from_test_input() {

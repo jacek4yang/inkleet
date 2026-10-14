@@ -27,7 +27,7 @@ pub struct Identity { pub username: String, pub account: String, pub persistence
 pub struct QuestionSummary {
     pub frontend_question_id: String, pub title: String, pub title_cn: Option<String>,
     pub title_slug: String, pub difficulty: String, pub paid_only: bool,
-    #[serde(default)] pub status: Option<String>,
+    #[serde(default, deserialize_with="read_completion_status")] pub status: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +74,19 @@ fn search_filters(keyword: &str, offset: u32, difficulty: Option<&str>, status: 
         filters.insert("status".into(),json!(value));
     }
     Ok(Value::Object(filters))
+}
+fn read_completion_status<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<String>,D::Error>{
+    let value=Value::deserialize(deserializer)?;
+    Ok(match value{
+        Value::Null=>None,
+        Value::String(value)=>match value.trim().to_ascii_uppercase().as_str(){
+            "AC"|"SOLVED"=>Some("AC".into()),
+            "TRIED"|"NOTAC"|"ATTEMPTED"=>Some("TRIED".into()),
+            ""|"NOT_STARTED"|"TO_DO"=>None,
+            _=>Some("UNKNOWN".into()),
+        },
+        _=>Some("UNKNOWN".into()),
+    })
 }
 impl Leetcode {
     pub fn new() -> Result<Self, String> {
@@ -143,7 +156,7 @@ impl Leetcode {
             if q.frontend_question_id.len()>40 || q.title.len()>1024 || q.title_cn.as_ref().is_some_and(|s|s.len()>1024) {return Err("题目列表文本超出长度限制".into());}
             q.difficulty=normalize_difficulty(&q.difficulty)?.into();
             if session.is_none() { q.status = None; }
-            else if q.status.as_deref().is_some_and(|s| !matches!(s, "AC" | "TRIED")) { return Err("完成状态格式变化，请更新应用".into()); }
+            // Unknown per-question status is preserved as UNKNOWN, never a page-wide failure.
         }
         Ok(list)
     }
@@ -163,6 +176,13 @@ impl Leetcode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn completion_status_variants_do_not_destroy_catalogue(){
+        for (raw,expected) in [(json!("ac"),Some("AC")),(json!("SOLVED"),Some("AC")),(json!("notac"),Some("TRIED")),(json!("ATTEMPTED"),Some("TRIED")),(json!("NOT_STARTED"),None),(Value::Null,None),(json!("future-value"),Some("UNKNOWN")),(json!({"changed":true}),Some("UNKNOWN"))]{
+            let question:QuestionSummary=serde_json::from_value(json!({"frontendQuestionId":"1","title":"Two Sum","titleCn":"两数之和","titleSlug":"two-sum","difficulty":"Easy","paidOnly":false,"status":raw})).unwrap();
+            assert_eq!(question.status.as_deref(),expected);
+        }
+    }
     #[test]
     fn list_filters_are_bounded_and_account_scoped() {
         assert_eq!(search_filters(" two sum ", 25, Some("EASY"), Some("AC"), true).unwrap(), json!({"searchKeywords":"two sum","difficulty":"EASY","status":"AC"}));

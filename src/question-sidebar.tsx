@@ -73,7 +73,7 @@ export function QuestionSidebar({ account, recent, selected, onSelectRecent, onC
         {loading && <p className="muted" role="status">加载中…</p>}
         {!isTauri() && <p className="muted">在客户端打开题库</p>}
         {!loading && data?.questions.map(q=><button key={q.titleSlug} data-slug={q.titleSlug} disabled={!!opening || q.paidOnly} aria-current={recent.find(p=>p.id===selected)?.official?.titleSlug===q.titleSlug ? "page" : undefined} onClick={()=>void choose(q.titleSlug)} title={q.paidOnly ? "会员题暂未开放" : q.titleCn || q.title}>
-          <span className={"question-status "+(account && q.status==="AC" ? "accepted" : "")} title={account ? q.status==="AC" ? "已通过" : q.status==="TRIED" ? "尝试过" : "未开始" : ""}>{account && q.status==="AC" ? <Icon name="check" /> : account && q.status==="TRIED" ? <Icon name="attempt" /> : null}</span>
+          <span className={"question-status "+(account && q.status==="AC" ? "accepted" : "")} title={account ? q.status==="AC" ? "已通过" : q.status==="TRIED" ? "尝试过" : q.status==="UNKNOWN" ? "完成状态暂不可用" : "未开始" : ""}>{account && q.status==="AC" ? <Icon name="check" /> : account && q.status==="TRIED" ? <Icon name="attempt" /> : account && q.status==="UNKNOWN" ? <Icon name="info" /> : null}</span>
           <span className="question-number">{q.frontendQuestionId}</span><span className="question-title">{q.titleCn||q.title}</span><span className={"question-difficulty "+q.difficulty}>{q.paidOnly ? <Icon name="lock" /> : difficulties[q.difficulty] ?? q.difficulty}</span>
         </button>)}
         {!loading && data && !data.questions.length && <p className="muted">没有匹配题目</p>}

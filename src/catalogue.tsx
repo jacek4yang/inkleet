@@ -12,7 +12,7 @@ export type RemoteQuestion = {
 };
 export type QuestionSummary = {
   frontendQuestionId: string; title: string; titleCn: string | null;
-  titleSlug: string; difficulty: string; paidOnly: boolean; status?: "AC" | "TRIED" | null;
+  titleSlug: string; difficulty: string; paidOnly: boolean; status?: "AC" | "TRIED" | "UNKNOWN" | null;
 };
 export type QuestionList = { questions: QuestionSummary[]; total: number; hasMore: boolean };
 type Result = QuestionList;

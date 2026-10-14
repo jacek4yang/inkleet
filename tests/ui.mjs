@@ -25,6 +25,7 @@ async function testPage(options) {
       configurable:true,get:()=>internals,set:value=>{
         const invoke=value.invoke;
         internals={...value,invoke:(command,args)=>{
+          if(command==="login_status"&&!window.__authRestoreTest)return Promise.resolve(null);
           if(command==="begin_draft_session"&&!window.__recoveryTest)return Promise.resolve(1);
           if(command==="checkpoint_draft"&&!window.__recoveryTest)return Promise.resolve();
           if(command==="get_editor_settings"&&!window.__formatTest&&!window.__vimTest)return Promise.resolve({settings:{version:1,formatOnSave:false,overrides:{}},revision:null});
@@ -456,7 +457,9 @@ try {
   assert.equal(await authPage.getByRole("button", { name: "运行", exact: true }).isEnabled(), false);
   await fixtureEditor.fill("// changed after online snapshot");
   await authPage.getByText(/结果对应发起时的代码和用例快照/).waitFor();
-  await authPage.getByText(/Accepted · 编号 fixture-run-123/).waitFor();
+  await authPage.getByText("运行完成",{exact:true}).waitFor();
+  assert.equal(await authPage.locator(".verdict.accepted").count(),0,"run status never claims submission accepted");
+  assert.equal(await authPage.locator(".judge-raw pre").isVisible(),false);
   assert.equal(await authPage.evaluate(() => window.__inkAuthTest.judgeStarts.length), 1);
   const sent = await authPage.evaluate(() => window.__inkAuthTest.judgeStarts[0]);
   assert.equal(sent.code, "// restored Java draft");
@@ -468,10 +471,58 @@ try {
   await authPage.getByRole("dialog", { name: "解除未知提交保护", exact: true }).getByRole("button", { name: "确认", exact: true }).click();
   await authPage.getByText("测试：用户已核查，未重发", { exact: true }).waitFor();
   assert.equal(await authPage.evaluate(() => window.__inkAuthTest.judgeStarts.length), 2, "解除保护不能自动重发");
+  await authPage.evaluate(()=>{const job=window.__inkAuthTest.jobs.at(-1);job.state={state:"finished",server_id:"fixture-wa",result:{status_msg:"Wrong Answer",code_output:"[7,0]",expected_output:"[0,1]",last_testcase:"[2,7,11,15]\n9",compare_result:"0000011000",display_runtime:0,total_correct:2,total_testcases:64}};});
+  await authPage.getByRole("button",{name:"fixture-user · 退出",exact:true}).click();
+  await authPage.getByRole("button",{name:"登录力扣",exact:true}).click();
+  await authPage.getByRole("button",{name:"验证登录",exact:true}).click();
+  await authPage.waitForFunction(()=>window.__inkAuthTest.pending.length===4);
+  await authPage.evaluate(()=>window.__inkAuthTest.pending[3].resolve({username:"fixture-user",account:"fixture-user",persistence:"memory-only"}));
+  await authPage.getByText("答案错误",{exact:true}).waitFor();
+  assert.equal(await authPage.locator(".judge-field").filter({has:authPage.getByRole("heading",{name:"实际输出",exact:true})}).locator("pre").innerText(),"[7,0]");
+  assert.equal(await authPage.locator(".judge-field").filter({has:authPage.getByRole("heading",{name:"预期输出",exact:true})}).locator("pre").innerText(),"[0,1]");
+  assert.equal(await authPage.locator(".judge-field").filter({has:authPage.getByRole("heading",{name:"失败输入",exact:true})}).locator("pre").innerText(),"[2,7,11,15]\n9");
+  await authPage.getByText("0 ms",{exact:true}).waitFor();
+  assert.equal(await authPage.locator(".judge-raw pre").isVisible(),false);
+  await authPage.screenshot({path:"evidence/online-verdict-readable.png",fullPage:true});
+  await authPage.evaluate(()=>{const old=window.__inkAuthTest.jobs.at(-1);window.__inkAuthTest.jobs.push({...old,snapshot:{...old.snapshot,id:"other-pending",language:"rust",solution:"alternate"},state:{state:"waiting",server_id:"other-server"}});});
+  await authPage.getByRole("button",{name:"fixture-user · 退出",exact:true}).click();
+  await authPage.getByRole("button",{name:"登录力扣",exact:true}).click();
+  await authPage.getByRole("button",{name:"验证登录",exact:true}).click();
+  await authPage.waitForFunction(()=>window.__inkAuthTest.pending.length===5);
+  await authPage.evaluate(()=>window.__inkAuthTest.pending[4].resolve({username:"fixture-user",account:"fixture-user",persistence:"memory-only"}));
+  await authPage.getByLabel("待处理评测",{exact:true}).waitFor();
+  assert.equal(await authPage.getByRole("button",{name:"提交",exact:true}).isDisabled(),true);
+  await authPage.getByLabel("待处理评测",{exact:true}).getByRole("button",{name:"继续查询",exact:true}).click();
+  await authPage.waitForFunction(()=>window.__inkAuthTest.jobs.find(job=>job.snapshot.id==="other-pending").state.state==="finished");
+  assert.equal(await authPage.evaluate(()=>window.__inkAuthTest.judgeStarts.length),2,"resuming another solution never re-sends code");
   assert.deepEqual(authErrors, []);
   await authPage.close();
   await writeFile("evidence/AUTH_UI_RESULT.txt", "PASS: mocked IPC only; cancel during verification, ignore stale success, explicit failure and recovery. NOT real login validation.\n");
 
+
+  const restorePage=await testPage();
+  await restorePage.addInitScript(()=>{
+    window.isTauri=true;
+    const state=window.__authRestoreTest={defer:false,cancelled:0};
+    const identity={username:"restored-user",account:"restored-account",persistence:"memory-only"};
+    window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
+      if(command==="login_status")return state.defer?new Promise(resolve=>state.reply=resolve):identity;
+      if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="search_questions")return {questions:[],total:0,hasMore:false};
+      if(command==="list_judgements")return [];
+      if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+      if(command==="load_document")return {code:"// restored",notes:null};
+      if(command==="external_editor_supported")return false;
+      if(command==="open_login"||command==="stop_language_service")return;
+      if(command==="cancel_login"){state.cancelled++;return;}
+      throw Error("Unexpected restore IPC "+command);
+    }};
+  });
+  await restorePage.goto("http://127.0.0.1:5173");
+  await restorePage.getByRole("button",{name:"restored-user · 退出",exact:true}).waitFor();
+  await restorePage.reload();
+  await restorePage.getByRole("button",{name:"restored-user · 退出",exact:true}).waitFor();
+  await restorePage.close();
 
   // 链接入口协议 fixture：测试竞态与草稿保护，不冒充真实中国站请求。
   const linkPage = await testPage({ viewport: { width: 390, height: 844 } });
