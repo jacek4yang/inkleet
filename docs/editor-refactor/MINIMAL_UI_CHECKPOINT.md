@@ -57,3 +57,12 @@ Risks: narrower toolbars, low-frequency action discoverability, WebView dialog f
 - No main merge, tag or official Release.
 
 First CI observation (8924097): TypeScript/build and 18 domain tests passed. Browser run reached local-result checks after Settings, keyboard, notes, LSP and environment UI checks, then failed because the existing local-vs-judge assertion still queried the removed permanent sentence. The distinction is now retained on the result tooltip and in the runtime Settings page, with assertions on both. Screenshot inspection additionally found notes SVGs shrinking under old pane-heading padding; specific padding and minimum rendered-icon-size regression checks added. Neither failure is treated as a complete pass.
+
+## Browser verification update
+Source e3072e676d9c5cefec6454ff5f4ac5a8b75f0909, CI [38499526237](https://github.com/jacek4yang/inkleet/actions/runs/38499526237): TypeScript, 18 domain tests, production frontend build and the complete browser regression passed, including Settings routes, SVG dimensions, keyboard, completion, login/online safety fixtures, export, conflicts, recovery and external-note guards.
+Screenshots below are Linux Chromium with authored test data, not native or real account evidence.
+- [Workbench](evidence/minimal-desktop-code.png)
+- [Searchable Settings](evidence/minimal-settings-search.png)
+- [SVG debugger](evidence/minimal-debug-svg-toolbar.png)
+
+Performance fixture: AMD EPYC 9V45, 4 logical CPUs; 390×844 viewport; 10,000 lines / 438,889 characters; 32 actual keyboard samples after synthetic editor paste. Input-to-next-animation-frame P50 23.6 ms, P95 26.2 ms; reported longest long-task 0 ms; paste setup 43 ms. This is a browser baseline, not native CPU/memory/IME or long-run acceptance.
