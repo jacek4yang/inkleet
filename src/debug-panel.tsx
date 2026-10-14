@@ -172,13 +172,13 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
         {(["next", "stepIn", "stepOut"] as const).map((kind, index) => <IconButton key={kind} icon={(["next","into","out"] as const)[index]} label={["单步跳过", "单步进入", "单步跳出"][index]} shortcut={["F10","F11","Shift+F11"][index]} title={inspectionOnly ? "先选择当前暂停线程，再执行单步" : undefined} disabled={!paused || pending || evaluating || inspectionOnly} onClick={() => action(kind)} />)}
         <IconButton icon="breakpoint" label="应用断点" disabled={pending || evaluating || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")} /><IconButton icon="stop" label="停止调试" shortcut="Shift+F5" disabled={pending} onClick={() => action("stop")} /></>}
     </div>
-    <div className="debug-body"><div className="debug-meta"><span className="breakpoint-summary">断点：{breakpoints.join(", ") || "未设置"}。</span></div>
-    <p role="status" hidden={!state} title={state?.reason}>{state ? state.phase === "paused" ? "已暂停" : state.phase === "finished" ? "调试结束 · " + state.reason : state.phase === "compiling" ? "正在编译调试快照…" : state.phase === "starting" ? "正在连接调试器…" : "调试运行中" : "尚未调试"}</p>
+    <div className="debug-body"><div className="debug-meta"><span className="breakpoint-summary">断点：{breakpoints.join(", ") || "未设置"}。</span>
+    <p role="status" hidden={!state} title={state?.reason}>{state ? state.phase === "paused" ? "已暂停" : state.phase === "finished" ? "调试结束 · " + state.reason : state.phase === "compiling" ? "正在编译调试快照…" : state.phase === "starting" ? "正在连接调试器…" : "调试运行中" : "尚未调试"}</p></div>
     {notice && <p role="status">{notice}</p>}
     {stale && <p className="cache-warning">代码或用例已改变，调试仍使用启动时快照；当前编辑器不显示旧快照停靠行。</p>}
     {(error || state?.error) && <p className="error" role="alert">{error || state?.error}</p>}
     {state?.breakpoints.some(b => !b.verified) && <p className="cache-warning">部分断点尚未验证，可能不是可执行行。</p>}
-    {paused && <div className="debug-inspector"><div className="debug-frames"><h4>调用栈</h4>{threads.length > 1 && <select aria-label="调试线程" value={selectedThread ?? ""} onChange={event => void showThread(Number(event.target.value))}>{threads.map(thread => <option key={thread.id} value={thread.id}>{thread.name}</option>)}</select>}{frames.map(frame => <button key={frame.id} aria-pressed={frame.id === selectedFrame} onClick={() => showFrame(frame)}>{frame.name.slice(0, 200)} · {frame.line}</button>)}</div>
+    {paused && <div className="debug-inspector"><div className="debug-frames"><h4>调用栈</h4>{threads.length > 1 && <select aria-label="调试线程" value={selectedThread ?? ""} onChange={event => void showThread(Number(event.target.value))}>{threads.map(thread => <option key={thread.id} value={thread.id}>{thread.name}</option>)}</select>}{frames.map(frame => <button key={frame.id} aria-pressed={frame.id === selectedFrame} title={`${frame.name} · ${frame.line}`} onClick={() => showFrame(frame)}><span className="debug-frame-name">{frame.name.slice(0, 200)}</span><span className="debug-frame-line"> · {frame.line}</span></button>)}</div>
       <div><h4>变量</h4><div className="local-actions">{scopes.map(scope => <button key={scope.variablesReference} onClick={() => showVariables(scope.variablesReference)}>{scope.name.slice(0,100)}</button>)}</div>
         {variables.map((variable,index) => <VariableNode key={frameToken + ":" + index + ":" + variable.name} variable={variable} token={frameToken} read={reference => readChildren(reference)} />)}</div></div>}
     {paused && <form className="debug-evaluate" aria-label="调试表达式" onSubmit={event => { event.preventDefault(); void evaluate(); }}>
@@ -187,12 +187,12 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
       {evaluation && <div className="debug-evaluation-result"><pre>{evaluation.result}</pre>{evaluation.type && <span>{evaluation.type}</span>}{evaluation.truncated && <p>结果过长，已截断显示。</p>}{evaluation.variablesReference > 0 && <button type="button" onClick={() => showVariables(evaluation.variablesReference)}>展开求值结果</button>}</div>}
     </form>}
     {paused && <section className="debug-watches" aria-label="监视表达式">
-      <header><h4>Watches</h4><button type="button" aria-label="添加监视表达式" title="添加当前表达式；仅手动刷新，表达式可能改变程序状态" disabled={!expression.trim() || watches.length >= 20 || watches.some(w => w.expression === expression.trim())} onClick={addWatch}>+</button></header>
+      <header><h4>Watches</h4><IconButton icon="add" type="button" label="添加监视表达式" title="添加当前表达式；仅手动刷新，表达式可能改变程序状态" disabled={!expression.trim() || watches.length >= 20 || watches.some(w => w.expression === expression.trim())} onClick={addWatch} /></header>
       {watches.map(watch => <div className="debug-watch" key={watch.id}>
         <code title={watch.expression}>{watch.expression}</code>
         <span className={watch.error ? "error" : ""}>{watch.token === frameToken ? watch.error ?? watch.result : "—"}</span>
         <IconButton icon="refresh" label={"刷新监视 " + watch.expression} title="在当前栈帧求值一次，可能改变程序状态" disabled={pending || evaluating || stale || selectedFrame === null || snapshot.language === "java"} onClick={() => void evaluate(watch.expression, watch.id)} />
-        <button type="button" aria-label={"删除监视 " + watch.expression} onClick={() => setWatches(items => items.filter(item => item.id !== watch.id))}>×</button>
+        <IconButton icon="close" type="button" label={"删除监视 " + watch.expression} onClick={() => setWatches(items => items.filter(item => item.id !== watch.id))} />
       </div>)}
     </section>}
     {state?.output && <pre>{state.output}</pre>}
