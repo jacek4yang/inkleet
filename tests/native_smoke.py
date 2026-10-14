@@ -1143,6 +1143,13 @@ except PublicServiceUnavailable as error:
     (evidence/"LIVE_CN_RESULT.txt").write_text("UNVERIFIED: public LeetCode CN access denied during live GUI search. Local IDE checks completed; current source preserved. Fresh online question/link/cache sequence not run. " + str(error) + "\n")
     print("::warning::Live public LeetCode CN verification blocked by upstream access denial; not a passing online or authentication result.",flush=True)
 except Exception:
+    # Read-only failure evidence; never replay a click/key or mutate the document.
+    if session:
+        try:
+            snapshot=cmd("POST","/execute/sync",{"script":"const e=document.activeElement; const l=document.querySelector('.lsp-status'); return {focus:{tag:e?.tagName,label:e?.getAttribute('aria-label')},lsp:{text:l?.textContent,title:l?.getAttribute('title'),label:l?.getAttribute('aria-label'),data:l?{...l.dataset}:null},completion:document.querySelector('.cm-tooltip-autocomplete')?.textContent??null,selection:String(window.getSelection())};","args":[]})
+            (evidence/"failure-state.json").write_text(json.dumps(snapshot,ensure_ascii=False,indent=2))
+        except Exception as diagnostic_error:
+            (evidence/"failure-state-error.txt").write_text(str(diagnostic_error))
     subprocess.run(["scrot", str(evidence / "desktop-failure.png")], check=False)
     if session:
         try: screenshot("failure.png")
