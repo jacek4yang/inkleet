@@ -1,6 +1,20 @@
 //! Separate crash-recovery snapshots. Never writes the canonical source.
 use serde::{Deserialize,Serialize};
 use std::{fs,io::{Read,Write},path::{Path,PathBuf}};
+#[derive(Default)]
+pub struct Session { epoch:u64,versions:std::collections::HashMap<PathBuf,u64> }
+impl Session {
+    pub fn begin(&mut self)->Result<u64,String>{
+        self.epoch=self.epoch.checked_add(1).ok_or("草稿会话已耗尽")?;
+        self.versions.clear();Ok(self.epoch)
+    }
+    pub fn should_write(&self,path:&Path,epoch:u64,revision:u64)->Result<bool,String>{
+        if epoch==0||epoch!=self.epoch{return Err("恢复草稿会话已过期，请重新打开工作台".into());}
+        if revision==0{return Err("草稿版本无效".into());}
+        Ok(!self.versions.get(path).is_some_and(|v|*v>=revision))
+    }
+    pub fn committed(&mut self,path:PathBuf,revision:u64){self.versions.insert(path,revision);}
+}
 const MAX_TEXT:usize=2*1024*1024;
 const MAX_RECORD:usize=24*1024*1024;
 #[derive(Clone,Serialize,Deserialize)]
@@ -43,6 +57,13 @@ pub fn write(path:&Path,text:String,baseline:Option<String>)->Result<(),String>{
 }
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn reload_accepts_new_revision_and_rejects_late_session(){
+        let mut s=Session::default();let p=PathBuf::from("solution.rs");
+        let first=s.begin().unwrap();assert!(s.should_write(&p,first,9).unwrap());s.committed(p.clone(),9);
+        assert!(!s.should_write(&p,first,8).unwrap());let second=s.begin().unwrap();
+        assert!(s.should_write(&p,second,1).unwrap());assert!(s.should_write(&p,first,10).is_err());
+        assert!(s.should_write(&p,second,0).is_err());
+    }
     #[test]fn draft_never_changes_canonical_and_keeps_baseline(){
         let dir=tempfile::tempdir().unwrap();let path=dir.path().join("solution.rs");
         fs::write(&path,"saved").unwrap();

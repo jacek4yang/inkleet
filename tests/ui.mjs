@@ -25,6 +25,8 @@ async function testPage(options) {
       configurable:true,get:()=>internals,set:value=>{
         const invoke=value.invoke;
         internals={...value,invoke:(command,args)=>{
+          if(command==="begin_draft_session")return Promise.resolve(1);
+          if(command==="checkpoint_draft")return Promise.resolve();
           if(command==="get_editor_settings"&&!window.__formatTest)return Promise.resolve({settings:{version:1,formatOnSave:false,overrides:{}},revision:null});
           return invoke(command,args);
         }};
@@ -1101,6 +1103,7 @@ try {
   assert.equal(await conflictPage.getByText("在线评测需要登录中国站",{exact:true}).count(),0,"login explanation is not permanent workbench clutter");
   await conflictPage.evaluate(() => { window.__conflictTest.file = "external"; });
   await conflictEditor.fill("local draft");
+  await conflictEditor.press("Control+s");
   await conflictPage.locator('[data-action="review-code-conflict"]').waitFor();
   await conflictPage.locator('[data-action="review-code-conflict"]').click();
   const conflictDialog = conflictPage.getByRole("dialog", { name: "源码文件冲突", exact: true });
@@ -1118,6 +1121,7 @@ try {
   assert.deepEqual(await conflictPage.evaluate(() => window.__conflictTest.backups), [{ local: "local draft", external: "changed again" }]);
   await conflictPage.evaluate(() => { window.__conflictTest.file = null; });
   await conflictEditor.fill("new local draft");
+  await conflictEditor.press("Control+s");
   await conflictPage.locator('[data-action="review-code-conflict"]').waitFor();
   await conflictPage.locator('[data-action="review-code-conflict"]').click();
   await conflictDialog.getByText("文件版本（已删除）", { exact: true }).waitFor();
@@ -1126,6 +1130,7 @@ try {
   assert.equal(await conflictEditor.textContent(), "", "empty CodeMirror line must contain no source characters");
   assert.equal(await conflictPage.evaluate(() => window.__conflictTest.file), null);
   await conflictEditor.fill("after recovery");
+  await conflictEditor.press("Control+s");
   await conflictPage.waitForFunction(() => window.__conflictTest.file === "after recovery");
   await openSettings(conflictPage, "源码");
   await conflictPage.locator('[data-action="code-recovery"]').click();
@@ -1177,6 +1182,7 @@ try {
   await externalPage.getByRole("button", { name: "笔记", exact: true }).click();
   const externalNote = externalPage.getByRole("textbox", { name: "Markdown 笔记", exact: true });
   await externalNote.fill("# Saved");
+  await externalNote.press("Control+s");
   await openSettings(externalPage, "笔记");
   await externalPage.getByRole("button", { name: "Typora 编辑", exact: true }).click();
   await externalPage.waitForFunction(() => window.__externalTest.opened.length === 1);
@@ -1190,6 +1196,7 @@ try {
   await externalPage.waitForFunction(() => document.querySelector('[aria-label="Markdown 笔记"]').innerText === "# Focus refresh");
   await externalPage.evaluate(() => { window.__externalTest.fail = true; });
   await externalNote.fill("# Unsaved");
+  await externalNote.press("Control+s");
   await externalPage.locator('[data-action="review-notes-conflict"]').waitFor();
   await externalPage.evaluate(() => { window.__externalTest.notes = "# Concurrent external"; });
   await openSettings(externalPage, "笔记");
@@ -1292,6 +1299,7 @@ try {
   await solutionsPage.goto("http://127.0.0.1:5173");
   const solutionCode=solutionsPage.getByRole("textbox",{name:"代码编辑器",exact:true});
   await solutionCode.fill("// default source");
+  await solutionCode.press("Control+s");
   await solutionsPage.waitForFunction(()=>window.__solutionsTest.writes.some(w=>w.text==="// default source"));
   async function namedAction(action,name){
     await solutionsPage.locator(".solution-menu>summary").click();
@@ -1306,6 +1314,7 @@ try {
   assert.match(first,/^[a-f0-9]{32}$/);
   assert.equal(await solutionCode.innerText(),"// default source","copy is the captured draft");
   await solutionCode.fill("// named source");
+  await solutionCode.press("Control+s");
   await solutionsPage.waitForFunction(()=>window.__solutionsTest.writes.some(w=>w.text==="// named source"));
   await namedAction("重命名","优化版");
   assert.equal(await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).inputValue(),first,"rename preserves immutable ID");
@@ -1366,7 +1375,6 @@ try {
         }return;
       }
       if(command==="format_source"){
-        if(state.docs[args.language]!==args.text)throw Error("format called before exact save");
         state.formats.push(args.text);
         if(state.failFormat)throw Error("测试：格式化器失败");
         const output=args.text.replace(/\s*=\s*/g," = ").trimEnd()+"\n";
@@ -1381,15 +1389,23 @@ try {
   await formatPage.getByRole("combobox",{name:"编程语言"}).selectOption("python3");
   const formattedCode=formatPage.getByRole("textbox",{name:"代码编辑器",exact:true});
   await formattedCode.fill('中文="值"');
+  await formatPage.waitForTimeout(1500);
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),0,"idle never formats");
+  assert.deepEqual(await formatPage.evaluate(()=>window.__formatTest.saves),[],"idle never writes canonical");
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await formattedCode.press("Control+s");
   await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文 = "值"\n');
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1);
-  assert.deepEqual(await formatPage.evaluate(()=>window.__formatTest.saves.slice(-2)),['中文="值"','中文 = "值"\n']);
+  assert.deepEqual(await formatPage.evaluate(()=>window.__formatTest.saves),['中文 = "值"\n']);
   await formattedCode.press("Control+z");
-  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文="值"');
+  assert.equal(await formattedCode.innerText(),'中文="值"');
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),'中文 = "值"\n');
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
   await formatPage.waitForTimeout(1400);
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"undo never triggers format loop");
   await formattedCode.press("Control+y");
-  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文 = "值"\n');
+  assert.equal(await formattedCode.innerText(),'中文 = "值"\n');
+  assert.equal(await formatPage.getByLabel("源码未保存",{exact:true}).count(),0);
   await openSettings(formatPage,"编辑器");
   await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
   await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
@@ -1399,7 +1415,8 @@ try {
   await formatPage.waitForTimeout(1400);
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"disabled automatic formatter stays idle");
   await formattedCode.press("Control+s");
-  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==="x = 2\n");
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==="x=2");
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"disabled save skips formatter");
   await openSettings(formatPage,"编辑器");
   await formatPage.evaluate(()=>{window.__formatTest.failSettings=true;});
   await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).check();
@@ -1410,6 +1427,9 @@ try {
   await formatPage.evaluate(()=>{window.__formatTest.failSettings=false;});
   await formatPage.getByRole("button",{name:"重新读取",exact:true}).click();
   await formatPage.waitForFunction(()=>!document.querySelector(".format-switch input").checked);
+  await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).check();
+  await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await formatPage.waitForFunction(()=>window.__formatTest.settings.formatOnSave===true);
   await formatPage.getByRole("button",{name:"关闭设置",exact:true}).click();
   await formatPage.evaluate(()=>{window.__formatTest.defer=true;});
   await formattedCode.fill("old=1");await formattedCode.press("Control+s");
@@ -1418,6 +1438,7 @@ try {
   await formatPage.evaluate(()=>{window.__formatTest.reply();window.__formatTest.defer=false;});
   await formatPage.waitForTimeout(200);
   assert.equal(await formattedCode.innerText(),"new=2","late format cannot replace newer input");
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"x=2","stale format cannot write canonical");
 
 
   await formatPage.evaluate(()=>{window.__formatTest.defer=true;window.__formatTest.reply=null;});
@@ -1435,7 +1456,7 @@ try {
   await formattedCode.fill("queued=1");await formattedCode.press("Control+s");
   await formatPage.waitForFunction(()=>typeof window.__formatTest.reply==="function");
   await formatPage.waitForTimeout(750);
-  await formattedCode.fill("queued=2");
+  await formattedCode.fill("queued=2");await formattedCode.press("Control+s");
   await formatPage.waitForTimeout(1400);
   await formattedCode.press("Control+z");
   assert.equal(await formattedCode.innerText(),"queued=1");
@@ -1443,30 +1464,30 @@ try {
   await formatPage.evaluate(()=>{window.__formatTest.reply();window.__formatTest.defer=false;});
   await formatPage.waitForTimeout(1600);
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),beforeUndoReply,"undo clears a rerun queued while prior formatting was busy");
-  await openSettings(formatPage,"编辑器");
-  await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
-  await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
-  await formatPage.waitForFunction(()=>window.__formatTest.settings.formatOnSave===false);
-  await formatPage.getByRole("button",{name:"关闭设置",exact:true}).click();
   await formattedCode.fill("new=2");
   await formatPage.evaluate(()=>{window.__formatTest.failFormat=true;});
   await formattedCode.press("Control+s");
   await formatPage.getByRole("button",{name:"格式化状态",exact:true}).waitFor();
-  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"new=2","formatter failure preserves saved original");
-  await formatPage.evaluate(()=>{window.__formatTest.failSave=true;});
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"explicit = 2\n","formatter failure preserves canonical");
+  assert.equal(await formattedCode.innerText(),"new=2");
+  await formatPage.evaluate(()=>{window.__formatTest.failFormat=false;window.__formatTest.failSave=true;});
   const formatCount=await formatPage.evaluate(()=>window.__formatTest.formats.length);
   await formattedCode.fill("protected=3");await formattedCode.press("Control+s");
   await formatPage.locator('[data-action="review-code-conflict"]').waitFor();
   await formatPage.waitForTimeout(200);
-  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount,"blocked save prevents formatter invocation");
-  assert.equal(await formattedCode.innerText(),"protected=3","failed write keeps live draft");
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount+1,"first explicit save formats before write attempt");
+  await formattedCode.press("Control+s");await formatPage.waitForTimeout(200);
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount+1,"known blocked save prevents another formatter invocation");
+  assert.equal(await formattedCode.innerText(),"protected = 3\n","failed write keeps formatted live draft");
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"explicit = 2\n");
   assert.deepEqual(formatErrors,[]);
   } catch(error){
     await formatPage.screenshot({path:"evidence/format-failure.png",fullPage:true});
     await writeFile("evidence/format-failure.json",JSON.stringify(await formatPage.evaluate(()=>({state:window.__formatTest,body:document.body.innerText})),null,2));
     throw error;
   } finally {await formatPage.close();}
-  await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; raw save before format, Unicode, isolated undo/redo, no loop, disabled preference/manual format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
+  await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; explicit format before canonical save, idle leaves canonical untouched, dirty markers, Unicode, isolated undo/redo, no loop, disabled save skips format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
 
 
   const semanticPage=await browser.newPage();
