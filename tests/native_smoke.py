@@ -106,8 +106,9 @@ def fill_once(css, value):
     # Paste exercises the real OS clipboard path. Sending each line through
     # Enter would intentionally trigger editor indentation and bracket pairing.
     if value: subprocess.run(["xclip","-selection","clipboard"],input=value.encode("utf-8"),check=True)
-    actions=[
-        {"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},
+    is_editor=bool(cmd("POST",f"/element/{node}/elements",{"using":"css selector","value":".cm-line"}))
+    # Escape dismisses CodeMirror completion, but closes a settings dialog.
+    actions=([{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"}] if is_editor else []) + [
         {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"a"},{"type":"keyUp","value":"a"},{"type":"keyUp","value":"\ue009"}
     ]
     if value:
@@ -115,8 +116,9 @@ def fill_once(css, value):
     else: actions += [{"type":"keyDown","value":"\ue003"},{"type":"keyUp","value":"\ue003"}]
     cmd("POST","/actions",{"actions":[{"type":"key","id":"keyboard","actions":actions}]})
     def editor_text():
-        lines=cmd("POST",f"/element/{node}/elements",{"using":"css selector","value":".cm-line"})
-        return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else cmd("GET",f"/element/{node}/property/value")
+        current=element(css)  # Read-only reacquisition after a controlled React update.
+        lines=cmd("POST",f"/element/{current}/elements",{"using":"css selector","value":".cm-line"})
+        return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else cmd("GET",f"/element/{current}/property/value")
     wait_for(lambda: editor_text()==value,"GUI paste exactly preserves source")
 def screenshot(name):
     try:
