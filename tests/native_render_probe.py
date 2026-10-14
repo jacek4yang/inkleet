@@ -228,6 +228,15 @@ try:
     start()
     code='[aria-label="代码编辑器"]'
     authored="use std::collections::HashMap;\n\nfn solve(values: &[i32]) -> i32 {\n    let mut map = HashMap::new();\n    map.insert(1, 2);\n    values.iter().sum()\n}"
+    def application_window():
+        processes=subprocess.run(["pgrep","-x","inkleet"],capture_output=True,text=True,check=False).stdout.split()
+        if len(processes)!=1:return None
+        windows=subprocess.run(["xdotool","search","--onlyvisible","--pid",processes[0]],capture_output=True,text=True,check=False).stdout.split()
+        return windows[0] if len(windows)==1 else None
+    window=wait_for(application_window,"unique native application window")
+    # DOM focus alone does not establish X11 focus for subsequent OS keys.
+    subprocess.run(["xdotool","windowfocus","--sync",window],check=True)
+    (evidence/"input-window.txt").write_text(subprocess.run(["xdotool","getwindowfocus","getwindowname"],capture_output=True,text=True,check=True).stdout)
     fill(code,authored)
     wait_for(lambda:cmd("POST","/execute/sync",{"script":"return document.fonts.status === 'loaded'","args":[]}),"fonts loaded")
     def probe(label):
