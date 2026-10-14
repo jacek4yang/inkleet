@@ -1924,7 +1924,7 @@ try {
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
       if(command==="start_language_service")return {id:89,version:1,server:"provider-fixture",uri:"file:///s.cpp",completionResolve:false,completionTriggerCharacters:[".",">","@"]};
-      if(command==="update_language_document"){s.version=args.version;return;}
+      if(command==="update_language_document"){if(s.deferSync)await new Promise(resolve=>{s.syncReply=resolve;});s.version=args.version;return;}
       if(command==="stop_language_service")return;
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
       if(command==="language_request"){if(args.kind==="completion"){s.calls.push(args.completionContext);const result={isIncomplete:s.incomplete!==false,items:[{label:"itemName"}]};if(s.defer)return new Promise((resolve,reject)=>{s.reply=()=>resolve(result);s.reject=reject;});return result;}return null;}
@@ -2002,6 +2002,21 @@ try {
   await providerPage.evaluate(()=>window.__providerTest.oldReject(Error("obsolete completion transport failure")));
   await providerPage.waitForTimeout(250);
   assert.equal(await providerPage.evaluate(()=>window.__providerTest.statuses.some(s=>s.includes("obsolete completion transport failure"))),false,"obsolete failure cannot overwrite newer successful completion status");
+  await providerPage.keyboard.press("Escape");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.defer=true;s.reply=null;s.view.focus();s.client.commands.completion(s.view);});
+  await providerPage.waitForFunction(()=>typeof window.__providerTest.reply==="function");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.defer=false;s.reject(Error("current completion transport failure"));});
+  await providerPage.waitForFunction(()=>window.__providerTest.statuses.at(-1)?.includes("current completion transport failure"));
+  await providerPage.keyboard.press("Escape");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.calls=[];s.deferSync=true;s.syncReply=null;s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:"itemN"},selection:{anchor:5}});s.view.focus();s.client.commands.completion(s.view);});
+  await providerPage.waitForFunction(()=>typeof window.__providerTest.syncReply==="function");
+  await providerPage.keyboard.press("Escape");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.deferSync=false;s.syncReply();});
+  await providerPage.waitForTimeout(400);
+  assert.equal(await providerPage.evaluate(()=>window.__providerTest.calls.length),0,"completion canceled during document flush never enters IPC");
+  await providerPage.keyboard.press("Control+Space");
+  await providerPage.getByRole("option",{name:"itemName",exact:true}).waitFor();
+  assert.equal(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1)?.triggerKind),1,"current completion still works after canceled flush");
   await providerPage.evaluate(()=>{window.__providerTest.client.destroy();window.__providerTest.view.destroy();});
   await providerPage.close();
   await writeFile("evidence/COMPLETION_CONTEXT_UI_RESULT.txt","PASS: actual CodeMirror keyboard manual context1, adjacent incomplete context3, provider-specific > context2 and manual override. Mocked IPC; native adapter verification is a separate required check.\\n");
