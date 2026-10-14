@@ -1,7 +1,7 @@
 name: Managed development environments
 on:
   push:
-    branches: [feat/first-workbench, main]
+    branches: [feat/first-workbench, feat/language-adapter-contract, main]
     paths: ['crates/managed-env/src/**', 'crates/managed-env/packages.json', 'crates/managed-env/Cargo.toml', 'crates/managed-env/Cargo.lock', 'crates/managed-env/examples/probe.rs', 'crates/managed-env/examples/compiler_probe.rs', '.github/workflows/managed-env.yml', 'tests/resolve_tool_pins.py']
   workflow_dispatch:
 permissions:

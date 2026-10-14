@@ -29,7 +29,7 @@ impl Context {
         if !self.enabled{return None;}
         let (future,body)=python_futures(source);
         let mut prefix=future;
-        prefix.push_str("from typing import *\n");
+        prefix.push_str(PYTHON_PUBLIC_PRELUDE);
         // Python allows user classes to shadow imported/default judge names.
         // These are isolated type-checker declarations, never saved or executed.
         if self.list{prefix.push_str("class ListNode:\n    def __init__(self, val: int = 0, next: Optional['ListNode'] = None):\n        self.val: int = val\n        self.next: Optional['ListNode'] = next\n");}
@@ -272,4 +272,20 @@ fn python_futures(source:&str)->(String,String){
   assert!(c.fragments("c","struct ListNode {int val;struct ListNode* next;};").0.is_empty());
   assert!(c.fragments("cpp","struct ListNode final {int val;};").0.is_empty());
  }
+}
+
+// Supported public judge conveniences. Module bindings deliberately come last,
+// matching runtime namespace precedence; incidental dir() exports are not an API.
+pub const PYTHON_PUBLIC_PRELUDE:&str="from typing import *\nfrom collections import *\nfrom heapq import *\nfrom itertools import *\nfrom math import *\nfrom functools import *\nfrom bisect import *\nimport collections, heapq, itertools, math, functools, bisect, random, statistics, operator, re, string\n";
+
+#[cfg(test)]mod python_import_contract_tests{
+    use super::*;
+    #[test]fn imports_are_virtual_and_counted_without_rewriting_source(){
+        let source="items = deque([1])\ncount = Counter(items)\n";
+        let c=Context::parse(Some(r#"{"params":[]}"#)).unwrap();
+        let (wrapped,prefix)=c.python_source(source).unwrap();
+        assert_eq!(wrapped,format!("{PYTHON_PUBLIC_PRELUDE}{source}"));
+        assert_eq!(prefix,PYTHON_PUBLIC_PRELUDE.lines().count() as u32);
+        assert!(PYTHON_PUBLIC_PRELUDE.find("from bisect import").unwrap()<PYTHON_PUBLIC_PRELUDE.find("import collections,").unwrap());
+    }
 }
