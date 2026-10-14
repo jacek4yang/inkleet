@@ -73,6 +73,23 @@ fn event(rx:&mpsc::Receiver<Value>,name:&str)->Result<Value,String>{
         if !items.iter().any(|item|item.get("label").and_then(Value::as_str).is_some_and(|s|s.contains("push_back"))){return Err("Missing vector member completion".into());}
         let definition=client.request("textDocument/definition",json!({"textDocument":{"uri":uri},"position":{"line":2,"character":7}}),Duration::from_secs(15))?;
         if !definition.to_string().contains("file:"){return Err("C++ stdlib definition missing".into());}
+        let judge=inkleet_managed_env::lsp_scaffold::Context::parse(Some(r#"{"params":[{"type":"ListNode"},{"type":"TreeNode"}]}"#))?;
+        for (version,kind) in [(2,"ListNode"),(3,"TreeNode")]{
+            let original=format!("void f({kind}& node) {{\n    node.va\n}}\n");
+            let (before,after)=judge.fragments("cpp",&original);
+            let prefix=before.lines().count() as u32;
+            let wrapped=format!("{before}{original}{after}");
+            client.notify("textDocument/didChange",json!({"textDocument":{"uri":uri,"version":version},"contentChanges":[{"text":wrapped}]}))?;
+            let deadline=Instant::now()+Duration::from_secs(30);
+            loop{
+                let response=client.request("textDocument/completion",json!({"textDocument":{"uri":uri},"position":{"line":prefix+1,"character":11}}),Duration::from_secs(10))?;
+                let items=response.as_array().or_else(||response.get("items").and_then(Value::as_array));
+                if items.is_some_and(|items|items.iter().any(|item|item.get("filterText").or_else(||item.get("label")).and_then(Value::as_str).is_some_and(|label|label.trim().starts_with("val")))){break;}
+                if Instant::now()>deadline{return Err(format!("implicit {kind} member completion missing: {response}"));}
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        }
+        println!("CPP_JUDGE_TYPES_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"listNodeCompletion":true,"treeNodeCompletion":true,"fixedVirtualScaffold":true}));
         println!("CPP_LSP_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"hover":true,"completion":true,"stdlibDefinition":true,"privateHeadersOnly":true}));
         Ok(())
     })();

@@ -56,6 +56,23 @@ use std::{path::Path,process::Command,sync::{Arc,atomic::AtomicBool},time::{Dura
         let canonical=std::fs::canonicalize(&path).map_err(|e|e.to_string())?;
         assert!(canonical.starts_with(std::fs::canonicalize(go_home.join("src")).map_err(|e|e.to_string())?));
         assert!(std::fs::read_to_string(canonical).map_err(|e|e.to_string())?.contains("type Builder struct"));
+        let judge=inkleet_managed_env::lsp_scaffold::Context::parse(Some(r#"{"params":[{"type":"ListNode"},{"type":"TreeNode"}]}"#))?;
+        for (version,kind) in [(2,"ListNode"),(3,"TreeNode")]{
+            let original=format!("package main\nfunc f(node *{kind}) {{\n    node.Va\n}}\n");
+            let (before,after)=judge.fragments("golang",&original);
+            let prefix=before.lines().count() as u32;
+            let wrapped=format!("{before}{original}{after}");
+            client.notify("textDocument/didChange",json!({"textDocument":{"uri":uri,"version":version},"contentChanges":[{"text":wrapped}]}))?;
+            let deadline=Instant::now()+Duration::from_secs(30);
+            loop{
+                let response=client.request("textDocument/completion",json!({"textDocument":{"uri":uri},"position":{"line":prefix+2,"character":11}}),Duration::from_secs(10))?;
+                let items=response.as_array().or_else(||response.get("items").and_then(Value::as_array));
+                if items.is_some_and(|items|items.iter().any(|item|item.get("filterText").or_else(||item.get("label")).and_then(Value::as_str).is_some_and(|label|label.trim().starts_with("Val")))){break;}
+                if Instant::now()>deadline{return Err(format!("implicit {kind} member completion missing: {response}"));}
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        }
+        println!("GO_JUDGE_TYPES_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"listNodeCompletion":true,"treeNodeCompletion":true,"fixedVirtualScaffold":true}));
         println!("GO_LSP_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"privateSourceBuild":true,"hover":true,"completion":true,"stdlibSource":true,"systemPathUsed":false}));
         Ok(())
     })();

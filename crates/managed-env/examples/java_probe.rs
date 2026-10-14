@@ -64,6 +64,23 @@ fn copy_config(from:&Path,to:&Path)->Result<(),String>{
         let mut source=sources.by_name("java.base/java/util/ArrayList.java").map_err(|e|e.to_string())?;
         let mut expected=String::new();source.read_to_string(&mut expected).map_err(|e|e.to_string())?;
         if contents.replace("\r\n","\n")!=expected.replace("\r\n","\n"){return Err(format!("Java source is not identical to private JDK src.zip (received {} bytes; expected {} bytes)",contents.len(),expected.len()));}
+        let judge=inkleet_managed_env::lsp_scaffold::Context::parse(Some(r#"{"params":[{"type":"ListNode"},{"type":"TreeNode"}]}"#))?;
+        for (version,kind) in [(2,"ListNode"),(3,"TreeNode")]{
+            let original=format!("class Solution {{\n void f({kind} node) {{\n  node.va\n }}\n}}\n");
+            let (before,after)=judge.fragments("java",&original);
+            let prefix=before.lines().count() as u32;
+            let wrapped=format!("{before}{original}{after}");
+            client.notify("textDocument/didChange",json!({"textDocument":{"uri":uri,"version":version},"contentChanges":[{"text":wrapped}]}))?;
+            let deadline=Instant::now()+Duration::from_secs(30);
+            loop{
+                let response=client.request("textDocument/completion",json!({"textDocument":{"uri":uri},"position":{"line":prefix+2,"character":9}}),Duration::from_secs(10))?;
+                let items=response.as_array().or_else(||response.get("items").and_then(Value::as_array));
+                if items.is_some_and(|items|items.iter().any(|item|item.get("filterText").or_else(||item.get("label")).and_then(Value::as_str).is_some_and(|label|label.trim().starts_with("val")))){break;}
+                if Instant::now()>deadline{return Err(format!("implicit {kind} member completion missing: {response}"));}
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        }
+        println!("JAVA_JUDGE_TYPES_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"listNodeCompletion":true,"treeNodeCompletion":true,"fixedVirtualScaffold":true}));
         println!("JAVA_LSP_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"hover":true,"completion":true,"stdlibDefinition":true,"exactJdkSource":true,"sourceBytes":contents.len(),"systemPathUsed":false}));
         Ok(())
     })();
