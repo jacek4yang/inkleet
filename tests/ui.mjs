@@ -418,6 +418,7 @@ try {
     window.isTauri = true;
     window.__linkTest = { pending: [], saves: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") { window.__linkTest.saves.push(args); return; }
@@ -500,6 +501,7 @@ try {
       { id: "pyright", version: "1.1.414", size: 4000000, downloaded: 4000000, phase: "ready", message: "" },
     ] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") return;
@@ -567,6 +569,7 @@ try {
     window.__lspTest = { id: 0, version: 1, text: "", stops: [], requests: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__lspTest;
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") return;
@@ -690,6 +693,7 @@ try {
     window.__runTest = { starts: [], result: null, pending: [], debug: null, debugStarts: 0, debugCalls: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__runTest;
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text" || command === "stop_language_service") return;
@@ -853,6 +857,7 @@ try {
     window.isTauri = true; window.__conflictTest = { file: "initial", backups: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__conflictTest;
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: state.file, notes: "" };
       if (command === "login_status") return null;
@@ -940,6 +945,7 @@ try {
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__externalTest;
       if (command === "external_editor_supported") return true;
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: "original code", notes: state.notes };
       if (command === "login_status") return null;
