@@ -1,7 +1,7 @@
 import { officialTemplate } from "./official-template";
 import { SolutionPicker } from "./solution-picker";
 import { QuestionSidebar } from "./question-sidebar";
-import { IconButton } from "./icons";
+import { Icon, IconButton } from "./icons";
 import { SettingsHub, type SettingsSection, type SettingsAction } from "./settings-hub";
 import { RecoveryDialog } from "./recovery";
 import { ConflictDialog, type FileConflict } from "./conflict";
@@ -297,7 +297,7 @@ function App() {
     { id:"refresh-notes", label:"刷新文件", section:"notes", icon:"refresh", disabled:editorLoading || !externalEditors, run:() => settingsRun(() => void refreshExternalNotes()) },
   ];
   return <main className={focus ? "workbench focus" : "workbench"}>
-    <header className="topbar"><div className="brand-group"><IconButton icon="panel" label={focus ? "退出专注" : "专注"} onClick={() => setFocus(!focus)} /><strong>墨题</strong></div>
+    <header className="topbar"><div className="brand-group"><IconButton icon="panel" label={focus ? "退出专注" : "专注"} onClick={() => setFocus(!focus)} /><span className="brand-mark" role="img" aria-label="墨题 InkLeet" title="墨题 InkLeet"><Icon name="inkleet" /></span></div>
       <div><Login onIdentity={setIdentity} /><IconButton icon="search" label="中国站题库" disabled={!isTauri()} data-action="open-catalogue" onClick={() => { setCatalogueMode("search"); setCatalogue(true); }} /><IconButton icon="link" label="链接打开" disabled={!isTauri()} data-action="open-link" onClick={() => { setCatalogueMode("link"); setCatalogue(true); }} /><IconButton icon="settings" label="设置" data-action="open-settings" onClick={() => setSettings("editor")} /></div>
     </header>
     <QuestionSidebar account={identity?.account ?? null} recent={problems} selected={problemId} onSelectRecent={setProblemId} onChoose={chooseQuestion} />
