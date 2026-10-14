@@ -545,7 +545,7 @@ try:
         assert text(code)=="def solve(values): return sum(values)"
         (evidence/"REFERENCES_GUI_RESULT.txt").write_text("PASS: actual native Shift+F12 real private Pyright declaration/reference lookup, two original source locations and navigation without modifying the draft.\n")
         fill(code, "def solve(values):\n    return sum(values)")
-        click(".actions button:first-child")
+        click('.pane-heading .actions button[aria-label="本地"]')
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
         wait_for(lambda: '"value": 10' in text(".local-result"), "real private Python harness result", seconds=30)
@@ -930,6 +930,7 @@ try:
         set_auto_format(False)
         click('select[aria-label="编程语言"] option[value="rust"]')
         fill(code,marker)
+        save_editor(code)
 
         (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")
     if os.environ.get("INKLEET_LIVE_CN") == "1":

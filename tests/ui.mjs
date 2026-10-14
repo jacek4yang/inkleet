@@ -1408,7 +1408,7 @@ try {
   await formatPage.waitForTimeout(1400);
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"undo never triggers format loop");
   await formattedCode.press("Control+y");
-  assert.equal(await formattedCode.innerText(),'中文 = "值"\n');
+  assert.equal((await formattedCode.locator(".cm-line").allTextContents()).join("\n"),'中文 = "值"\n');
   assert.equal(await formatPage.getByLabel("源码未保存",{exact:true}).count(),0);
   await openSettings(formatPage,"编辑器");
   await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
@@ -1482,7 +1482,7 @@ try {
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount+1,"first explicit save formats before write attempt");
   await formattedCode.press("Control+s");await formatPage.waitForTimeout(200);
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount+1,"known blocked save prevents another formatter invocation");
-  assert.equal(await formattedCode.innerText(),"protected = 3\n","failed write keeps formatted live draft");
+  assert.equal((await formattedCode.locator(".cm-line").allTextContents()).join("\n"),"protected = 3\n","failed write keeps formatted live draft");
   await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"explicit = 2\n");
   assert.deepEqual(formatErrors,[]);
