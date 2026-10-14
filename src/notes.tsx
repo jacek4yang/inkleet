@@ -48,20 +48,21 @@ export function MarkdownPreview({ text }: { text: string }) {
       : <p className="muted">暂无笔记</p>}
   </div>;
 }
-export function Notes({ documentKey, value, loading, onChange, onSettings }: {
+export function Notes({ documentKey, value, loading, onChange, onSettings, onSave, dirty=false }: {
   documentKey: string; value: string; loading: boolean;
   onChange: (value: string) => void; onExport: () => void;
+  onSave?:()=>void;dirty?:boolean;
   onSettings?: () => void; onRecovery?: () => void;
   externalEditors?: boolean; onExternal?: (editor: "default" | "typora") => void; onReload?: () => void;
 }) {
   const [preview, setPreview] = useState(false);
   return <>
-    <div className="pane-heading notes-heading"><div>
+    <div className="pane-heading notes-heading"><div>{dirty&&<span className="unsaved-mark" role="img" aria-label="笔记未保存" title="未保存">●</span>}<IconButton icon="save" label="保存笔记" shortcut="Ctrl+S" disabled={loading} onClick={onSave} />
       <IconButton icon={preview ? "edit" : "eye"} label={preview ? "返回编辑" : "预览笔记"} disabled={loading} aria-pressed={preview} onClick={() => setPreview(v => !v)} />
       <IconButton icon="settings" label="笔记设置" onClick={onSettings} />
     </div></div>
     {loading ? <p className="loading">正在读取笔记…</p> : preview
       ? <MarkdownPreview text={value} />
-      : <CodeEditor documentKey={documentKey} language="markdown" label="Markdown 笔记" value={value} onChange={onChange} />}
+      : <CodeEditor onSave={onSave} documentKey={documentKey} language="markdown" label="Markdown 笔记" value={value} onChange={onChange} />}
   </>;
 }
