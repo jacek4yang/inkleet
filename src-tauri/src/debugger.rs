@@ -182,7 +182,7 @@ pub async fn start(app:tauri::AppHandle,snapshot:crate::local_run::Snapshot,line
 fn launch(session:&Arc<Session>,manager:&inkleet_managed_env::Manager,root:&std::path::Path,snapshot:&crate::local_run::Snapshot,mut lines:Vec<u32>)->Result<()>{
     let launch=crate::debug_launch::prepare(manager,root,snapshot,session.closed.clone())?;
     if session.closed.load(Ordering::Acquire){return Err("调试已停止".into());}
-    if let Ok(mut view)=session.view.lock(){view.phase="starting".into();}
+    if let Ok(mut view)=session.view.lock(){view.phase="starting".into();if let Some(warning)=&launch.warning{view.output.push_str(warning);view.output.push('\n');}}
     let (initialized_tx,initialized_rx)=mpsc::sync_channel(1);let weak=Arc::downgrade(session);
     let events:Arc<dyn Fn(Value)+Send+Sync>=Arc::new(move|event|{
         let Some(session)=weak.upgrade()else{return};

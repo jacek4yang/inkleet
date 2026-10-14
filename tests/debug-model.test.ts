@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {debugVariables, debugFrames, debugScopes, debugThreads} from "../src/debug-model.ts";
+import {debugVariables, debugFrames, debugScopes, debugThreads, isRawDebugVariable} from "../src/debug-model.ts";
 test("DAP inspection rejects malformed payloads without losing frame zero",()=>{
   assert.deepEqual(debugVariables(null),[]);
   assert.deepEqual(debugVariables([null,{}, {name: "v", value: null}]),[]);
@@ -16,4 +16,23 @@ test("variable references, labels and collections remain bounded",()=>{
   assert.equal(v.presentationHint?.lazy,true);
   assert.equal(debugVariables(Array.from({length:1000},()=>({name:"v",value:"1",variablesReference:0}))).length,100);
   assert.deepEqual(debugScopes([{name:"invalid",variablesReference:0},{name:"expensive",variablesReference:2,expensive:true}]),[{name:"expensive",variablesReference:2,expensive:true}]);
+});
+
+test("raw view is identified only by adapter metadata, never user field names",()=>{
+  const values=debugVariables([
+    {name:"[raw]",value:"type",variablesReference:1,presentationHint:{attributes:["readOnly","virtual"]}},
+    {name:"[raw]",value:"user",variablesReference:2},
+    {name:"base",value:"user",variablesReference:3,presentationHint:{attributes:["readOnly","virtual"]}},
+    {name:"[raw]",value:"user",variablesReference:4,presentationHint:{attributes:["virtual",17,"unknown"]}}
+  ]);
+  assert.deepEqual(values.map(isRawDebugVariable),[true,false,false,false]);
+  assert.deepEqual(values[3].presentationHint?.attributes,["virtual"]);
+});
+
+test("bounded collection retains the final adapter raw branch",()=>{
+  const input=Array.from({length:150},(_,i)=>({name:"["+i+"]",value:String(i),variablesReference:0}));
+  const raw={name:"[raw]",value:"raw",variablesReference:42,presentationHint:{attributes:["readOnly","virtual"]}};
+  const values=debugVariables([...input,raw]);
+  assert.equal(values.length,100);assert.equal(values.filter(isRawDebugVariable).length,1);
+  assert.equal(values.at(-1)?.variablesReference,42);
 });
