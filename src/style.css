@@ -79,3 +79,10 @@
 
 .lsp-signature{max-width:min(580px,85vw);max-height:230px;overflow:auto;padding:10px 14px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 var(--font-mono)}
 .lsp-signature-label{font-weight:600;margin-bottom:6px}
+
+.lsp-rename { padding: 12px; max-width: min(360px, 80vw); color: var(--ink); }
+.lsp-rename label { display: block; margin-bottom: 8px; font-size: 12px; }
+.lsp-rename input { display: block; box-sizing: border-box; width: 100%; margin-top: 5px; padding: 7px; font: inherit; font-family: var(--font-mono); }
+.lsp-rename button { margin-right: 6px; }
+.lsp-rename p { margin: 7px 0 0; font-size: 12px; }
+.lsp-rename [role="alert"] { color: #a23228; white-space: pre-wrap; }

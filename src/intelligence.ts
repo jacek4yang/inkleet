@@ -1,3 +1,4 @@
+import { renameSymbol } from "./rename";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
 import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
@@ -52,12 +53,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     });
     return synchronization;
   }
-  async function request(kind: string, pos: number, doc: Text): Promise<unknown> {
+  async function request(kind: string, pos: number, doc: Text, newName?: string): Promise<unknown> {
     if (!session || closed || !view) return null;
     await flush();
     if (closed || !session || view.state.doc !== doc) return null;
     const line = doc.lineAt(pos), askedVersion = version, id = session.id;
-    const result = await invoke("language_request", { id, version: askedVersion, kind, line: line.number - 1, character: pos - line.from });
+    const result = await invoke("language_request", { id, version: askedVersion, kind, line: line.number - 1, character: pos - line.from, newName: newName ?? null });
     return !closed && session?.id === id && version === askedVersion && view.state.doc === doc ? result : null;
   }
   async function complete(context: CompletionContext) {
@@ -193,7 +194,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     } catch (e) { if (!closed) status(String(e)); }
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
+  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status);
   const extensions: Extension[] = [
+    ...rename.extensions,
     signatureField,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
@@ -232,7 +235,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      closed = true; ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      rename.destroy(); closed = true; ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },

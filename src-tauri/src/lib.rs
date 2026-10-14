@@ -153,9 +153,9 @@ async fn update_language_document(window:tauri::WebviewWindow,app:tauri::AppHand
     tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().update(id,version,text)).await.map_err(|_|"语言服务同步任务中断".to_owned())?
 }
 #[tauri::command]
-async fn language_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32,kind:String,line:u32,character:u32)->Result<serde_json::Value,String>{
+async fn language_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32,kind:String,line:u32,character:u32,new_name:Option<String>)->Result<serde_json::Value,String>{
     check_origin(&window)?;
-    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().request(id,version,&kind,line,character)).await.map_err(|_|"语言服务请求任务中断".to_owned())?
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().request(id,version,&kind,line,character,new_name)).await.map_err(|_|"语言服务请求任务中断".to_owned())?
 }
 #[tauri::command]
 async fn language_diagnostics(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64)->Result<serde_json::Value,String>{

@@ -143,3 +143,74 @@ pub fn definition(value:&mut Value,document_uri:&str,prefix:u32){
         assert_eq!(prefix,0);assert!(rust.starts_with("#![allow(dead_code)]"));assert!(rust.contains("pub struct Solution;"));
     }
 }
+
+/// Normalize a server rename into bounded edits of this exact user document.
+/// Reject multi-file operations and every edit touching implicit helper code.
+pub fn rename_edits(value:&Value,uri:&str,prefix:u32,text:&str,version:u32)->Result<Value,String>{
+    let mut edits=Vec::new();
+    if value.is_null(){return Err("此符号不能重命名".into());}
+    if !value.is_object(){return Err("语言服务返回的重命名格式无效".into());}
+    if value.get("changes").is_some()&&value.get("documentChanges").is_some(){return Err("拒绝含重复编辑表示的重命名".into());}
+    if let Some(changes)=value.get("changes"){
+        let changes=changes.as_object().ok_or("重命名文件列表无效")?;
+        for (target,items) in changes{
+            if target!=uri{return Err("此重命名涉及其他文件，当前仅支持本题源码内重命名".into());}
+            edits.extend(items.as_array().ok_or("重命名编辑列表无效")?.iter().cloned());
+        }
+    }
+    if let Some(changes)=value.get("documentChanges"){
+        for change in changes.as_array().ok_or("重命名文件操作无效")?{
+            if change.get("kind").is_some()||change.pointer("/textDocument/uri").and_then(Value::as_str)!=Some(uri){return Err("拒绝跨文件或文件系统重命名操作".into());}
+            if let Some(v)=change.pointer("/textDocument/version").filter(|v|!v.is_null()){
+                if v.as_u64()!=Some(u64::from(version)){return Err("重命名使用了过期的文档版本".into());}
+            }
+            edits.extend(change.get("edits").and_then(Value::as_array).ok_or("缺少重命名编辑")?.iter().cloned());
+        }
+    }
+    if edits.is_empty()||edits.len()>512{return Err("重命名没有有效编辑或超过 512 处限制".into());}
+    let lines=text.split('\n').collect::<Vec<_>>();
+    fn point(value:&Value,lines:&[&str])->Option<(usize,usize)>{
+        let line=usize::try_from(value.get("line")?.as_u64()?).ok()?;
+        let column=usize::try_from(value.get("character")?.as_u64()?).ok()?;
+        let source=lines.get(line)?;let mut units=0;
+        for ch in source.chars(){if units==column{return Some((line,column));}units+=ch.len_utf16();}
+        (units==column).then_some((line,column))
+    }
+    let mut spans=Vec::new();let mut total=0usize;
+    for item in &mut edits{
+        let inserted=item.get("newText").and_then(Value::as_str).ok_or("重命名替换文本无效")?;
+        total=total.checked_add(inserted.len()).ok_or("重命名文本过大")?;
+        if inserted.len()>65536||total>2*1024*1024{return Err("重命名替换文本超过限制".into());}
+        let span=item.get_mut("range").ok_or("重命名范围缺失")?;
+        if !range(span,prefix){return Err("重命名涉及语言环境辅助代码，无法自动应用".into());}
+        let start=point(&span["start"],&lines).ok_or("重命名起点越界或拆分 Unicode 字符")?;
+        let end=point(&span["end"],&lines).ok_or("重命名终点越界或拆分 Unicode 字符")?;
+        if start>end{return Err("重命名范围顺序无效".into());}
+        spans.push((start,end));
+    }
+    spans.sort_unstable();
+    for pair in spans.windows(2){if pair[1].0<pair[0].1||pair[1].0==pair[0].0{return Err("重命名编辑相互重叠".into());}}
+    Ok(Value::Array(edits))
+}
+#[cfg(test)]mod rename_tests{
+    use super::*;use serde_json::json;
+    fn edit(line:u32,start:u32,end:u32)->Value{json!({"range":{"start":{"line":line,"character":start},"end":{"line":line,"character":end}},"newText":"renamed"})}
+    #[test]fn rename_maps_source_and_rejects_other_files_helpers_and_old_versions(){
+        let uri="file:///solution.rs";
+        let valid=json!({"changes":{(uri):[edit(2,0,3)]}});
+        let result=rename_edits(&valid,uri,2,"old",4).unwrap();assert_eq!(result[0]["range"]["start"]["line"],0);
+        for bad in [
+            json!({"changes":{"file:///secret.rs":[edit(2,0,3)]}}),
+            json!({"changes":{(uri):[edit(1,0,1)]}}),
+            json!({"changes":{(uri):[edit(3,0,1)]}}),
+            json!({"changes":{(uri):[edit(2,0,3),edit(2,1,2)]}}),
+            json!({"documentChanges":[{"kind":"rename","oldUri":uri,"newUri":"file:///other.rs"}]}),
+            json!({"documentChanges":[{"textDocument":{"uri":uri,"version":3},"edits":[edit(2,0,3)]}]}),
+        ]{assert!(rename_edits(&bad,uri,2,"old",4).is_err(),"{bad}");}
+    }
+    #[test]fn rename_never_splits_utf16_surrogate_pairs(){
+        let uri="file:///solution.rs";
+        assert!(rename_edits(&json!({"changes":{(uri):[edit(0,1,2)]}}),uri,0,"🦀x",1).is_err());
+        assert!(rename_edits(&json!({"changes":{(uri):[edit(0,2,3)]}}),uri,0,"🦀x",1).is_ok());
+    }
+}

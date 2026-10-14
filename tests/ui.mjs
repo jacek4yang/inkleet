@@ -424,6 +424,11 @@ try {
       if (command === "language_diagnostics") return { version: state.version, diagnostics: [] };
       if (command === "language_request") {
         state.requests.push(args);
+        if (args.kind === "rename") {
+          const result = [0,1].map(line => ({ range: { start: { line, character: 0 }, end: { line, character: 5 } }, newText: args.newName }));
+          if (state.deferRename) return new Promise(resolve => { state.renameReply = () => resolve(result); });
+          return result;
+        }
         if (args.kind === "completion") return { items: [{ label: "popleft", kind: 2, documentation: "<img src=x onerror=alert(1)>plain documentation" }] };
         if (args.kind === "signatureHelp" && state.deferSignature) return new Promise(resolve => { state.signatureReply = resolve; });
         if (args.kind === "signatureHelp") return { signatures: [{ label: "popleft(index: int) -> int", documentation: "<img src=x onerror=alert(1)>signature docs", parameters: [{ label: "index" }] }], activeSignature: 0, activeParameter: 0 };
@@ -469,6 +474,26 @@ try {
   assert.equal(await readOnly.innerText(), beforeSource);
   await sourceDialog.getByRole("button", { name: "返回代码", exact: true }).click();
   assert.equal(await lspEditor.innerText(), "items.popleft");
+  await lspEditor.fill("items = []\nitems.append(1)");
+  await lspEditor.press("Control+Home");
+  await lspEditor.press("ArrowRight");
+  await lspEditor.press("F2");
+  const renameForm = lspPage.getByRole("form", { name: "重命名符号", exact: true });
+  await renameForm.getByRole("textbox", { name: "新名称", exact: true }).fill("values");
+  await renameForm.getByRole("button", { name: "重命名", exact: true }).click();
+  await lspPage.waitForFunction(() => document.querySelector('[aria-label="代码编辑器"]').innerText === "values = []\nvalues.append(1)");
+  await lspEditor.press("Control+z");
+  assert.equal(await lspEditor.innerText(), "items = []\nitems.append(1)", "rename must be one undoable transaction");
+  await lspPage.evaluate(() => { window.__lspTest.deferRename = true; });
+  await lspEditor.press("Control+Home"); await lspEditor.press("ArrowRight"); await lspEditor.press("F2");
+  await renameForm.getByRole("textbox", { name: "新名称", exact: true }).fill("late");
+  await renameForm.getByRole("button", { name: "重命名", exact: true }).click();
+  await lspPage.waitForFunction(() => typeof window.__lspTest.renameReply === "function");
+  await renameForm.getByRole("button", { name: "取消", exact: true }).click();
+  await lspEditor.fill("new draft");
+  await lspPage.evaluate(() => window.__lspTest.renameReply());
+  await lspPage.waitForTimeout(100);
+  assert.equal(await lspEditor.innerText(), "new draft", "canceled/late rename must not overwrite a newer draft");
   await lspPage.getByRole("combobox", { name: "编程语言", exact: true }).selectOption("rust");
   await lspPage.waitForFunction(() => window.__lspTest.stops.length > 0);
   assert.deepEqual(lspErrors, []);

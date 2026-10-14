@@ -79,5 +79,5 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
     };
   }, [documentKey, language, label, connection, metadata]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedLine); }, [pausedLine, documentKey, connection]);
-  return <><div className="editor-host" ref={host} />{(language !== "markdown") && <div className="lsp-status"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{(language !== "markdown") && <div className="lsp-status" title="F2 重命名当前符号 · F12 查看定义"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }
