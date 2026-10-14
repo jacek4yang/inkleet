@@ -70,7 +70,7 @@ pub fn prepare(manager:&Manager,root:&Path,language:&str)->Result<Launch>{
             command.env("GOROOT",go_home).env("GOTOOLCHAIN","local").env("GOENV","off").env("GOWORK","off")
                 .env("CGO_ENABLED","0").env("GOPROXY","off").env("GOSUMDB","off").env("GOTELEMETRY","off")
                 .env("GOCACHE",root.join(".go-cache")).env("GOPATH",root.join(".go-path")).env("GOPLSCACHE",root.join(".gopls-cache"));
-            let initialization=json!({"staticcheck":false,"usePlaceholders":false,"completeUnimported":true,"buildFlags":["-mod=readonly"]});
+            let initialization=json!({"staticcheck":false,"semanticTokens":true,"usePlaceholders":false,"completeUnimported":true,"buildFlags":["-mod=readonly"]});
             let settings=json!({"gopls":initialization});
             Ok(Launch{command,settings,initialization,roots:vec![std::fs::canonicalize(root).map_err(|_|"工作区无效")?,std::fs::canonicalize(go_home.join("src")).map_err(|_|"Go 标准库源码无效")?],filename:"solution.go",language_id:"go",server:"gopls"})
         },
