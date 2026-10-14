@@ -996,8 +996,13 @@ try:
         assert len(cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-vim-panel"}))==0,"no local duplicate mode bar"
         subprocess.run(["xdotool","key","i"],check=True)
         wait_for(lambda:text(".editor-status-mode")=="INSERT","native global INSERT status")
-        wait_for(lambda:element(".code-pane .inkleet-insert-cursor"),"native measured INSERT block")
-        rect=cmd("GET",f"/element/{element('.code-pane .inkleet-insert-cursor')}/rect")
+        def measured_insert_block():
+            # Measurement may replace the visual-only overlay between read calls.
+            # Re-locate only for this read; never repeat the keyboard mutation.
+            node=element(".code-pane .inkleet-insert-cursor")
+            rect=cmd("GET",f"/element/{node}/rect")
+            return rect if rect["width"]>5 and rect["height"]>10 else None
+        rect=wait_for(measured_insert_block,"native measured INSERT block geometry")
         assert rect["width"]>5 and rect["height"]>10,"native block geometry"
         time.sleep(1.5)
         assert cmd("GET",f"/element/{element('.code-pane .inkleet-insert-cursor')}/displayed"),"native block does not blink"
