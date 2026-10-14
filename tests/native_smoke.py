@@ -101,7 +101,7 @@ def fill(css, value):
             cmd("DELETE","/actions")  # release any modifier whose key-up was uncertain
             time.sleep(.3)
 def fill_once(css, value):
-    node=element(css)
+    node=wait_for(lambda:element(css),"input target available after document switch")
     cmd("POST",f"/element/{node}/click",{})
     # Paste exercises the real OS clipboard path. Sending each line through
     # Enter would intentionally trigger editor indentation and bracket pairing.
@@ -144,6 +144,19 @@ try:
     assert not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="代码编辑器"]'}), "fresh installation must not create a sample document"
     assert "整数数组求和" not in text("body") and "寻找最大值" not in text("body")
     screenshot("empty-real-workspace-native.png")
+    if os.environ.get("INKLEET_LIVE_CN") == "1":
+        # Verify the new real sidebar before the slower six-language fixture loop.
+        outcome=wait_for(lambda: ("ready" if cmd("POST","/elements",{"using":"css selector","value":'.question-sidebar button[data-slug="two-sum"]'}) else "error" if cmd("POST","/elements",{"using":"css selector","value":'.question-sidebar [role="alert"]'}) else None),"real native sidebar response",seconds=30)
+        if outcome=="ready":
+            screenshot("real-question-sidebar-native.png")
+            click('.question-sidebar button[data-slug="two-sum"]')
+            wait_for(lambda:"两数之和" in text("article h1"),"sidebar opens real public question",seconds=30)
+            wait_for(lambda:"impl Solution" in text('[aria-label="代码编辑器"]'),"sidebar loads official template",seconds=30)
+            screenshot("real-sidebar-question-native.png")
+        else:
+            message=text('.question-sidebar [role="alert"]')
+            if "中国站拒绝访问" not in message: raise AssertionError(message)
+            (evidence/"SIDEBAR_LIVE_RESULT.txt").write_text("UNVERIFIED: upstream access denial; no mock fallback.\n")
     stop()
     # Isolated authored regression fixture enters only via the real cache format.
     cache_path=pathlib.Path(os.environ["XDG_CACHE_HOME"])/"top.jacek.inkleet/public-questions.json"
