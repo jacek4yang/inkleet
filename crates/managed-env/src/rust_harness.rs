@@ -67,8 +67,10 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     let types=params.iter().filter_map(|p|p["type"].as_str()).chain(std::iter::once(returned)).collect::<Vec<_>>();
     let list=types.iter().any(|t|t.contains("ListNode"));let tree=types.iter().any(|t|t.contains("TreeNode"));
     let mut driver=String::from("#![allow(dead_code,unused_mut,unused_variables)]\n");
-    if !free{driver+="pub struct Solution;\n";}
-    if list{driver+=LIST_TYPES;}if tree{driver+=TREE_TYPES;}
+    // Share the same bounded declaration policy as the language server.
+    // Explicit imports remain only in the owner's exact solution.rs snapshot.
+    let (_,helpers)=crate::lsp_scaffold::Context::parse(Some(metadata))?.fragments("rust",source);
+    driver+=&helpers;
     driver+="include!(\"solution.rs\");\nmod inkleet_harness{\n";driver+=SUPPORT;
     if list{driver+=LIST_SUPPORT;}if tree{driver+=TREE_SUPPORT;}driver+="}\n";
     driver+="fn main()->Result<(),String>{use inkleet_harness::Json as _;let mut output=std::fs::File::create(\"results.jsonl\").map_err(|e|e.to_string())?;let mut total=0;\n";
@@ -158,3 +160,27 @@ impl Json for std::rc::Rc<std::cell::RefCell<crate::TreeNode>>{fn json(&self,w:&
     while values.last()==Some(&None){values.pop();}values.json(w)
 }}
 "#;
+
+#[cfg(test)]mod import_contract_tests{
+ use super::*;
+ #[test]fn explicit_imports_and_existing_helpers_are_not_rewritten(){
+  let root=tempfile::tempdir().unwrap();
+  let source="use std::collections::{HashMap as Map, HashSet};\nuse std::{rc::Rc,cell::RefCell};\npub struct Solution;\nimpl Solution { pub fn f(v: Vec<i32>)->i32 { let mut m=Map::new(); for x in v { *m.entry(x).or_insert(0)+=1; } m.len() as i32 } }\n";
+  prepare(root.path(),source,r#"{"name":"f","params":[{"name":"v","type":"integer[]"}],"return":{"type":"integer"}}"#,"[1,2,1]").unwrap();
+  assert_eq!(fs::read_to_string(root.path().join("solution.rs")).unwrap(),source);
+  let driver=fs::read_to_string(root.path().join("harness.rs")).unwrap();
+  assert!(!driver.contains("pub struct Solution;"));
+  assert!(!driver.contains("use std::collections::HashMap"));
+  assert!(driver.contains("Solution::r#f(arg0)"));
+ }
+ #[test]fn runtime_and_lsp_agree_on_explicit_node_declarations(){
+  let root=tempfile::tempdir().unwrap();
+  let source=format!("pub struct Solution;\n{LIST_TYPES}\nimpl Solution {{ pub fn f(v:Option<Box<ListNode>>)->Option<Box<ListNode>>{{v}} }}");
+  let metadata=r#"{"name":"f","params":[{"name":"v","type":"ListNode"}],"return":{"type":"ListNode"}}"#;
+  prepare(root.path(),&source,metadata,"[1,2]").unwrap();
+  let driver=fs::read_to_string(root.path().join("harness.rs")).unwrap();
+  assert!(!driver.contains("pub struct ListNode"));assert!(!driver.contains("pub struct Solution"));
+  assert!(crate::lsp_scaffold::Context::parse(Some(metadata)).unwrap().fragments("rust",&source).1.is_empty());
+  assert_eq!(fs::read_to_string(root.path().join("solution.rs")).unwrap(),source);
+ }
+}
