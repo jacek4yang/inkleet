@@ -40,10 +40,9 @@ impl Services {
         if let Ok(mut diagnostics)=session.diagnostics.lock(){*diagnostics=Value::Null;}
         Ok(())
     }
-    pub fn request(&self,id:u64,version:u32,kind:&str,line:u32,character:u32,new_name:Option<String>,completion_context:Option<Value>)->Result<Value>{
+    pub fn request(&self,id:u64,version:u32,kind:&str,line:u32,character:u32,new_name:Option<String>,completion_context:Option<Value>,completion_sequence:Option<u64>)->Result<Value>{
         let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition","signatureHelp"=>"textDocument/signatureHelp","rename"=>"textDocument/rename","references"=>"textDocument/references",_=>return Err("不支持此语言服务请求".into())};
         let session=self.session(id)?;
-        let completion_generation=if kind=="completion"{session.completion_generation.fetch_update(Ordering::Relaxed,Ordering::Relaxed,|n|n.checked_add(1)).map_err(|_|"补全请求编号已耗尽")?+1}else{0};
         let prefix={
             let document=session.document.lock().map_err(|_|"文档状态不可用")?;
             if document.version!=version{return Err("文档已更新，请重试".into());}
@@ -59,7 +58,11 @@ impl Services {
             if name.is_empty()||name.len()>128||!name.chars().all(|c|c.is_alphanumeric()||matches!(c,'_'|'$'))||name.chars().next().is_some_and(|c|c.is_numeric()){return Err("名称必须为不超过 128 字节的标识符".into());}
             params["newName"]=json!(name);
         }
+        // Validate the entire request before superseding any valid completion.
+        let completion_generation=if kind=="completion"{crate::completion_cache::admit_sequence(&session.completion_generation,completion_sequence)?}else{if completion_sequence.is_some(){return Err("此请求不接受补全序号".into());}0};
+        if kind=="completion"&&session.completion_generation.load(Ordering::Relaxed)!=completion_generation{return Err("补全请求已经过期".into());}
         let mut response=session.client.request(method,params,Duration::from_secs(8))?;
+        if kind=="completion"&&session.completion_generation.load(Ordering::Relaxed)!=completion_generation{return Err("忽略过期的补全结果".into());}
         if session.document.lock().map_err(|_|"文档状态不可用")?.version!=version{return Err("忽略旧版本的语言服务结果".into());}
         self.session(id)?;
         if kind=="rename"{

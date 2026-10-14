@@ -1,5 +1,15 @@
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64,Ordering};
+
+// Completion intent is ordered at the frontend issuance boundary, not by the
+// order in which spawn_blocking workers happen to execute. RPC IDs stay private.
+pub fn admit_sequence(latest:&AtomicU64,sequence:Option<u64>)->Result<u64,String>{
+    let sequence=sequence.filter(|n|*n>0&&*n<=9_007_199_254_740_991).ok_or("补全请求序号无效")?;
+    latest.fetch_update(Ordering::Relaxed,Ordering::Relaxed,|old|if sequence>old{Some(sequence)}else{None}).map_err(|_|"补全请求已经过期".to_owned())?;
+    Ok(sequence)
+}
+
 #[derive(Default)]
 pub struct CompletionCache{version:u32,generation:u64,next:u64,items:HashMap<u64,Value>}
 impl CompletionCache{
@@ -57,6 +67,45 @@ pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
         let id=newest[0]["_inkleetCompletion"].as_u64().unwrap();
         cache.remember(&mut json!([{"label":"old"}]),4,1);
         assert_eq!(cache.get(id,4).unwrap()["label"],"new");
+    }
+    #[test]fn issuer_order_survives_reversed_worker_admission(){
+        let order=AtomicU64::new(0);let mut cache=CompletionCache::default();
+        let newer=admit_sequence(&order,Some(2)).unwrap();
+        let mut b=json!([{"label":"B"}]);cache.remember(&mut b,1,newer);
+        let token=b[0]["_inkleetCompletion"].as_u64().unwrap();
+        assert!(admit_sequence(&order,Some(1)).is_err());
+        assert_eq!(cache.get(token,1).unwrap()["label"],"B");
+        assert!(admit_sequence(&order,Some(2)).is_err());
+        assert_eq!(admit_sequence(&AtomicU64::new(0),Some(1)).unwrap(),1);
+    }
+    #[test]fn issuer_order_survives_reversed_responses_and_publication_race(){
+        let order=AtomicU64::new(0);let mut cache=CompletionCache::default();
+        let older=admit_sequence(&order,Some(1)).unwrap();
+        let newer=admit_sequence(&order,Some(2)).unwrap();
+        let mut b=json!([{"label":"B"}]);cache.remember(&mut b,7,newer);
+        let token=b[0]["_inkleetCompletion"].as_u64().unwrap();
+        // Even if A passed an earlier atomic check, the cache cannot regress.
+        cache.remember(&mut json!([{"label":"A"}]),7,older);
+        assert_eq!(cache.get(token,7).unwrap()["label"],"B");
+        assert_ne!(order.load(Ordering::Relaxed),older);
+    }
+    #[test]fn concurrent_admission_keeps_highest_issuer_sequence(){
+        let order=AtomicU64::new(0);let barrier=std::sync::Barrier::new(16);
+        std::thread::scope(|scope|{
+            let mut tasks=Vec::new();
+            for n in 1..=16 {let order=&order;let barrier=&barrier;tasks.push((n,scope.spawn(move||{barrier.wait();admit_sequence(order,Some(n))})));}
+            for (n,task) in tasks {let result=task.join().unwrap();if n==16{assert_eq!(result.unwrap(),16);}}
+        });
+        assert_eq!(order.load(Ordering::Relaxed),16);
+    }
+    #[test]fn invalid_sequences_do_not_advance_admission(){
+        let order=AtomicU64::new(0);
+        for sequence in [None,Some(0),Some(9_007_199_254_740_992),Some(u64::MAX)]{
+            assert!(admit_sequence(&order,sequence).is_err());
+            assert_eq!(order.load(Ordering::Relaxed),0);
+        }
+        assert_eq!(admit_sequence(&order,Some(9_007_199_254_740_991)).unwrap(),9_007_199_254_740_991);
+        assert!(admit_sequence(&order,Some(1)).is_err());
     }
     #[test]fn unresolved_auto_import_response_never_inserts_identifier_alone(){
         let original=json!({"label":"HashMap","insertText":"HashMap","data":{"imports":[{"full_import_path":"std::collections::HashMap"}]}});
