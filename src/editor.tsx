@@ -64,7 +64,13 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
       // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。
       Prec.high(keymap.of([{ key: "Tab", run: view => acceptCompletion(view) || indentMore(view), shift: indentLess }])),
       // 脱离面板的 overflow / stacking context；CM 自动同步主题并在销毁时移除容器。
-      tooltips({ parent: document.body, position: "fixed" }), ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
+      tooltips({ parent: document.body, position: "fixed" }),
+      EditorView.domEventObservers({
+        keydown(event, view) {
+          // 即使 Escape 被补全/选区消耗，也保留显式移出编辑器的键盘通道。
+          if (event.key === "Escape") view.setTabFocusMode(2000);
+        },
+      }), ...(debug?.extensions ?? []), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
       EditorView.updateListener.of(update => {
         if (update.docChanged) callback.current(update.state.doc.toString());
