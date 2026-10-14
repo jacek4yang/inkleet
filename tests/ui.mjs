@@ -95,6 +95,10 @@ try {
   await page.screenshot({ path: "evidence/desktop-code.png", fullPage: true });
   await page.getByRole("button", { name: "笔记", exact: true }).click();
   await page.getByRole("textbox", { name: "Markdown 笔记" }).fill("# 推导\n\n- 检查空数组\n- 时间复杂度 O(n)\n\n自编样例，非私人笔记。");
+  for (const label of ["预览笔记", "笔记设置"]) {
+    const iconBounds = await page.getByRole("button", { name: label, exact: true }).locator("svg").boundingBox();
+    assert.ok(iconBounds && iconBounds.width >= 16 && iconBounds.height >= 16, "note action icons retain readable dimensions");
+  }
   await page.screenshot({ path: "evidence/desktop-notes.png", fullPage: true });
   // 真实 Worker 渲染 + DOMPurify；仅自编测试数据，原文与撤销历史不得因预览丢失。
   const notesEditor = page.getByRole("textbox", { name: "Markdown 笔记", exact: true });
@@ -658,7 +662,10 @@ try {
   await runPanel.getByText(/"value": 10/).waitFor();
   assert.equal(await runPanel.locator("img").count(), 0);
   assert.match(await runPanel.innerText(), /9007199254740993/);
-  assert.match(await runPanel.innerText(), /不代表通过力扣判题/);
+  assert.match(await runPanel.locator(".exit-code").getAttribute("title"), /不代表通过力扣判题/, "local result distinction remains available on hover");
+  await runPanel.getByRole("button", { name: "运行与调试设置", exact: true }).click();
+  await runPage.getByRole("dialog", { name: "设置", exact: true }).getByText(/本地输出不代表力扣判题结果/).waitFor();
+  await runPage.getByRole("button", { name: "关闭设置", exact: true }).click();
 
   await runPanel.locator('[data-local-tab="debug"]').click();
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).press("F9");

@@ -7,13 +7,18 @@ This checkpoint responds to the owner's screenshot: remove the persistent explan
 Architecture remains Tauri 2 + React + CodeMirror 6 + Rust.
 
 Lithe reference is pinned to **6210013d06e1410c7bcbb1949e1ff16ea8deae15**. See [full source comparison](LITHE_REFERENCE.md).
-Specific UI references:
-- Windows `windows/tauri/src/features/editor/components/debugger-view.tsx`: compact icon controls, state-dependent enablement; do not copy its duplicate text toolbar.
-- `windows/tauri/src/ui/icons.tsx`: central icon API and accessible names. Its mixed JetBrains/Lucide assets are not copied.
-- `settings/components/settings-dialog.tsx` and `settings-section.tsx`: category navigation, direct entry to relevant category, labels.
-- `ProjectPreparationStatus.tsx`: short status in the workbench, expanded explanation on demand.
-- Native macOS `DebugToolbarPresentation.swift`, `GenericDebugView.swift` and `DebugToolbarPresentationTests`: stable grouped order, compact SVG-sized controls, shortcut/help/accessibility metadata and state gating. These are interaction references, not cross-platform components.
-- `sidebar-pane-selector.tsx` and `ui/button.tsx`: icon controls with hover labels and accessible names.
+Specific UI references (all paths at the pinned SHA):
+- `windows/tauri/src/features/debugger/components/debugger-view.tsx`: compact ghost controls and session/pause/thread gating. Its additional duplicate text action row is not adopted.
+- `windows/tauri/src/ui/icons.tsx`: central SVG/Lucide wrapper and decorative-icon semantics. Button accessible names come primarily from Button and callers. Its mixed JetBrains/Lucide assets are not copied.
+- `windows/tauri/src/features/settings/components/settings-dialog.tsx`: categories, requested-category entry and current-item semantics.
+- `windows/tauri/src/features/settings/components/settings-section.tsx`: setting-row label/description associations.
+- `windows/tauri/src/features/run/components/project-preparation-status.tsx`: project-preparation progressive disclosure, not an LSP component. Compact ready is hidden; busy/failure gets a short label and expandable details/recovery.
+- `macos/Sources/Lithe/Views/Debug/DebugToolbarPresentation.swift`: ordered groups, separators, 18px icons and 36px toolbar.
+- `macos/Sources/Lithe/Views/Debug/GenericDebugView.swift`: button help/shortcut/accessibility labels, low-frequency menu and pending-request gates.
+- `macos/Tests/LitheTests/DebugToolbarPresentationTests.swift`: presentation contracts for ordering, grouping, resource/command presence and state labels; not native end-to-end behavior tests.
+- `windows/tauri/src/features/layout/components/sidebar/sidebar-pane-selector.tsx`: icon mode with tooltip, accessible name and current-item semantics.
+- `windows/tauri/src/ui/button.tsx`: sizes, focus/disabled styling, tooltip-derived labels and effective command shortcuts.
+Swift files are interaction references, not cross-platform components.
 
 Classification **B**: independently reimplemented React/CodeMirror-compatible interaction patterns. No Monaco or Swift code transplanted. All SVG paths in `src/icons.tsx` are newly authored; no JetBrains/Nucleo artwork was imported. Existing Apache-2.0 and third-party notices stay intact.
 
@@ -50,3 +55,5 @@ Risks: narrower toolbars, low-frequency action discoverability, WebView dialog f
 - Prior P0 real keyboard test passed; complete six-language P0 rerun failed on WebDriver transport, not accepted as full pass.
 - Windows/macOS/Android native, physical Chinese IME, performance and long-run acceptance: unverified for this checkpoint.
 - No main merge, tag or official Release.
+
+First CI observation (8924097): TypeScript/build and 18 domain tests passed. Browser run reached local-result checks after Settings, keyboard, notes, LSP and environment UI checks, then failed because the existing local-vs-judge assertion still queried the removed permanent sentence. The distinction is now retained on the result tooltip and in the runtime Settings page, with assertions on both. Screenshot inspection additionally found notes SVGs shrinking under old pane-heading padding; specific padding and minimum rendered-icon-size regression checks added. Neither failure is treated as a complete pass.

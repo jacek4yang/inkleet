@@ -204,3 +204,5 @@ article h3{font-size:14px}
 .reading article{padding:20px 24px;line-height:1.65}
 @media(max-width:760px){.statusbar>span:last-child{display:block;min-width:0;overflow:auto}.statusbar{padding:5px 10px}.reading article{padding:16px 20px}}
 @media(min-width:761px) and (max-width:1000px){.workbench{grid-template-columns:160px minmax(240px,1fr) minmax(310px,1.15fr)}.workbench.focus{grid-template-columns:0 minmax(240px,1fr) minmax(310px,1.2fr)}}
+
+.pane-heading .icon-button{padding:5px}.icon-button svg{flex-shrink:0}

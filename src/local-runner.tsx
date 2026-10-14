@@ -67,7 +67,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
 
-    {result && !busy(result) && <small className="exit-code">退出码 {result.exitCode ?? "无"}</small>}
+    {result && !busy(result) && <small className="exit-code" title="本地结果不代表通过力扣判题">退出码 {result.exitCode ?? "无"}</small>}
     </div>
     <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel snapshot={{ code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
   </section>;
