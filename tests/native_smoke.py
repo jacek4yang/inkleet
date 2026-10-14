@@ -665,8 +665,8 @@ try:
                 wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
                 wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
                 def local_total():
-                    node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='total']]/code"})[EID]
-                    return cmd("GET",f"/element/{node}/text")
+                    node=element('.debug-variable > button[aria-label="total"] + code')
+                    return cmd("GET",f"/element/{node}/property/textContent")
                 wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
                 screenshot(group+"-debug-native.png")
                 for _ in range(3):
