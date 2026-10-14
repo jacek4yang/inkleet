@@ -29,7 +29,7 @@ pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
         if original.get(key)!=resolved.get(key){return Err("补全解析改变了原始替换内容".into());}
     }
     if original.pointer("/data/imports").and_then(Value::as_array).is_some_and(|items|!items.is_empty()){
-        if !resolved.get("additionalTextEdits").and_then(Value::as_array).is_some_and(|edits|edits.iter().any(|edit|edit.get("newText").and_then(Value::as_str).is_some_and(|s|!s.is_empty()))){
+        if !resolved.get("additionalTextEdits").and_then(Value::as_array).is_some_and(|edits|edits.iter().any(|edit|edit.get("newText").and_then(Value::as_str).is_some_and(|s|!s.is_empty())&&!original.get("additionalTextEdits").and_then(Value::as_array).is_some_and(|before|before.contains(edit)))){
             return Err("语言服务未解析所需导入，未应用任何修改，请重新触发补全".into());
         }
     }
@@ -64,6 +64,7 @@ pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
         assert!(validate_resolved(&original,&unresolved).is_err());
         unresolved["additionalTextEdits"]=json!([]);assert!(validate_resolved(&original,&unresolved).is_err());
         unresolved["additionalTextEdits"]=json!([{"newText":"use std::collections::HashMap;"}]);assert!(validate_resolved(&original,&unresolved).is_ok());
+        let mut auxiliary=original.clone();auxiliary["additionalTextEdits"]=json!([{"newText":"auxiliary edit"}]);let mut fallback=auxiliary.clone();fallback.as_object_mut().unwrap().remove("data");assert!(validate_resolved(&auxiliary,&fallback).is_err());
     }
 
 }
