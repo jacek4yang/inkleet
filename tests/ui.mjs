@@ -356,12 +356,28 @@ try {
     inputToRafP95Ms: sorted[Math.floor(sorted.length * .95)],
     longestTaskMs: Math.max(0, ...measured.tasks),
   };
+  // Distinguish paste-triggered parser catch-up from settled incremental typing.
+  await page.evaluate(async()=>{window.__inkParseProbe=await import("/tests/parse-probe.ts");});
+  await page.waitForFunction(()=>window.__inkParseProbe.inspect()?.available);
+  const parseBefore=await page.evaluate(()=>window.__inkParseProbe.inspect());
+  await page.evaluate(()=>{window.__inkPerf.frames=[];window.__inkPerf.tasks=[];});
+  const warmSession=await page.context().newCDPSession(page);
+  await warmSession.send("Profiler.enable");await warmSession.send("Profiler.start");
+  const warmText=" // settled typing 0123456789";
+  await editor.pressSequentially(warmText,{delay:20});
+  await page.waitForFunction(()=>window.__inkPerf.frames.length>=20);
+  const warmMeasured=await page.evaluate(()=>({performance:window.__inkPerf,parseAfter:window.__inkParseProbe.inspect()}));
+  const warmProfile=await warmSession.send("Profiler.stop");
+  await writeFile("evidence/EDITOR_SETTLED_INPUT.cpuprofile",JSON.stringify(warmProfile.profile));
+  await warmSession.detach();
+  const warmSorted=[...warmMeasured.performance.frames].sort((a,b)=>a-b);
+  await writeFile("evidence/PERFORMANCE_SETTLED.json",JSON.stringify({...report,setup:"Same editor after syntaxTreeAvailable through document end; no forced parsing",parseBefore,parseAfter:warmMeasured.parseAfter,samples:warmSorted.length,inputToRafP50Ms:warmSorted[Math.floor(warmSorted.length*.5)],inputToRafP95Ms:warmSorted[Math.floor(warmSorted.length*.95)],longestTaskMs:Math.max(0,...warmMeasured.performance.tasks),rawFrames:warmMeasured.performance.frames},null,2));
   const downloadPromise = page.waitForEvent("download");
   await openSettings(page, "源码");
   await page.getByRole("button", { name: "导出源码", exact: true }).click();
   const exported = await downloadPromise;
   const exportedText = await readFile(await exported.path(), "utf8");
-  assert.equal(exportedText, large + " // performance probe 0123456789");
+  assert.equal(exportedText, large + " // performance probe 0123456789" + warmText);
   await writeFile("evidence/PERFORMANCE.json", JSON.stringify(report, null, 2));
   assert.ok(report.inputToRafP95Ms < 100, "受控测试输入响应 P95 不应超过 100ms");
   assert.deepEqual(errors, []);
