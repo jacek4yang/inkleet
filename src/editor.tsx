@@ -50,7 +50,7 @@ type Props = {
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void; onStatus?: (status: string) => void; reconnectToken?: number; onSettings?: () => void;
   onSave?:()=>void;onSaveReady?:(save:(()=>boolean)|null)=>void;
-  formatting?: {ready?:(save:boolean)=>boolean;enabled:boolean;save:(text:string)=>Promise<boolean>;report:(message:string)=>void};
+  formatting?: {epoch?:()=>number;ready?:(save:boolean)=>boolean;enabled:boolean;save:(text:string)=>Promise<boolean>;report:(message:string)=>void};
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
 export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
@@ -85,7 +85,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
     ];
     const extensions = [editorCommands(commands),
       basicSetup, syntax(language), theme, ...(language==="markdown"?[]:[indentGuides]),
-      ...(intelligence&&formatting?formatOnSave({ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
+      ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
       // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。

@@ -461,6 +461,7 @@ try:
         assert source_text(code)=="def solve(values):\npass","palette preserves source"
         (evidence/"COMMAND_NATIVE_RESULT.txt").write_text("PASS: native CtrlShiftP command discovery, actual LSP action search, Escape and unchanged source.\n")
         fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
+        save_editor(code)
         python_source=source.with_name("solution.py")
         wait_for(lambda: python_source.exists() and python_source.read_text() == "from collections import deque\nitems = deque([1, 2])\nitems.pop", "multiline Python source persisted exactly")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[

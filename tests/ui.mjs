@@ -25,8 +25,8 @@ async function testPage(options) {
       configurable:true,get:()=>internals,set:value=>{
         const invoke=value.invoke;
         internals={...value,invoke:(command,args)=>{
-          if(command==="begin_draft_session")return Promise.resolve(1);
-          if(command==="checkpoint_draft")return Promise.resolve();
+          if(command==="begin_draft_session"&&!window.__recoveryTest)return Promise.resolve(1);
+          if(command==="checkpoint_draft"&&!window.__recoveryTest)return Promise.resolve();
           if(command==="get_editor_settings"&&!window.__formatTest)return Promise.resolve({settings:{version:1,formatOnSave:false,overrides:{}},revision:null});
           return invoke(command,args);
         }};
@@ -1493,6 +1493,74 @@ try {
   } finally {await formatPage.close();}
   await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; explicit format before canonical save, idle leaves canonical untouched, dirty markers, Unicode, isolated undo/redo, no loop, disabled save skips format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
 
+
+
+  const recoveryPage=await testPage({viewport:{width:1200,height:800}});
+  recoveryPage.on("dialog",dialog=>dialog.accept());
+  await recoveryPage.addInitScript(()=>{
+    window.isTauri=true;
+    const stored=JSON.parse(sessionStorage.getItem("explicitRecovery")||'{"code":"A","notes":"N","codeDraft":null,"notesDraft":null}');
+    const state=window.__recoveryTest={...stored,epoch:0,writes:0,defer:false};
+    const persist=()=>sessionStorage.setItem("explicitRecovery",JSON.stringify({code:state.code,notes:state.notes,codeDraft:state.codeDraft,notesDraft:state.notesDraft}));
+    window.__persistRecovery=persist;
+    window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
+      if(command==="begin_draft_session")return ++state.epoch;
+      if(command==="checkpoint_draft"){
+        if(args.epoch!==state.epoch)throw Error("stale epoch");
+        state[args.kind+"Draft"]={text:args.text,baseline:args.baseline};persist();return;
+      }
+      if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="external_editor_supported")return false;
+      if(command==="login_status")return null;
+      if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+      if(command==="load_document")return JSON.parse(JSON.stringify({code:state.code,notes:state.notes,codeDraft:state.codeDraft,notesDraft:state.notesDraft}));
+      if(command==="start_language_service")throw Error("offline");
+      if(command==="stop_language_service")return;
+      if(command==="save_text"){
+        const commit=()=>{
+          if(state[args.kind]!==args.expected)throw Error("CAS conflict");
+          state[args.kind]=args.text;state.writes++;persist();
+        };
+        if(state.defer)return new Promise((resolve,reject)=>state.reply=()=>{try{commit();resolve();}catch(e){reject(e);}});
+        commit();return;
+      }
+      throw Error("Unexpected recovery IPC "+command);
+    }};
+  });
+  await recoveryPage.goto("http://127.0.0.1:5173");
+  const recoveryCode=recoveryPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await recoveryCode.fill("B");
+  await recoveryPage.waitForFunction(()=>window.__recoveryTest.codeDraft?.text==="B");
+  assert.equal(await recoveryPage.evaluate(()=>window.__recoveryTest.code),"A");
+  await recoveryPage.reload();
+  await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="代码编辑器"]')?.textContent==="B");
+  await recoveryPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.code="C";window.__persistRecovery();});
+  await recoveryPage.reload();
+  await recoveryPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await recoveryPage.locator('[data-action="review-code-conflict"]').waitFor();
+  assert.equal(await recoveryCode.innerText(),"B","external edit preserves conflicting recovered draft");
+  assert.equal(await recoveryPage.evaluate(()=>window.__recoveryTest.code),"C");
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.codeDraft={text:"A",baseline:"A"};window.__recoveryTest.notesDraft={text:"N",baseline:"N"};window.__recoveryTest.notes="External note";window.__persistRecovery();});
+  await recoveryPage.reload();
+  await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="代码编辑器"]')?.textContent==="C");
+  assert.equal(await recoveryPage.getByLabel("源码未保存",{exact:true}).count(),0,"clean sidecar cannot resurrect stale code");
+  await recoveryPage.getByRole("button",{name:"笔记",exact:true}).click();
+  await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="Markdown 笔记"]')?.textContent==="External note");
+  assert.equal(await recoveryPage.getByLabel("笔记未保存",{exact:true}).count(),0,"clean note sidecar cannot resurrect stale note");
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.defer=true;});
+  await recoveryCode.fill("D");await recoveryCode.press("Control+s");
+  await recoveryPage.waitForFunction(()=>typeof window.__recoveryTest.reply==="function");
+  await recoveryCode.fill("E");
+  await recoveryPage.waitForFunction(()=>window.__recoveryTest.codeDraft?.text==="E");
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.reply();});
+  await recoveryPage.waitForFunction(()=>window.__recoveryTest.code==="D"&&window.__recoveryTest.codeDraft?.text==="E"&&window.__recoveryTest.codeDraft?.baseline==="D");
+  await recoveryPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await recoveryPage.reload();
+  await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="代码编辑器"]')?.textContent==="E");
+  assert.equal(await recoveryPage.locator('[data-action="review-code-conflict"]').count(),0,"newer draft rebased against older committed save");
+  await recoveryPage.close();
+  await writeFile("evidence/EXPLICIT_RECOVERY_UI_RESULT.txt","PASS: mocked disk IPC, real CodeMirror dirty recovery and external conflict, clean source/notes sidecars ignored, save D while editing E rebases recovery to D without clearing dirty.\n");
 
   const semanticPage=await browser.newPage();
   await semanticPage.route("**/semantic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));

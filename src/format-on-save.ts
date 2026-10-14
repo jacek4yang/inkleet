@@ -6,10 +6,10 @@ const formatters=new WeakMap<EditorView,()=>void>(),savers=new WeakMap<EditorVie
 export function saveDocument(view:EditorView){const run=savers.get(view);if(!run||view.composing)return false;run();return true;}
 export function formatDocument(view:EditorView){const run=formatters.get(view);if(!run||view.composing)return false;run();return true;}
 export const formattedTransaction=Annotation.define<boolean>();
-type Options={ready?:(save:boolean)=>boolean;enabled:()=>boolean;save:(text:string)=>Promise<boolean>;request:(text:string)=>Promise<string>;report:(message:string)=>void};
+type Options={epoch?:()=>number;ready?:(save:boolean)=>boolean;enabled:()=>boolean;save:(text:string)=>Promise<boolean>;request:(text:string)=>Promise<string>;report:(message:string)=>void};
 export function formatOnSave(options:Options){
   class Controller{
-    private generation=0;private closed=false;private busy=false;private pending:{generation:number;save:boolean}|null=null;
+    private generation=0;private closed=false;private busy=false;private pending:{generation:number;epoch:number;save:boolean}|null=null;
     private worker:Worker|null=null;private rejectDiff:((reason:Error)=>void)|null=null;
     private readonly trigger=()=>{void this.run(false);};
     private readonly saveTrigger=()=>{void this.run(true);};
@@ -22,11 +22,11 @@ export function formatOnSave(options:Options){
     async run(save:boolean){
       if(this.closed||this.view.composing)return;
       if(options.ready?.(save)===false){if(save)options.report("请先处理保存错误或关闭对话框");return;}
-      if(this.busy){this.pending={generation:this.generation,save:save||!!(this.pending?.generation===this.generation&&this.pending.save)};return;}
+      if(this.busy){this.pending={generation:this.generation,epoch:options.epoch?.()??0,save:save||!!(this.pending?.generation===this.generation&&this.pending.save)};return;}
       this.busy=true;this.pending=null;
-      const doc=this.view.state.doc,text=doc.toString(),generation=this.generation;
+      const doc=this.view.state.doc,text=doc.toString(),generation=this.generation,epoch=options.epoch?.()??0;
       let committedDoc:typeof doc|null=null;
-      const current=()=>options.ready?.(save)!==false&&!this.closed&&generation===this.generation&&this.view.state.doc===doc&&!this.view.composing;
+      const current=()=>epoch===(options.epoch?.()??0)&&options.ready?.(save)!==false&&!this.closed&&generation===this.generation&&this.view.state.doc===doc&&!this.view.composing;
       try{
         if(save&&!options.enabled()){if(!await options.save(text))throw Error("保存未完成，草稿仍被保留");options.report("");return;}
         if(new TextEncoder().encode(text).length>1024*1024)throw Error("格式化源码超过 1 MiB 限制");
@@ -57,7 +57,7 @@ export function formatOnSave(options:Options){
         if(save&&!await options.save(after))throw Error("保存未完成，格式化后的草稿仍被保留");
         options.report("");
       }catch(error){if(!this.closed&&(current()||this.view.state.doc===committedDoc))options.report((save?"保存未完成 · ":"格式化未完成 · ")+String(error).slice(0,220));}
-      finally{this.busy=false;const pending=this.takePending();if(pending&&!this.closed&&pending.generation===this.generation)void this.run(pending.save);}
+      finally{this.busy=false;const pending=this.takePending();if(pending&&!this.closed&&pending.generation===this.generation&&pending.epoch===(options.epoch?.()??0))void this.run(pending.save);}
     }
     takePending(){const pending=this.pending;this.pending=null;return pending;}
     destroy(){if(formatters.get(this.view)===this.trigger)formatters.delete(this.view);if(savers.get(this.view)===this.saveTrigger)savers.delete(this.view);this.closed=true;this.pending=null;++this.generation;this.cancelDiff();}

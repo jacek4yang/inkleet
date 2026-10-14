@@ -81,7 +81,7 @@ function App() {
   const draftEpoch=useRef<Promise<number>|null>(null);
   const sourceSave=useRef<(()=>boolean)|null>(null);
   const [draftError,setDraftError]=useState(""),[closeRequested,setCloseRequested]=useState(false),[closing,setClosing]=useState(false);
-  const shuttingDown=useRef(false);
+  const shuttingDown=useRef(false),formatEpoch=useRef(0),failedDrafts=useRef(new Set<string>());
   const closeAllowed=useRef(false),closeDialog=useRef<HTMLDialogElement>(null);
   const activeKey = problemId ? draftKey({ account: "local", problem: problemId, language, solution }) : "";
   const selected = useRef(activeKey); selected.current = activeKey;
@@ -119,8 +119,8 @@ function App() {
       const epoch=await draftEpoch.current;
       await invoke("checkpoint_draft",{problem:target.problem,language:target.language,solution:target.solution,kind:target.kind,text,baseline,epoch,revision:version});
     },
-      saved:()=>{void draftQueue.current.idle.then(()=>{if(!draftQueue.current.busy)setDraftError("");});},
-      failed:error=>setDraftError("恢复草稿未写入 · "+String(error).slice(0,200))});
+      saved:()=>{failedDrafts.current.delete(key);void draftQueue.current.idle.then(()=>{if(!draftQueue.current.busy)setDraftError("");});},
+      failed:error=>{failedDrafts.current.add(key);setDraftError("恢复草稿未写入 · "+String(error).slice(0,200));}});
   }
   async function saveSnapshot(kind:"code"|"notes",text:string):Promise<boolean>{
     const target:SaveTarget={key:activeKey,problem:problemId,language,solution,kind},key=storageKey(target);
@@ -213,7 +213,7 @@ function App() {
   },[]);
   useEffect(()=>{if(closeRequested&&!closeDialog.current?.open)closeDialog.current?.showModal();},[closeRequested]);
   async function closeWithDrafts(){
-    if(shuttingDown.current)return;shuttingDown.current=true;setClosing(true);
+    if(shuttingDown.current)return;shuttingDown.current=true;++formatEpoch.current;setClosing(true);
     try{
       await queue.current.idle;await draftQueue.current.idle;
       if(draftQueue.current.busy||saving.current.size>0)throw Error("请先处理草稿或文件保存错误，或导出内容");
@@ -390,7 +390,7 @@ function App() {
         persisted.current.set(key,isTauri()?text:null);clean.current.set(key,text);dirty.current.delete(key);selectSolution(entry.id);
       }} />}</div><div className="actions">{dirty.current.has(activeKey)&&<span className="unsaved-mark" role="img" aria-label="源码未保存" title="未保存">●</span>}<IconButton icon="save" label="保存源码" shortcut="Ctrl+S" disabled={editorLoading} onClick={()=>sourceSave.current?.()} /><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} aria-expanded={localRunner} onClick={() => {setLocalOpened(true);setLocalRunner(v => !v);}} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
       {problem && baseTemplate===null && !doc.code.trim() && <p className="error" role="alert">官方模板不可用</p>}
-      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSaveReady={save=>{sourceSave.current=save;}} formatting={{ready:(save)=>!shuttingDown.current&&(!save||(!queue.current.failed(activeKey)&&!conflict&&!recovery)),enabled:formatEnabled(editorSettings?.settings??null,language),save:text=>saveSnapshot("code",text),report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
+      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSaveReady={save=>{sourceSave.current=save;}} formatting={{epoch:()=>formatEpoch.current,ready:(save)=>!shuttingDown.current&&(!save||(!queue.current.failed(activeKey)&&!conflict&&!recovery)),enabled:formatEnabled(editorSettings?.settings??null,language),save:text=>saveSnapshot("code",text),report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
       {localOpened && problem && <LocalRunner onReveal={()=>setLocalRunner(true)} hidden={!localRunner} onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={position => setPaused({ key: activeKey, position })} key={activeKey} documentKey={activeKey} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} onClose={() => {setLocalRunner(false);document.querySelector<HTMLElement>('.code-pane .cm-content')?.focus();}} />}
       {judge.panel}
     </section>
@@ -401,7 +401,7 @@ function App() {
     {recovery && <RecoveryDialog target={recovery} onClose={() => setRecovery(null)} onRefresh={async () => { setRecovery(await readConflict(recovery)); }} onRestore={restoreRecovery} />}
     {conflict && <ConflictDialog conflict={conflict} onClose={() => { ++conflictSequence.current; setConflict(null); }} onRefresh={async () => { setConflict(await readConflict(conflict)); }} onResolve={resolveConflict} />}
     {closeRequested&&<dialog ref={closeDialog} className="close-drafts" aria-label="未保存更改" onCancel={event=>{event.preventDefault();if(!closing)setCloseRequested(false);}}><h3>未保存更改</h3><p>保留恢复草稿后退出？源码文件不会被覆盖。</p><button disabled={closing} onClick={()=>setCloseRequested(false)}>取消</button><button disabled={closing} onClick={()=>void closeWithDrafts()}>保留草稿并退出</button>{draftError&&<p role="alert">{draftError}</p>}</dialog>}
-    <footer className="statusbar" role="status" data-storage-state={status}><span>{draftError&&<span role="alert">{draftError}<button onClick={()=>{for(const key of dirty.current)draftQueue.current.retry(key);}}>重试草稿</button></span>}{["选择题目", "已读取本机文件", "已保存到本机文件", "已处理冲突 · 两份内容已保留", "已恢复所选副本 · 恢复前的两份内容仍已保留", "已重新读取外部笔记", "已请求外部编辑器打开笔记 · 返回时自动检查更新"].includes(status) ? "" : status}{queue.current.failed(activeKey) && <button data-action="review-code-conflict" onClick={() => void openConflict("code")}>对比源码</button>}{queue.current.failed(problemId + "/notes") && <button data-action="review-notes-conflict" onClick={() => void openConflict("notes")}>对比笔记</button>}{(queue.current.failed(activeKey) || queue.current.failed(problemId + "/notes")) && <button onClick={retrySave}>重试保存</button>}</span>{(formatConfigError||formatMessage)&&<IconButton icon="info" label="格式化状态" title={formatConfigError||formatMessage} onClick={()=>setSettings("editor")} />}</footer>
+    <footer className="statusbar" role="status" data-storage-state={status}><span>{draftError&&<span role="alert">{draftError}<button onClick={()=>{for(const key of failedDrafts.current)draftQueue.current.retry(key);}}>重试草稿</button></span>}{["选择题目", "已读取本机文件", "已保存到本机文件", "已处理冲突 · 两份内容已保留", "已恢复所选副本 · 恢复前的两份内容仍已保留", "已重新读取外部笔记", "已请求外部编辑器打开笔记 · 返回时自动检查更新"].includes(status) ? "" : status}{queue.current.failed(activeKey) && <button data-action="review-code-conflict" onClick={() => void openConflict("code")}>对比源码</button>}{queue.current.failed(problemId + "/notes") && <button data-action="review-notes-conflict" onClick={() => void openConflict("notes")}>对比笔记</button>}{(queue.current.failed(activeKey) || queue.current.failed(problemId + "/notes")) && <button onClick={retrySave}>重试保存</button>}</span>{(formatConfigError||formatMessage)&&<IconButton icon="info" label="格式化状态" title={formatConfigError||formatMessage} onClick={()=>setSettings("editor")} />}</footer>
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<App />);
