@@ -2,6 +2,7 @@
 use serde_json::Value;
 use std::{fs,path::Path};
 pub(crate) const HEADER:&str=include_str!("cpp_harness.hpp");
+pub const STANDARD_PRELUDE:&str=include_str!("cpp_standard.hpp");
 fn cpp_type(kind:&str)->Result<String,String>{
     if let Some(inner)=kind.strip_suffix("[]"){return Ok(format!("std::vector<{}>",cpp_type(inner)?));}
     Ok(match kind{"integer"=>"int","long"=>"long long","double"=>"double","boolean"=>"bool","string"=>"std::string","character"=>"char","ListNode"=>"ListNode*","TreeNode"=>"TreeNode*",_=>return Err("此 C++ 参数类型尚未支持".into())}.into())
@@ -65,9 +66,7 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     let params=config["metadata"]["params"].as_array().ok_or("参数缺失")?;
     let types=params.iter().map(|p|p["type"].as_str().ok_or("参数类型缺失")).collect::<Result<Vec<_>,_>>()?;
     let mut driver=String::from("#include \"cpp_harness.hpp\"\nusing namespace std;\n");
-    let meta=config["metadata"].to_string();
-    if meta.contains("ListNode"){driver+="struct ListNode{int val;ListNode* next;ListNode(int v=0,ListNode* n=nullptr):val(v),next(n){}};\n";}
-    if meta.contains("TreeNode"){driver+="struct TreeNode{int val;TreeNode* left;TreeNode* right;TreeNode(int v=0,TreeNode* l=nullptr,TreeNode* r=nullptr):val(v),left(l),right(r){}};\n";}
+    driver+=&crate::lsp_scaffold::Context::parse(Some(metadata))?.fragments("cpp",source).0;
     driver+="#include \"solution.cpp\"\nint main(){std::ofstream output(\"results.jsonl\",std::ios::binary|std::ios::trunc);if(!output)return 2;std::size_t total=0;\n";
     for (index,case) in config["cases"].as_array().ok_or("用例缺失")?.iter().enumerate(){
         driver+="{\n";let values=case.as_array().ok_or("用例无效")?;let mut budget=10000;
@@ -81,6 +80,7 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     }
     driver+="return 0;}\n";
     fs::write(root.join("solution.cpp"),source).map_err(|_|"无法写入 C++ 源码快照")?;
+    fs::write(root.join("cpp_standard.hpp"),STANDARD_PRELUDE).map_err(|_|"无法写入 C++ 标准库声明")?;
     fs::write(root.join("cpp_harness.hpp"),HEADER).map_err(|_|"无法写入 C++ 序列化驱动")?;
     fs::write(root.join("harness.cpp"),driver).map_err(|_|"无法写入 C++ 调用驱动")?;
     Ok(())
@@ -101,5 +101,20 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
         prepare(root.path(),source,r#"{"name":"sum","params":[{"name":"v","type":"integer[]"}],"return":{"type":"integer"}}"#,"[1,2]").unwrap();
         assert_eq!(fs::read_to_string(root.path().join("solution.cpp")).unwrap(),source);
         assert!(fs::read_to_string(root.path().join("harness.cpp")).unwrap().contains("Solution{}.sum(arg0)"));
+    }
+}
+
+#[cfg(test)]mod authored_helper_tests {
+    use super::*;
+    #[test]fn authored_nodes_and_standard_headers_stay_consistent(){
+        let root=tempfile::tempdir().unwrap();
+        let source="struct ListNode { int val; ListNode* next; ListNode(int v):val(v),next(nullptr){} }; class Solution{public:ListNode* identity(ListNode* n){return n;}};";
+        let metadata=r#"{"name":"identity","params":[{"name":"n","type":"ListNode"}],"return":{"type":"ListNode"}}"#;
+        prepare(root.path(),source,metadata,"[1,2]").unwrap();
+        let driver=fs::read_to_string(root.path().join("harness.cpp")).unwrap();
+        assert!(!driver.contains("struct ListNode"));
+        assert_eq!(fs::read_to_string(root.path().join("solution.cpp")).unwrap(),source);
+        assert_eq!(fs::read_to_string(root.path().join("cpp_standard.hpp")).unwrap(),STANDARD_PRELUDE);
+        for header in ["sstream","iomanip","stdexcept","unordered_map"]{assert!(STANDARD_PRELUDE.contains(&format!("#include <{header}>")));}
     }
 }

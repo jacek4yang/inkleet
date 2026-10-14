@@ -214,3 +214,26 @@ mod tests {
         s.slug = "fixture".into(); s.code.clear(); assert!(validate(&s).is_err());
     }
 }
+
+#[cfg(test)]mod source_identity_tests{
+ use super::*;
+ #[test]fn six_language_imports_are_sent_without_any_rewrite(){
+  for (language,source) in [
+   ("rust","use std::collections::HashMap;\r\nimpl Solution {}\r\n"),
+   ("python3","from __future__ import annotations\nfrom collections import Counter\n# 中文\n"),
+   ("java","import java.util.HashMap;\nclass Solution {}\n"),
+   ("c","#include <stdlib.h>\nint solve(int n){return n;}\n"),
+   ("cpp","#include <unordered_map>\nclass Solution {};\n"),
+   ("golang","import \"fmt\"\nfunc solve(n int) int { return n }\n")
+  ]{
+   let snapshot=Snapshot{solution:Some("a".repeat(32)),id:"identity-test".into(),account:"fixture".into(),question_id:"1".into(),slug:"two-sum".into(),language:language.into(),code:source.into(),test_case:String::new(),kind:Kind::Submission};
+   validate(&snapshot).unwrap();let body=payload(&snapshot);
+   assert_eq!(body["typed_code"].as_str().unwrap().as_bytes(),source.as_bytes());
+   assert!(body.get("solution").is_none());assert!(body.get("data_input").is_none());
+  }
+ }
+ #[test]fn legacy_journal_without_solution_deserializes_to_default(){
+  let old=json!({"id":"old","account":"fixture","questionId":"1","slug":"two-sum","language":"rust","code":"impl Solution {}","testCase":"","kind":"submission"});
+  let snapshot:Snapshot=serde_json::from_value(old).unwrap();assert!(snapshot.solution.is_none());validate(&snapshot).unwrap();
+ }
+}

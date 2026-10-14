@@ -54,6 +54,15 @@ async fn main() -> Result<(), String> {
         let hover=client.request("textDocument/hover",json!({"textDocument":{"uri":document},"position":{"line":prefix+3,"character":38}}),Duration::from_secs(30))?;
         assert!(hover.to_string().contains("ListNode"),"Python annotated judge type hover missing: {hover}");
         println!("PYTHON_JUDGE_TYPES_RESULT {}",json!({"listNodeCompletion":true,"futureAnnotations":true,"typedHover":true,"sourceLinesPreserved":true}));
+        let implicit="items = deque([1])\nitems.\ncounts = Counter([1,1])\ncounts.\n";
+        let (virtual_source,prefix)=context.python_source(implicit).ok_or("implicit Python imports")?;
+        client.notify("textDocument/didChange",json!({"textDocument":{"uri":document,"version":3},"contentChanges":[{"text":virtual_source}]}))?;
+        for (line,character,label) in [(1,6,"popleft"),(3,7,"most_common")]{
+            let result=client.request("textDocument/completion",json!({"textDocument":{"uri":document},"position":{"line":prefix+line,"character":character}}),Duration::from_secs(30))?;
+            let items=result.as_array().or_else(||result.get("items").and_then(serde_json::Value::as_array)).ok_or("implicit completion")?;
+            assert!(items.iter().any(|item|item["label"]==label),"implicit {label} missing: {result}");
+        }
+        println!("PYTHON_IMPLICIT_IMPORTS_RESULT public deque and Counter completion PASS");
         client.request("shutdown",json!(null),Duration::from_secs(5))?;
         let _=client.notify("exit",json!(null));client.stop();
         Ok(json!({"initialize":true,"hover":true,"completion":true,"stdlibDeclaration":true,"managedNode":true}))
@@ -76,7 +85,7 @@ async fn main() -> Result<(), String> {
         
         {
             use inkleet_managed_env::harness;
-            fn check(python:&std::path::Path,root:&std::path::Path,source:&str,metadata:&str,input:&str,expected:serde_json::Value)->Result<(),String>{
+            fn check_record(python:&std::path::Path,root:&std::path::Path,source:&str,metadata:&str,input:&str)->Result<serde_json::Value,String>{
                 let work=tempfile::Builder::new().prefix("harness-").tempdir_in(root).map_err(|e|e.to_string())?;
                 harness::prepare(work.path(),source,metadata,input)?;
                 let mut cmd=Command::new(python);cmd.arg("-I").arg(work.path().join("harness.py")).current_dir(work.path()).env_clear()
@@ -86,6 +95,11 @@ async fn main() -> Result<(), String> {
                 assert_eq!(output.exit_code,Some(0),"{:?}",output);
                 let text=std::fs::read_to_string(work.path().join("results.jsonl")).map_err(|e|e.to_string())?;
                 let result:serde_json::Value=serde_json::from_str(text.trim()).map_err(|e|e.to_string())?;
+                assert_eq!(std::fs::read_to_string(work.path().join("solution.py")).map_err(|e|e.to_string())?,source);
+                Ok(result)
+            }
+            fn check(python:&std::path::Path,root:&std::path::Path,source:&str,metadata:&str,input:&str,expected:serde_json::Value)->Result<(),String>{
+                let result=check_record(python,root,source,metadata,input)?;
                 assert_eq!(result["ok"],true,"{result}");assert_eq!(result["value"],expected,"{result}");
                 Ok(())
             }
@@ -93,6 +107,56 @@ async fn main() -> Result<(), String> {
             check(&runtime_python,&runtime_work,"def identity(value): return value\n",r#"{"name":"identity","params":[{"name":"value","type":"long"}]}"#,"900719925474099312345678901234567890",serde_json::from_str("900719925474099312345678901234567890").unwrap())?;
             check(&runtime_python,&runtime_work,"class Solution:\n    def identity(self, head: Optional[ListNode]) -> Optional[ListNode]:\n        return head\n",r#"{"name":"identity","params":[{"name":"head","type":"ListNode"}]}"#,"[1,2,3]",json!([1,2,3]))?;
             check(&runtime_python,&runtime_work,"class Solution:\n    def identity(self, root: Optional[TreeNode]) -> Optional[TreeNode]:\n        return root\n",r#"{"name":"identity","params":[{"name":"root","type":"TreeNode"}]}"#,"[1,null,2,3]",json!([1,null,2,3]))?;
+            let list=r#"class ListNode:
+    def __init__(self, val):
+        self.val, self.next = val, None
+class Solution:
+    def identity(self, head):
+        assert isinstance(head, ListNode)
+        first = ListNode(0)
+        first.next = head
+        return first
+"#;
+            check(&runtime_python,&runtime_work,list,r#"{"name":"identity","params":[{"name":"head","type":"ListNode"}]}"#,"[1,2,3]",json!([0,1,2,3]))?;
+            let tree=r#"class TreeNode:
+    def __init__(self, val):
+        self.val, self.left, self.right = val, None, None
+class Solution:
+    def identity(self, root):
+        assert isinstance(root, TreeNode)
+        parent = TreeNode(0)
+        parent.right = root
+        return parent
+"#;
+            check(&runtime_python,&runtime_work,tree,r#"{"name":"identity","params":[{"name":"root","type":"TreeNode"}]}"#,"[1,null,2,3]",json!([0,null,1,null,2,3]))?;
+            let imports=r#"from collections import Counter as Counts
+def identity(value):
+    @cache
+    def twice(n): return n * 2
+    values = deque([value])
+    count = Counter(values)
+    alias = Counts(values)
+    d = defaultdict(int)
+    d[value] += 1
+    heap = []
+    heappush(heap, value)
+    return [values.popleft(), count[value], alias[value], d[value], heappop(heap), twice(value), bisect_left([1,3],2), bisect.bisect_left([1,3],2), gcd(6,9)]
+"#;
+            check(&runtime_python,&runtime_work,imports,r#"{"name":"identity","params":[{"name":"value","type":"integer"}]}"#,"3",json!([3,1,1,1,3,6,1,1,3]))?;
+            let nested="class ListNode:\n    def __init__(self,val): self.val,self.next=val,None\ndef identity(nodes):\n    assert all(isinstance(n,ListNode) for n in nodes)\n    return nodes\n";
+            check(&runtime_python,&runtime_work,nested,r#"{"name":"identity","params":[{"name":"nodes","type":"ListNode[]"}]}"#,"[[1,2],[3]]",json!([[1,2],[3]]))?;
+            let cycle=list.replace("first.next = head","first.next = first");
+            let result=check_record(&runtime_python,&runtime_work,&cycle,r#"{"name":"identity","params":[{"name":"head","type":"ListNode"}]}"#,"[1]")?;
+            assert_eq!(result["ok"],false);assert!(result["error"].as_str().unwrap().contains("cycle"));
+            let shared=tree.replace("parent.right = root","parent.right = root\n        parent.left = root");
+            let result=check_record(&runtime_python,&runtime_work,&shared,r#"{"name":"identity","params":[{"name":"root","type":"TreeNode"}]}"#,"[1]")?;
+            assert_eq!(result["ok"],false);assert!(result["error"].as_str().unwrap().contains("shared node"));
+            let result=check_record(&runtime_python,&runtime_work,"ListNode=42\ndef identity(head): return head\n",r#"{"name":"identity","params":[{"name":"head","type":"ListNode"}]}"#,"[1]")?;
+            assert_eq!(result["ok"],false);assert!(result["error"].as_str().unwrap().contains("must be a class"));
+            let mutation="class ListNode:\n    def __init__(self,val): self.val,self.next=val,None\ndef identity(nodes):\n    assert all(isinstance(n,ListNode) for n in nodes)\n    nodes[0].val=9\n";
+            let result=check_record(&runtime_python,&runtime_work,mutation,r#"{"name":"identity","params":[{"name":"nodes","type":"ListNode[]"}],"return":{"type":"void"}}"#,"[[1,2],[3]]")?;
+            assert_eq!(result["ok"],true);assert_eq!(result["argumentsAfterCall"],json!([[[9,2],[3]]]));
+            println!("PYTHON_ADAPTER_CONTRACT_RESULT imports authoredNodes nestedNodes cycles invalidBindings sourcePreserved PASS");
         }
 
         println!("PROBE_STAGE Typed harness verified");

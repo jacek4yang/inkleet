@@ -1,7 +1,7 @@
 name: Go local test harness
 on:
   push:
-    branches: [feat/first-workbench, main]
+    branches: [feat/first-workbench, feat/language-adapter-contract, main]
     paths: ['crates/managed-env/src/harness.rs', 'crates/managed-env/src/go_harness.go', 'crates/managed-env/examples/go_harness_probe.rs', '.github/workflows/go-harness.yml']
   workflow_dispatch:
 permissions:

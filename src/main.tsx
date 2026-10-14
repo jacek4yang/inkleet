@@ -1,3 +1,4 @@
+import { officialTemplate } from "./official-template";
 import { SolutionPicker } from "./solution-picker";
 import { QuestionSidebar } from "./question-sidebar";
 import { IconButton } from "./icons";
@@ -68,7 +69,8 @@ function App() {
   const activeKey = problemId ? draftKey({ account: "local", problem: problemId, language, solution }) : "";
   const selected = useRef(activeKey); selected.current = activeKey;
   const problem = problems.find(p => p.id === problemId);
-  const baseCode = problem?.official.codeSnippets?.find(s => s.langSlug === language)?.code ?? "";
+  const baseTemplate = officialTemplate(problem?.official.codeSnippets,language);
+  const baseCode = baseTemplate ?? "";
   const doc = documents.current.get(activeKey) ?? { code: baseCode, notes: notes.current.get(problemId) ?? "" };
 
   const judge = useOnlineJudge({ identity, question: problem?.official, language, solution, code: doc.code });
@@ -307,11 +309,12 @@ function App() {
       {cacheWarning && <p className="cache-warning error" role="alert">{cacheWarning}</p>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
-      <div className="pane-heading"><div className="document-selectors"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select>{problem && <SolutionPicker key={solutionGroup} problem={problemId} language={language} value={solution} code={doc.code} template={baseCode} disabled={editorLoading} onChange={selectSolution} onCreated={(entry,text) => {
+      <div className="pane-heading"><div className="document-selectors"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select>{problem && <SolutionPicker key={solutionGroup} problem={problemId} language={language} value={solution} code={doc.code} template={baseCode} templateAvailable={baseTemplate!==null} disabled={editorLoading} onChange={selectSolution} onCreated={(entry,text) => {
         const key=draftKey({account:"local",problem:problemId,language,solution:entry.id});
         documents.current.set(key,{code:text,notes:notes.current.get(problemId)??""});
         persisted.current.set(key,isTauri()?text:null);selectSolution(entry.id);
       }} />}</div><div className="actions"><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
+      {problem && baseTemplate===null && !doc.code.trim() && <p className="error" role="alert">官方模板不可用</p>}
       {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
       {localRunner && problem && <LocalRunner onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={activeKey} documentKey={activeKey} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} onClose={() => setLocalRunner(false)} />}
       {judge.panel}

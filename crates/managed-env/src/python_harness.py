@@ -31,11 +31,12 @@ class TreeNode:
 
 MAX_NODES = 10000
 
-def decode(value, kind):
+def decode(value, kind, node_types=(ListNode, TreeNode)):
+    list_type, tree_type = node_types
     if kind.endswith("[]"):
         if not isinstance(value, list):
             raise ValueError("Array input must be a JSON array")
-        return [decode(item, kind[:-2]) for item in value]
+        return [decode(item, kind[:-2], node_types) for item in value]
     if kind in ("integer", "long"):
         if type(value) is not int:
             raise ValueError("Integer input expected")
@@ -53,11 +54,17 @@ def decode(value, kind):
             return None
         if not isinstance(value, list) or len(value) > MAX_NODES:
             raise ValueError("Linked list must be a bounded JSON array")
-        dummy = tail = ListNode()
+        head = tail = None
         for item in value:
-            tail.next = ListNode(decode(item, "integer"))
-            tail = tail.next
-        return dummy.next
+            node = list_type(decode(item, "integer", node_types))
+            if tail is None:
+                head = node
+            else:
+                tail.next = node
+            tail = node
+        if tail is not None:
+            tail.next = None
+        return head
     elif kind == "TreeNode":
         if value is None or value == []:
             return None
@@ -67,7 +74,7 @@ def decode(value, kind):
             if any(item is not None for item in value):
                 raise ValueError("Tree has nodes without a root")
             return None
-        root = TreeNode(decode(value[0], "integer"))
+        root = tree_type(decode(value[0], "integer", node_types))
         queue = collections.deque([root])
         index = 1
         while queue and index < len(value):
@@ -78,7 +85,7 @@ def decode(value, kind):
                 item = value[index]
                 index += 1
                 if item is not None:
-                    child = TreeNode(decode(item, "integer"))
+                    child = tree_type(decode(item, "integer", node_types))
                     setattr(node, side, child)
                     queue.append(child)
         if any(item is not None for item in value[index:]):
@@ -88,7 +95,8 @@ def decode(value, kind):
         raise ValueError("Unsupported input type")
     return value
 
-def encode(value, active=None, budget=None):
+def encode(value, active=None, budget=None, node_types=(ListNode, TreeNode)):
+    list_type, tree_type = node_types
     if active is None:
         active, budget = set(), [MAX_NODES]
     budget[0] -= 1
@@ -105,40 +113,40 @@ def encode(value, active=None, budget=None):
         raise ValueError("Result contains a cycle")
     active.add(identity)
     try:
-        if isinstance(value, ListNode):
+        if isinstance(value, list_type):
             result, seen = [], set()
             while value is not None:
-                if not isinstance(value, ListNode) or id(value) in seen:
+                if not isinstance(value, list_type) or id(value) in seen:
                     raise ValueError("Linked list contains a cycle or invalid node")
                 seen.add(id(value))
                 if len(seen) > MAX_NODES:
                     raise ValueError("Linked list exceeds the node limit")
-                result.append(encode(value.val, active, budget))
+                result.append(encode(value.val, active, budget, node_types))
                 value = value.next
             return result
-        if isinstance(value, TreeNode):
+        if isinstance(value, tree_type):
             result, seen, queue = [], set(), collections.deque([value])
             while queue:
                 node = queue.popleft()
                 if node is None:
                     result.append(None)
                     continue
-                if not isinstance(node, TreeNode) or id(node) in seen:
+                if not isinstance(node, tree_type) or id(node) in seen:
                     raise ValueError("Tree contains a cycle or shared node")
                 seen.add(id(node))
                 if len(seen) > MAX_NODES:
                     raise ValueError("Tree exceeds the node limit")
-                result.append(encode(node.val, active, budget))
+                result.append(encode(node.val, active, budget, node_types))
                 queue.extend((node.left, node.right))
             while result and result[-1] is None:
                 result.pop()
             return result
         if isinstance(value, (list, tuple)):
-            return [encode(item, active, budget) for item in value]
+            return [encode(item, active, budget, node_types) for item in value]
         if isinstance(value, dict):
             if not all(isinstance(key, str) for key in value):
                 raise ValueError("Object result keys must be strings")
-            return {key: encode(item, active, budget) for key, item in value.items()}
+            return {key: encode(item, active, budget, node_types) for key, item in value.items()}
         raise ValueError("Unsupported result value")
     finally:
         active.remove(identity)
@@ -150,19 +158,27 @@ def execute(config, solution, results):
     namespace.update({"collections": collections, "heapq": heapq, "itertools": itertools, "math": math, "functools": functools, "bisect": bisect, "random": random, "statistics": statistics, "operator": operator, "re": re, "string": string})
     loaded = runpy.run_path(str(solution), init_globals=namespace)
     metadata = config["metadata"]
+    required_nodes = {entry.get("type", "").replace("[]", "") for entry in
+                      [*metadata["params"], metadata.get("return") or {}]}
+    bindings = (loaded.get("ListNode", ListNode), loaded.get("TreeNode", TreeNode))
+    node_types = tuple(binding if isinstance(binding, type) else default
+                       for binding, default in zip(bindings, (ListNode, TreeNode)))
     total_bytes = 0
     with results.open("x", encoding="utf-8") as output:
         for index, raw in enumerate(config["cases"]):
             try:
-                arguments = [decode(value, parameter["type"]) for value, parameter in zip(raw, metadata["params"])]
+                for name, binding in zip(("ListNode", "TreeNode"), bindings):
+                    if name in required_nodes and not isinstance(binding, type):
+                        raise ValueError(f"{name} must be a class with the official-compatible constructor")
+                arguments = [decode(value, parameter["type"], node_types) for value, parameter in zip(raw, metadata["params"])]
                 if "Solution" in loaded:
                     function = getattr(loaded["Solution"](), metadata["name"])
                 else:
                     function = loaded[metadata["name"]]
                 value = function(*arguments)
-                record = {"case": index + 1, "ok": True, "value": encode(value)}
+                record = {"case": index + 1, "ok": True, "value": encode(value, node_types=node_types)}
                 if (metadata.get("return") or {}).get("type") == "void":
-                    record["argumentsAfterCall"] = encode(arguments)
+                    record["argumentsAfterCall"] = encode(arguments, node_types=node_types)
                 line = json.dumps(record, ensure_ascii=False, allow_nan=False)
             except Exception as error:
                 line = json.dumps({"case": index + 1, "ok": False, "error": f"{type(error).__name__}: {error}"[:1000]}, ensure_ascii=False)
