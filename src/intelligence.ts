@@ -29,13 +29,13 @@ function range(doc: Text, value: unknown) {
   const from = offset(doc, value.start), to = offset(doc, value.end);
   return from !== null && to !== null && from <= to ? { from, to } : null;
 }
-function completionChanges(doc:Text,item:Record<string,any>,from:number,to:number){
+export function completionChanges(doc:Text,item:Record<string,any>,from:number,to:number){
   if(item.insertTextFormat===2)return null;
   const primary=object(item.textEdit)?item.textEdit:null;
   const span=primary?range(doc,primary.range??primary.replace??primary.insert):{from,to};
   const insert=primary?.newText??item.insertText??item.label;
   if(!span||typeof insert!=="string"||insert.length>65536||span.from>to||span.to<from)return null;
-  const changes=[{...span,insert}];
+  const main={...span,insert},changes=[main];
   if(item.additionalTextEdits!==undefined){
     if(!Array.isArray(item.additionalTextEdits)||item.additionalTextEdits.length>20)return null;
     for(const edit of item.additionalTextEdits){
@@ -44,9 +44,9 @@ function completionChanges(doc:Text,item:Record<string,any>,from:number,to:numbe
       changes.push({...r,insert:edit.newText});
     }
   }
-  changes.sort((a,b)=>a.from-b.from||a.to-b.to);
-  for(let i=1;i<changes.length;i++)if(changes[i].from<changes[i-1].to||changes[i].from===changes[i-1].from)return null;
-  return {changes,anchor:span.from+insert.length+changes.filter(c=>c.from<span.from).reduce((sum,c)=>sum+c.insert.length-(c.to-c.from),0)};
+  changes.sort((a,b)=>a.from-b.from||a.to-b.to||Number(a===main)-Number(b===main));
+  for(let i=1;i<changes.length;i++)if(changes[i].from<changes[i-1].to)return null;
+  return {changes,anchor:span.from+insert.length+changes.filter(c=>c!==main&&(c.from<span.from||c.from===span.from&&c.to===c.from)).reduce((sum,c)=>sum+c.insert.length-(c.to-c.from),0)};
 }
 function content(value: unknown): string {
   if (typeof value === "string") return value.slice(0, 32768);
@@ -159,7 +159,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           info: content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
           apply(target) {
             const ticket=++completionApplyGeneration;
-            const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.main.head===context.pos&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
+            const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.main.head===context.pos&&target.state.selection.main.empty&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
             if(!current())return;
             void (async()=>{
               const resolved=resolve?await invoke<unknown>("language_completion_resolve",{id,version:askedVersion,token}):item;
@@ -262,8 +262,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     semanticField, semanticTheme,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventHandlers({ compositionstart(){++completionApplyGeneration;return false;}, mousedown(event, target) {
+    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
+    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;return false;}, compositionstart(){++completionApplyGeneration;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;

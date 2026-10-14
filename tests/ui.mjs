@@ -1475,7 +1475,7 @@ try {
   await semanticPage.evaluate(async()=>{
     const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
     const {EditorState}=await import("/node_modules/.vite/deps/@codemirror_state.js");
-    const {languageIntelligence}=await import("/src/intelligence.ts");
+    const {languageIntelligence,completionChanges}=await import("/src/intelligence.ts");
     const {rust}=await import("/node_modules/.vite/deps/@codemirror_lang-rust.js");
     const {basicSetup}=await import("/node_modules/.vite/deps/codemirror.js");
     const state=window.__semanticTest={version:1,requests:0,active:0,maxActive:0,defer:true,reply:null,revision:0,fail:true};
@@ -1607,11 +1607,16 @@ try {
     const client=languageIntelligence("rust",message=>state.status.push(message),()=>{});
     const view=new EditorView({state:EditorState.create({doc:state.text,extensions:[basicSetup,rust(),indentUnit.of("    "),indentGuides,client.extensions,EditorView.theme({".cm-scroller":{maxHeight:"240px",overflow:"auto"}})]}),parent:document.querySelector("#editor")});
     state.client=client;state.view=view;state.accept=()=>acceptCompletion(view);state.columns=indentationColumns;
+    state.boundaryCheck=async()=>{const {completionChanges}=await import("/src/intelligence.ts");const doc=EditorState.create({doc:"HashM"}).doc;const result=completionChanges(doc,{label:"HashMap",textEdit:{range:{start:{line:0,character:0},end:{line:0,character:5}},newText:"HashMap"},additionalTextEdits:[{range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"use std::collections::HashMap;\n"}]},0,5);const change=EditorState.create({doc:"HashM"}).update({changes:result.changes,selection:{anchor:result.anchor}});return {text:change.state.doc.toString(),cursor:change.state.selection.main.head};};
     await client.connect(view);view.dispatch({selection:{anchor:view.state.doc.line(2).to}});view.focus();
   });
+  const boundary=await inputPage.evaluate(()=>window.__inputTest.boundaryCheck());
+  assert.equal(boundary.text,"use std::collections::HashMap;\nHashMap");
+  assert.equal(boundary.cursor,boundary.text.length,"same-offset import precedes primary and cursor maps correctly");
   await inputPage.keyboard.press("Control+Space");
   await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
-  await inputPage.evaluate(()=>window.__inputTest.accept());
+  await inputPage.waitForTimeout(150);
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.accept()),true,"visible completion is accepted after CodeMirror interaction delay");
   await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
   assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","unresolved acceptance inserts nothing");
   await inputPage.evaluate(()=>window.__inputTest.reply());
@@ -1620,7 +1625,8 @@ try {
   await inputPage.keyboard.press("Control+z");
   assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","atomic import and primary edit undo together");
   await inputPage.keyboard.press("Control+Space");await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
-  await inputPage.evaluate(()=>{window.__inputTest.reply=null;window.__inputTest.accept();});
+  await inputPage.waitForTimeout(150);
+  assert.equal(await inputPage.evaluate(()=>{window.__inputTest.reply=null;return window.__inputTest.accept();}),true);
   await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
   await inputPage.keyboard.press("ArrowLeft");
   await inputPage.evaluate(()=>window.__inputTest.reply());

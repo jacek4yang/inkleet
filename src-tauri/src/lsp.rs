@@ -8,7 +8,7 @@ pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, a
 struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
     id:u64, client:Client, uri:String, language:String, context:inkleet_managed_env::lsp_scaffold::Context, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
-    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, completion_resolve:bool, completion_cache:Mutex<crate::completion_cache::CompletionCache>, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
+    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, completion_resolve:bool, completion_generation:AtomicU64, completion_cache:Mutex<crate::completion_cache::CompletionCache>, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
@@ -43,6 +43,7 @@ impl Services {
     pub fn request(&self,id:u64,version:u32,kind:&str,line:u32,character:u32,new_name:Option<String>)->Result<Value>{
         let method=match kind{"hover"=>"textDocument/hover","completion"=>"textDocument/completion","definition"=>"textDocument/definition","signatureHelp"=>"textDocument/signatureHelp","rename"=>"textDocument/rename","references"=>"textDocument/references",_=>return Err("不支持此语言服务请求".into())};
         let session=self.session(id)?;
+        let completion_generation=if kind=="completion"{session.completion_generation.fetch_update(Ordering::Relaxed,Ordering::Relaxed,|n|n.checked_add(1)).map_err(|_|"补全请求编号已耗尽")?+1}else{0};
         let prefix={
             let document=session.document.lock().map_err(|_|"文档状态不可用")?;
             if document.version!=version{return Err("文档已更新，请重试".into());}
@@ -70,7 +71,7 @@ impl Services {
             if document.version!=version{return Err("源码已改变，请重新查找引用".into());}
             return crate::lsp_document::references(&response,&session.uri,prefix,&document.text);
         }
-        if kind=="completion"&&session.completion_resolve{session.completion_cache.lock().map_err(|_|"补全缓存不可用")?.remember(&mut response,version);}
+        if kind=="completion"&&session.completion_resolve{session.completion_cache.lock().map_err(|_|"补全缓存不可用")?.remember(&mut response,version,completion_generation);}
         crate::lsp_document::response(kind,&mut response,prefix);
         if kind=="definition"{
             crate::lsp_document::definition(&mut response,&session.uri,prefix);
@@ -215,7 +216,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let roots=launch.roots;
         let started_uri=uri.clone();
-        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,completion_resolve,completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,completion_resolve,completion_generation:AtomicU64::new(0),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
