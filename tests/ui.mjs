@@ -1577,14 +1577,7 @@ try {
   await inputPage.route("**/input-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor' style='width:600px'></div></body></html>"}));
   await inputPage.goto("http://127.0.0.1:5173/input-test");
   await inputPage.evaluate(async()=>{
-    const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
-    const {EditorState}=await import("/node_modules/.vite/deps/@codemirror_state.js");
-    const {basicSetup}=await import("/node_modules/.vite/deps/codemirror.js");
-    const {indentGuides,indentationColumns}=await import("/src/indent-guides.ts");
-    const {indentUnit}=await import("/node_modules/.vite/deps/@codemirror_language.js");
-    const {acceptCompletion}=await import("/node_modules/.vite/deps/@codemirror_autocomplete.js");
-    const {languageIntelligence}=await import("/src/intelligence.ts");
-    const {rust}=await import("/node_modules/.vite/deps/@codemirror_lang-rust.js");
+    const {EditorView,EditorState,basicSetup,indentGuides,indentationColumns,indentUnit,acceptCompletion,completionStatus,selectedCompletionIndex,languageIntelligence,rust}=await import("/tests/input-harness.ts");
     const state=window.__inputTest={version:1,resolves:0,reply:null,status:[],text:"fn example() {\n    let _map = HashM\n}",defer:true};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
@@ -1606,7 +1599,7 @@ try {
     }};
     const client=languageIntelligence("rust",message=>state.status.push(message),()=>{});
     const view=new EditorView({state:EditorState.create({doc:state.text,extensions:[basicSetup,rust(),indentUnit.of("    "),indentGuides,client.extensions,EditorView.theme({".cm-scroller":{maxHeight:"240px",overflow:"auto"}})]}),parent:document.querySelector("#editor")});
-    state.client=client;state.view=view;state.accept=()=>acceptCompletion(view);state.columns=indentationColumns;
+    state.client=client;state.view=view;state.accept=()=>acceptCompletion(view);state.columns=indentationColumns;state.completionStatus=()=>completionStatus(view);state.selectedIndex=()=>selectedCompletionIndex(view);
     state.boundaryCheck=async()=>{const {completionChanges}=await import("/src/intelligence.ts");const doc=EditorState.create({doc:"HashM"}).doc;const result=completionChanges(doc,{label:"HashMap",textEdit:{range:{start:{line:0,character:0},end:{line:0,character:5}},newText:"HashMap"},additionalTextEdits:[{range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"use std::collections::HashMap;\n"}]},0,5);const change=EditorState.create({doc:"HashM"}).update({changes:result.changes,selection:{anchor:result.anchor}});return {text:change.state.doc.toString(),cursor:change.state.selection.main.head};};
     await client.connect(view);view.dispatch({selection:{anchor:view.state.doc.line(2).to}});view.focus();
   });
@@ -1617,7 +1610,7 @@ try {
   await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
   await inputPage.waitForTimeout(150);
   await writeFile("evidence/completion-before-accept.json",JSON.stringify(await inputPage.evaluate(()=>({focused:window.__inputTest.view.hasFocus,composing:window.__inputTest.view.composing,text:window.__inputTest.view.state.doc.toString(),options:[...document.querySelectorAll('[role="option"]')].map(el=>el.outerHTML)})),null,2));
-  await inputPage.getByRole("option",{name:/HashMap/}).click();
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.accept()),true,"shared-module completion command accepts the visible candidate");
   await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
   assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","unresolved acceptance inserts nothing");
   await inputPage.evaluate(()=>window.__inputTest.reply());
@@ -1628,7 +1621,7 @@ try {
   await inputPage.keyboard.press("Control+Space");await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
   await inputPage.waitForTimeout(150);
   await inputPage.evaluate(()=>{window.__inputTest.reply=null;});
-  await inputPage.getByRole("option",{name:/HashMap/}).click();
+  await inputPage.keyboard.press("Enter");
   await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
   await inputPage.keyboard.press("ArrowLeft");
   await inputPage.evaluate(()=>window.__inputTest.reply());
