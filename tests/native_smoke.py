@@ -500,6 +500,7 @@ try:
         click(".debug-inspector > div:first-child > button")
         wait_for(lambda: element(".debug-variable"), "real variable values loaded")
         wait_for(lambda: element(".cm-debug-stopped"), "paused source line highlighted")
+        wait_for(lambda:element(".cm-execution-pointer svg"),"native SVG execution arrow")
         expression_input=element('[aria-label="调试表达式输入"]')
         cmd("POST",f"/element/{expression_input}/value",{"text":"len(values)","value":list("len(values)")})
         wait_for(lambda:cmd("GET",f"/element/{element('.debug-evaluate button[type=\"submit\"]')}/enabled"),"expression button enabled after native text input")
@@ -597,6 +598,28 @@ try:
         wait_for(lambda:watch_result()=="—","watch result invalidated on new pause")
         click('[aria-label="停止调试"]')
         wait_for(lambda:"调试结束" in text(".debug-panel"),"nested debugger stopped")
+        # A second real session preserves the ordinary step-in/out assertions above
+        # and independently validates capability-gated targeted step-in.
+        click_debug_action('[aria-label="开始调试"]')
+        wait_for(lambda:"已暂停" in text(".debug-panel"),"targeted step-in source breakpoint",seconds=45)
+        click_debug_action('[aria-label="选择函数步入"]')
+        def inner_target():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-targets>button"})
+            for node in nodes:
+                label=cmd("GET",f"/element/{node[EID]}/property/textContent")
+                if "inner" in label:return node[EID]
+            return None
+        target=wait_for(inner_target,"real debugpy inner function target")
+        reveal_debug_control(".debug-targets>button")
+        target=inner_target()
+        cmd("POST",f"/element/{target}/click",{})
+        wait_for(lambda:"inner" in stack_names(),"selected adapter target enters inner function")
+        wait_for(lambda:element(".cm-execution-pointer svg"),"targeted step-in moves execution arrow")
+        screenshot("python-smart-step-native.png")
+        click_debug_action('[aria-label="停止调试"]')
+        wait_for(lambda:"调试结束" in text(".debug-panel"),"targeted debugger stopped")
+        (evidence/"SMART_STEP_NATIVE_RESULT.txt").write_text("PASS: real private debugpy target discovery, original target selection, entry into inner function and execution arrow. Other adapters require independent capability validation.\\n")
+
         focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
@@ -651,6 +674,7 @@ try:
         click_debug_action('.debug-panel [aria-label="开始调试"]')
         wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
         wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
+        wait_for(lambda:element(".cm-execution-pointer svg"),"Java SVG execution arrow")
         def java_total():
             node=element('.debug-variable > button[aria-label="total"] + code')
             return cmd("GET",f"/element/{node}/property/textContent")
@@ -739,6 +763,7 @@ try:
                 click_debug_action('.debug-panel [aria-label="开始调试"]')
                 wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
                 wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
+                wait_for(lambda:element(".cm-execution-pointer svg"),f"{group} SVG execution arrow")
                 def local_total():
                     node=element('.debug-variable > button[aria-label="total"] + code')
                     return cmd("GET",f"/element/{node}/property/textContent")
