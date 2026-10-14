@@ -57,8 +57,9 @@ export function formatOnSave(options:Options){
         this.view.dispatch({changes:changeSet,annotations:[formattedTransaction.of(true),isolateHistory.of("full")],userEvent:"input.format"});
         options.report("");
       }catch(error){if(current())options.report("格式化未完成 · "+String(error).slice(0,220));}
-      finally{this.busy=false;const pending=this.pending;this.pending=null;if(pending&&!this.closed&&pending.generation===this.generation)void this.run(pending.explicit);}
+      finally{this.busy=false;const pending=this.takePending();if(pending&&!this.closed&&pending.generation===this.generation)void this.run(pending.explicit);}
     }
+    takePending(){const pending=this.pending;this.pending=null;return pending;}
     destroy(){this.closed=true;this.pending=null;++this.generation;clearTimeout(this.timer);this.cancelDiff();}
   }
   const plugin=ViewPlugin.fromClass(Controller);
