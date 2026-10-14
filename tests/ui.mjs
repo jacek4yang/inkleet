@@ -155,6 +155,11 @@ try {
   await page.getByRole("heading", { name: "Intel One Mono", exact: true }).waitFor();
   await page.getByRole("button", { name: "关闭字体说明", exact: true }).click();
   assert.equal(await page.locator(".editor-foot").count(), 0, "low-frequency actions are not permanently shown below the editor");
+  assert.equal(await page.locator(".code-pane > .lsp-status").count(),0,"LSP never overlays save toolbar");
+  assert.equal(await page.locator(".statusbar > .lsp-status").count(),1,"LSP belongs to global status");
+  const saveBounds=await page.getByRole("button",{name:"保存源码",exact:true}).boundingBox();
+  const lspBounds=await page.locator(".statusbar > .lsp-status").boundingBox();
+  assert.ok(lspBounds.y>=saveBounds.y+saveBounds.height,"LSP and save hit targets are separate");
   const beforeSettings = await editor.innerText();
   const settingsDialog = await openSettings(page, "语言与环境");
   await settingsDialog.getByRole("textbox", { name: "搜索设置" }).fill("导出");

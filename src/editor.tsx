@@ -136,5 +136,5 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
   }, [documentKey, language, label, connection, metadata]);
   useLayoutEffect(()=>{const view=liveView.current;if(view)view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});},[vimEnabled]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection, language, label, metadata]);
-  return <><div className="editor-host" ref={host} />{(language !== "markdown") && <button type="button" onClick={onSettings} className={"lsp-status " + (lspStatus.includes("已连接") ? "ready" : "unavailable")} data-status={lspStatus} aria-label="语言服务设置" title={lspStatus}><i /><span>LSP</span></button>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }

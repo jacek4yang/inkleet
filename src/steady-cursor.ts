@@ -7,7 +7,7 @@ export function steadyVimCursor(){
   private destroyed=false;
   private cm:ReturnType<typeof getCM>;
   private measure={read:()=>this.read(),write:(rects:{left:number;top:number;width:number;height:number}[])=>this.paint(rects)};
-  private schedule=()=>{if(!this.destroyed)this.view.requestMeasure(this.measure);};
+  private schedule=()=>{if(!this.destroyed){if(!this.cm?.state.vim?.insertMode||!this.view.hasFocus)this.layer.replaceChildren();this.view.requestMeasure(this.measure);}};
   private composing=()=>{this.view.dom.setAttribute("data-inkleet-composing","true");this.layer.replaceChildren();};
   private composed=()=>{this.view.dom.removeAttribute("data-inkleet-composing");this.schedule();};
   constructor(readonly view:EditorView){
