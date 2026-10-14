@@ -134,8 +134,11 @@ def focus_code_editor():
 def click(css):
     # Only known visible transport-sensitive controls use one OS click.
     # WebDriver retains auto-scroll for other controls and native options.
-    if css in (".pane-heading .actions button", '[data-action="local-execute"]', '[data-action="open-settings"]'):
-        return click_debug_action(css)
+    if css in (".pane-heading .actions button", '[data-action="local-execute"]', '[data-action="open-settings"]', '[aria-label="关闭设置"]'):
+        click_debug_action(css)
+        if css == '[aria-label="关闭设置"]':
+            wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":css}),"settings closes after one native pointer click")
+        return
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
         closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
