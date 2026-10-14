@@ -9,8 +9,9 @@ pub fn contextual_source(language:&str,text:&str,context:&Context)->(String,u32)
     (format!("{before}{base}{after}"),prefix+extra)
 }
 pub fn source(language:&str,text:&str)->(String,u32){
+    if language=="cpp"{let headers=inkleet_managed_env::cpp_harness::STANDARD_PRELUDE;return (format!("{headers}using namespace std;\n{text}"),headers.lines().count() as u32+1);}
+
     let prefix=match language{
-        "cpp"=>inkleet_managed_env::cpp_harness::STANDARD_PRELUDE,
         "c"=>"#include <stdlib.h>\n#include <stdio.h>\n#include <string.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <limits.h>\n#include <math.h>\n",
         _=>"",
     };
