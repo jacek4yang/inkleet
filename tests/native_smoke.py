@@ -35,8 +35,14 @@ def cmd(method, path, payload=None):
         action.get("type")=="key" and action.get("id","").endswith(("-completion","-source"))
         for action in payload.get("actions",[])
     )
+    read_only = method == "GET" or (method == "POST" and (path in ("/element", "/elements") or path.endswith("/elements")))
     try: return request(method, f"/session/{session}" + path, payload)
     except http.client.RemoteDisconnected:
+        if read_only:
+            with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
+                log.write(f"Retrying one read-only WebKit transport reset: {method} {path}\n")
+            time.sleep(.3)
+            return request(method, f"/session/{session}" + path, payload)
         if not replayable: raise
         # These sequences begin at Home/End and only request read-only language
         # information. Never replay debugger steps, text entry or online actions.
@@ -46,7 +52,14 @@ def cmd(method, path, payload=None):
         time.sleep(.3)
         return request(method, f"/session/{session}" + path, payload)
 def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
-def text(css): return cmd("GET",f"/element/{element(css)}/text")
+def text(css):
+    suffix = "/attribute/data-status" if css == ".lsp-status" else "/text"
+    return cmd("GET",f"/element/{element(css)}" + suffix)
+def settings_action(category, css):
+    click('[data-action="open-settings"]')
+    node=cmd("POST","/element",{"using":"xpath","value":f"//nav[@aria-label='设置分类']/button[text()='{category}']"})[EID]
+    cmd("POST",f"/element/{node}/click",{})
+    click(css)
 def source_text(css):
     # WebDriver rendered text may normalize leading whitespace. Read textContent
     # of the visible CodeMirror lines, then independently check the saved file.
@@ -56,7 +69,7 @@ def source_text(css):
 def click(css):
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
-        closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner header > button:last-child")
+        closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
         selection=(css.startswith("select[") and " option[value=" in css) or css in ('[data-local-tab="run"]','[data-local-tab="debug"]')
         if not (closing or selection): raise
         with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
@@ -148,11 +161,11 @@ try:
     wait_for(lambda: text(note) == "# Native note", "return from preview preserves original Markdown")
 
     notes.write_text("# Real external note update")
-    click(".notes-heading button:last-child")
+    settings_action("笔记", '[data-setting-action="refresh-notes"]')
     wait_for(lambda:text(note)=="# Real external note update","manual refresh adopts actual external notes file")
     assert source.read_text()==marker,"refreshing notes changed source"
     notes.write_text("# Native note")
-    click(".notes-heading button:last-child")
+    settings_action("笔记", '[data-setting-action="refresh-notes"]')
     wait_for(lambda:text(note)=="# Native note","second external refresh keeps fresh persisted baseline")
     (evidence/"EXTERNAL_NOTES_RESULT.txt").write_text("PASS: actual native notes file changed outside the editor, explicit refresh adopts it without modifying source; subsequent refresh and restart retain the correct baseline. Actual Typora process launching is not verified.\n")
 
@@ -192,7 +205,7 @@ try:
     wait_for(lambda: notes.read_text()=="# Resolved note","blocked save queue resumes on reviewed baseline")
     (evidence/"CONFLICT_GUI_RESULT.txt").write_text("PASS: actual native comparison, concurrent external-change refusal, explicit file-version choice, two-version recovery snapshot, editor reload and subsequent atomic save.\n")
 
-    click('[data-action="notes-recovery"]')
+    settings_action("笔记", '[data-action="notes-recovery"]')
     wait_for(lambda:element(".file-recovery"),"native recovery history")
     wait_for(lambda:element(".recovery-list button:first-child"),"native recovery records loaded")
     click(".recovery-list button:first-child")
@@ -210,7 +223,7 @@ try:
 
     (evidence/"RESULT.txt").write_text("PASS: real Linux Tauri/WebKitGTK launch, native IPC, plain source and notes save, process restart restore, external conflict preserving both texts. No LeetCode verification.\n")
     if os.environ.get("INKLEET_MANAGED_ENV") == "1":
-        click('[data-action="open-environments"]')
+        settings_action("语言与环境", '[data-action="open-environments"]')
         wait_for(lambda: element(".environment-summary button"), "environment manager opened")
         click(".environment-summary button")
         wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["python","node","pyright","debugpy"]), "three verified private tools installed", seconds=300)
@@ -315,7 +328,10 @@ try:
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
         wait_for(lambda: '"value": 10' in text(".local-result"), "real private Python harness result", seconds=30)
-        assert "不代表通过力扣判题" in text(".local-runner")
+        assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.exit-code')}/attribute/title")
+        click('[aria-label="运行与调试设置"]')
+        wait_for(lambda:"本地输出不代表力扣判题结果" in text(".settings-hub"),"local judge distinction remains in runtime settings")
+        click('[aria-label="关闭设置"]')
         screenshot("python-local-run-native.png")
         (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
         click('[data-local-tab="debug"]')
@@ -346,14 +362,14 @@ try:
         (evidence/"DEBUG_GUI_RESULT.txt").write_text("PASS: real Linux GUI private debugpy, F9 breakpoint and paused call stack inspector. Stepping verified separately by protocol probe.\n")
         click(code)
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-update-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
-        apply_points=cmd("POST","/element",{"using":"xpath","value":"//button[text()='应用断点']"})[EID]
+        apply_points=cmd("POST","/element",{"using":"xpath","value":"//button[@aria-label='应用断点']"})[EID]
         cmd("POST",f"/element/{apply_points}/click",{})
         wait_for(lambda: "断点已更新" in text(".debug-panel"), "live debugger accepts cleared breakpoints")
         wait_for(lambda: "断点：未设置。" in text(".debug-panel"), "cleared breakpoint list is reflected in actual UI")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-stop-keys","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
         wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
-        click(".local-runner header > button:last-child")
-        click('[data-action="open-environments"]')
+        click(".local-runner [aria-label='收起']")
+        settings_action("语言与环境", '[data-action="open-environments"]')
         wait_for(lambda: element('select[aria-label="开发环境语言"]'), "language-specific tool groups")
         click('select[aria-label="开发环境语言"] option[value="java"]')
         click(".environment-summary button")
@@ -414,7 +430,7 @@ try:
         cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-stop","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
         wait_for(lambda: "调试结束" in text(".debug-panel"),"Java debug stop")
         (evidence/"JAVA_DEBUG_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private Java debug core over stdio, original line 4 breakpoint, paused source highlight, total=0, real F10 variable update and Shift+F5 termination.\n")
-        click(".local-runner header > button:last-child")
+        click(".local-runner [aria-label='收起']")
         (evidence/"JAVA_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK/JDTLS install, ArrayList member completion and F12 read-only standard library source. Separate three-platform protocol checks compare returned source byte-for-byte with private JDK src.zip.\n")
         click('select[aria-label="编程语言"] option[value="rust"]')
         wait_for(lambda: text(code) == marker, "switching away preserves Rust draft and stops Python session")
@@ -426,7 +442,7 @@ try:
             ("cpp","cpp","clangd","void example() { vector<int> values; values.pu }","push_back","vector","vector.h"),
             ("c","c","clangd",'void example(void) { printf(""); struct { int value; } pair; pair.va }',"value","printf","stdio.h"),
         ]:
-            click('[data-action="open-environments"]')
+            settings_action("语言与环境", '[data-action="open-environments"]')
             wait_for(lambda: element("dialog.environments"), "environment dialog")
             environment_group="cpp" if group=="c" else group
             click(f'select[aria-label="开发环境语言"] option[value="{environment_group}"]')
@@ -435,7 +451,7 @@ try:
                 # Closing before Go finishes must not discard the queued gopls build.
                 click("dialog.environments header button")
                 time.sleep(1)
-                click('[data-action="open-environments"]')
+                settings_action("语言与环境", '[data-action="open-environments"]')
                 wait_for(lambda: element("dialog.environments"),"reopen ongoing Go installation")
                 click('select[aria-label="开发环境语言"] option[value="golang"]')
             wait_for(lambda: all("已安装" in text(f'[data-tool="{tool}"]') for tool in (
@@ -501,7 +517,7 @@ try:
                 cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-stop","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
                 wait_for(lambda: "调试结束" in text(".debug-panel"),f"{group} debugger stop")
                 (evidence/(group.upper()+"_DEBUG_GUI_RESULT.txt")).write_text(f"PASS: actual private {group} debugger GUI launch, original source breakpoint line 3, paused source highlight, local total=0, real F10 variable update and Shift+F5 termination.\n")
-                click(".local-runner header > button:last-child")
+                click(".local-runner [aria-label='收起']")
                 fill(code,code_text)
 
         click('select[aria-label="编程语言"] option[value="rust"]')

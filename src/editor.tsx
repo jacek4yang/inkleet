@@ -43,17 +43,18 @@ function syntax(language: Language | "markdown") {
 }
 type Props = {
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
-  label: string; onChange: (text: string) => void;
+  label: string; onChange: (text: string) => void; onStatus?: (status: string) => void; reconnectToken?: number; onSettings?: () => void;
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedLine?: number;
 };
-export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedLine = 0 }: Props) {
+export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedLine = 0, onStatus, reconnectToken = 0, onSettings }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [lspStatus, setLspStatus] = useState("");
-  const [connection, reconnect] = useState(0);
+  const connection = reconnectToken;
   const [source, setSource] = useState<Source | null>(null);
   const callback = useRef(onChange), pointCallback = useRef(onBreakpoints);
   const debugView = useRef<{ view: EditorView; stopped: (view: EditorView, line: number) => void } | null>(null);
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
+  useLayoutEffect(() => { onStatus?.(lspStatus); }, [lspStatus,onStatus]);
   useLayoutEffect(() => {
     const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
@@ -94,5 +95,5 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
     };
   }, [documentKey, language, label, connection, metadata]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedLine); }, [pausedLine, documentKey, connection]);
-  return <><div className="editor-host" ref={host} />{(language !== "markdown") && <div className="lsp-status" title="Tab 补全或缩进 · Shift+Tab 反缩进 · Escape 后 Tab 移出编辑器 · F2 重命名 · F12 定义 · Shift+F12 引用"><span role="status">{lspStatus}</span><button onClick={() => reconnect(n => n + 1)}>重连语言服务</button></div>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{(language !== "markdown") && <button type="button" onClick={onSettings} className={"lsp-status " + (lspStatus.includes("已连接") ? "ready" : "unavailable")} data-status={lspStatus} aria-label="语言服务设置" title={lspStatus}><i /><span>LSP</span></button>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }

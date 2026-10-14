@@ -133,3 +133,76 @@
 
 /* Tooltip portals must stay above sibling editor panels, but below native modal top layers. */
 body > div > .cm-tooltip { z-index: 1000; pointer-events: auto; }
+
+/* Minimal workbench: persistent UI is navigation, source and current status. */
+:root{font-family:system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif}
+.icon-button{width:30px;height:30px;padding:5px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:4px;flex-shrink:0}
+.icon-button svg{display:block;width:18px;height:18px}
+.icon-button:hover:not(:disabled){background:#e9e5de}
+.topbar{padding:0 12px}
+.topbar>div{gap:5px}
+.topbar .brand-group{gap:8px}
+.topbar strong{font-size:14px;font-weight:600}
+.topbar .login-area>button{font-size:12px;padding:4px 8px;border:0}
+.sidebar{padding:12px 10px}
+.search{margin-bottom:10px}
+.sidebar .search input{font-size:12px;padding:7px 9px}
+.problem-item{font-size:13px;padding:9px 8px}
+article{padding:20px 24px;line-height:1.65}
+article h1{font-size:22px;margin:10px 0 20px}
+article h3{font-size:14px}
+.code-pane{position:relative}
+.pane-heading{min-height:38px;padding:4px 10px}
+.pane-heading select{font-size:12px;padding:4px 7px;max-width:110px}
+.actions{gap:5px}
+.actions>button{font-size:12px;padding:4px 9px}
+.actions>.icon-button{padding:5px}
+.code-pane>.lsp-status{position:absolute;top:9px;left:126px;display:flex;gap:4px;align-items:center;border:0;background:transparent;padding:2px 3px;height:20px;font-size:10px;line-height:1;color:#8b847b;z-index:2}
+.lsp-status i{width:5px;height:5px;border-radius:50%;background:#b78945}
+.lsp-status.ready i{background:#659677}
+.statusbar{font-size:10px;padding:0 12px;min-height:24px}
+.notes-heading{justify-content:flex-end;background:transparent}
+.notes-heading>div{display:flex;gap:3px}
+.notes-heading strong{display:none}
+.notes-preview{padding-top:8px}
+.local-runner header{min-height:36px;padding:3px 8px}
+.local-runner header button[data-local-tab]{border:0;border-radius:0;font-size:12px;padding:5px 8px}
+.local-runner header button[aria-pressed=true]{border-bottom:2px solid #ac633f}
+.debug-panel>.local-actions{padding:4px 8px;gap:3px;border-bottom:1px solid #e6e0d7}
+.debug-panel>.local-actions>.icon-button{width:28px;height:28px;padding:5px}
+.debug-panel>.local-actions>.icon-button:nth-child(3){margin-left:8px}
+.debug-meta{font-size:10px;color:#8b847b}
+.debug-body>p[role=status]{font-size:12px;margin:6px 0}
+.debug-body{padding:6px 10px}
+.debug-inspector h4{font-size:11px;font-weight:500;text-transform:uppercase;color:#7c746a;margin:8px 0}
+.debug-inspector button{font-size:12px;padding:4px 6px;border:0}
+.debug-evaluate{align-items:end;gap:6px}
+.debug-evaluate label{font-size:11px}
+.debug-evaluate input{padding:5px 7px;font-family:var(--font-mono);font-size:12px}
+.local-runner textarea{font-family:var(--font-mono);font-size:12px}
+.settings-hub{width:min(760px,94vw);padding:0;max-height:82vh;border:1px solid #dcd5cb;border-radius:8px;color:#302b26;background:#faf9f5}
+.settings-hub>header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #e5ded5}
+.settings-hub h2{font-size:15px;margin:0}
+.settings-body{display:grid;grid-template-columns:150px minmax(0,1fr);min-height:360px;max-height:65vh}
+.settings-body>nav{padding:12px 8px;border-right:1px solid #e5ded5;background:#f3f0e9}
+.settings-body>nav button{display:block;width:100%;border:0;text-align:left;font-size:12px;padding:8px 10px;margin-bottom:2px}
+.settings-body>nav button[aria-current=page]{background:#e7dfd2}
+.settings-body>section{padding:16px;overflow:auto}
+.settings-body>section>input{width:100%;padding:8px 10px;background:transparent;border:1px solid #ded7cd;border-radius:5px;font-size:12px}
+.settings-actions{display:grid;gap:4px;margin-top:12px}
+.settings-actions button{display:flex;gap:10px;align-items:center;text-align:left;border:0;padding:10px;font-size:13px}
+.settings-service,.settings-reference{font-size:12px;line-height:1.7;color:#72695e}
+.settings-reference h3{font-size:12px}
+.settings-reference dl{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.settings-reference dd{margin:0;font-family:var(--font-mono);font-size:11px}
+@media(min-width:761px){.workbench{grid-template-columns:190px minmax(280px,1fr) minmax(350px,1.3fr);grid-template-rows:44px 38px minmax(0,1fr) 24px}.workbench.focus{grid-template-columns:0 minmax(280px,1fr) minmax(350px,1.4fr)}}
+@media(max-width:760px){.topbar{padding:0 8px}.topbar>div{gap:2px}.topbar .login-area>button{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.settings-body{grid-template-columns:108px minmax(0,1fr)}.settings-body>section{padding:10px}.code-pane>.lsp-status{left:124px}.notes-heading{min-height:34px}}
+
+.debug-variable button{display:inline-flex;align-items:center;gap:3px}.debug-variable button svg{width:12px;height:12px;flex-shrink:0}
+.settings-hub::backdrop{background:#24201b55}
+
+.reading article{padding:20px 24px;line-height:1.65}
+@media(max-width:760px){.statusbar>span:last-child{display:block;min-width:0;overflow:auto}.statusbar{padding:5px 10px}.reading article{padding:16px 20px}}
+@media(min-width:761px) and (max-width:1000px){.workbench{grid-template-columns:160px minmax(240px,1fr) minmax(310px,1.15fr)}.workbench.focus{grid-template-columns:0 minmax(240px,1fr) minmax(310px,1.2fr)}}
+
+.pane-heading .icon-button{padding:5px}.icon-button svg{flex-shrink:0}
