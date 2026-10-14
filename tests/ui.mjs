@@ -1552,6 +1552,7 @@ try {
   await commandCode.press("Control+Shift+p");
   const commandDialog=commandPage.getByRole("dialog",{name:"编辑器命令",exact:true});
   await commandDialog.waitFor();
+  assert.deepEqual(await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).evaluate(el=>{const s=getComputedStyle(el);return [s.outlineStyle,s.borderTopWidth,s.borderRadius];}),["none","0px","0px"],"palette input keeps a single quiet focus surface despite generic form rules");
   await commandPage.screenshot({path:"evidence/editor-command-palette.png"});
   await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).fill("全选");
   await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).press("Enter");
