@@ -1,0 +1,49 @@
+use serde_json::Value;
+use std::collections::HashMap;
+#[derive(Default)]
+pub struct CompletionCache{version:u32,next:u64,items:HashMap<u64,Value>}
+impl CompletionCache{
+    pub fn clear(&mut self){self.items.clear();}
+    pub fn remember(&mut self,value:&mut Value,version:u32){
+        self.items.clear();self.version=version;
+        let items=if value.is_array(){value.as_array_mut()}else{value.get_mut("items").and_then(Value::as_array_mut)};
+        let Some(items)=items else{return};let mut bytes=0usize;
+        for item in items.iter_mut().take(5000){
+            if !item.is_object(){continue;}
+            item.as_object_mut().unwrap().remove("_inkleetCompletion");
+            let Ok(encoded)=serde_json::to_vec(item)else{continue};
+            if encoded.len()>131072||bytes.saturating_add(encoded.len())>8*1024*1024{continue;}
+            let Some(id)=self.next.checked_add(1)else{break};self.next=id;bytes+=encoded.len();
+            self.items.insert(id,item.clone());item["_inkleetCompletion"]=Value::from(id);
+        }
+    }
+    pub fn get(&self,id:u64,version:u32)->Result<Value,String>{
+        if version!=self.version{return Err("补全快照已经过期".into());}
+        self.items.get(&id).cloned().ok_or_else(||"补全候选已经过期，请重新触发补全".into())
+    }
+}
+pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
+    if !resolved.is_object(){return Err("补全解析结果无效".into());}
+    for key in ["label","filterText","sortText","insertText","insertTextFormat","textEdit"]{
+        if original.get(key)!=resolved.get(key){return Err("补全解析改变了原始替换内容".into());}
+    }
+    Ok(())
+}
+#[cfg(test)]mod tests{
+    use super::*;use serde_json::json;
+    #[test]fn original_server_item_is_retained_and_handles_expire(){
+        let mut cache=CompletionCache::default();
+        let original=json!({"label":"HashMap","data":{"opaque":1},"textEdit":{"range":{"start":{"line":7,"character":2},"end":{"line":7,"character":7}},"newText":"HashMap"}});
+        let mut response=json!({"items":[original.clone()]});cache.remember(&mut response,3);
+        let id=response["items"][0]["_inkleetCompletion"].as_u64().unwrap();
+        assert_eq!(cache.get(id,3).unwrap(),original);assert!(cache.get(id,4).is_err());
+        cache.remember(&mut json!([{"label":"next"}]),3);assert!(cache.get(id,3).is_err());cache.clear();assert!(cache.items.is_empty());
+    }
+    #[test]fn cache_bounds_and_resolve_preserves_primary_edit(){
+        let mut cache=CompletionCache::default();let mut huge=json!([{"label":"x","data":"a".repeat(131073)}]);cache.remember(&mut huge,1);
+        assert!(cache.items.is_empty());assert!(huge[0].get("_inkleetCompletion").is_none());
+        let original=json!({"label":"HashMap","insertText":"HashMap"});
+        let mut resolved=original.clone();resolved["additionalTextEdits"]=json!([]);assert!(validate_resolved(&original,&resolved).is_ok());
+        resolved["insertText"]=json!("other");assert!(validate_resolved(&original,&resolved).is_err());
+    }
+}
