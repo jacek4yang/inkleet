@@ -35,7 +35,7 @@ def native_keys(payload):
     # transport. No mutation is retried; all source/selection assertions remain.
     sources=payload.get("actions",[])
     assert len(sources)==1 and sources[0].get("type")=="key", "unsupported native action source"
-    mapping={"\ue010":"End","\ue007":"Return","\ue008":"Shift_L","\ue004":"Tab","\ue003":"BackSpace","\ue009":"Control_L","\ue03c":"F12","\ue012":"Left","\ue011":"Home","\ue014":"Right","\ue032":"F2","\ue015":"Down","\ue039":"F9","\ue035":"F5","\ue00c":"Escape","\ue03a":"F10","z":"z"}
+    mapping={"\ue010":"End","\ue007":"Return","\ue008":"Shift_L","\ue004":"Tab","\ue003":"BackSpace","\ue009":"Control_L","\ue03c":"F12","\ue012":"Left","\ue011":"Home","\ue014":"Right","\ue032":"F2","\ue015":"Down","\ue039":"F9","\ue035":"F5","\ue00c":"Escape","\ue03a":"F10","z":"z"," ":"space"}
     command=["xdotool"];held=set();used=set()
     for action in sources[0].get("actions",[]):
         kind=action.get("type");key=mapping.get(action.get("value"))
