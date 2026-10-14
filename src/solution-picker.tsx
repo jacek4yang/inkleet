@@ -3,8 +3,8 @@ import {invoke,isTauri} from "@tauri-apps/api/core";
 import {Icon,IconButton} from "./icons";
 type Entry={id:string;name:string};
 type Operation={kind:"new"|"copy"|"rename";name:string;code:string;expected?:string};
-export function SolutionPicker({problem,language,value,code,template,disabled,onChange,onCreated}:{
- problem:string;language:string;value:string;code:string;template:string;disabled:boolean;
+export function SolutionPicker({problem,language,value,code,template,templateAvailable=true,disabled,onChange,onCreated}:{
+ problem:string;language:string;value:string;code:string;template:string;templateAvailable?:boolean;disabled:boolean;
  onChange:(id:string)=>void;onCreated:(entry:Entry,code:string)=>void;
 }){
  const [entries,setEntries]=useState<Entry[]>([{id:"default",name:"默认解答"}]),[error,setError]=useState(""),[loading,setLoading]=useState(false);
@@ -50,7 +50,7 @@ export function SolutionPicker({problem,language,value,code,template,disabled,on
   <details ref={menu} className="solution-menu">
    <summary aria-label="解答操作" title="解答操作"><Icon name="more"/></summary>
    <div>
-    <button disabled={disabled||loading||pending} onClick={()=>begin("new")}>新建解答</button>
+    <button title={templateAvailable?undefined:"官方模板不可用"} disabled={disabled||loading||pending||!templateAvailable} onClick={()=>begin("new")}>新建解答</button>
     <button disabled={disabled||loading||pending} onClick={()=>begin("copy")}>复制解答</button>
     <button disabled={disabled||loading||pending} onClick={()=>begin("rename")}>重命名</button>
     <button disabled={loading||pending} onClick={()=>{if(menu.current)menu.current.open=false;void refresh();}}>刷新</button>
