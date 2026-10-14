@@ -2,18 +2,23 @@ import {parameterNames,seedCases,validateCases,inputParts,displayResult,compactC
 import { useResizablePanel } from "./resizable-panel";
 import type { DebugPosition } from "./debug-position";
 import { Icon, IconButton } from "./icons";
-import React, { useEffect, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { DebugPanel } from "./debug-panel";
 import type { Language } from "./domain";
 type Snapshot = { caseId?:string;caseName?:string;documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "compiling", "running", "canceling"].includes(r.phase);
+// Primitive props preserve each rendered result across source edits and fresh IPC arrays.
+const CaseResult = memo(function CaseResult({raw,index,caseName,multiple}:{raw:string;index:number;caseName?:string;multiple:boolean}){
+  const value=useMemo(()=>displayResult(raw,index),[raw,index]);
+  return <section className="case-result" title="本地结果不代表通过力扣判题"><header><span>{caseName??"用例 "+value.caseNumber}{caseName&&multiple?" · "+value.caseNumber:""}</span><span>{value.error?"执行失败":value.raw?"输出":"返回值"}</span></header>{value.error?<pre role="alert" className="error">{value.error}</pre>:<pre className="local-result">{value.value}</pre>}<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details></section>;
+});
 export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
   onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
 }) {
   const resize=useResizablePanel("local",!hidden);
-  const names=parameterNames(metadata),storageKey="inkleet.test-cases.v1:"+(documentKey??title+":"+language);
+  const names=useMemo(()=>parameterNames(metadata),[metadata]),storageKey="inkleet.test-cases.v1:"+(documentKey??title+":"+language);
   const [initial]=useState(()=>{
     const fallback=seedCases(sampleInput,exampleInputs,names);
     try{const raw=localStorage.getItem(storageKey);return {...(raw?validateCases(JSON.parse(raw)):{cases:fallback,selected:fallback[0].id}),error:"",blocked:false};}
@@ -31,7 +36,7 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
   function chooseCase(id:string){setRename(null);updateCases(cases,id);}
   function addCase(){const next={id:crypto.randomUUID(),name:"用例 "+(cases.length+1),input:currentCase.input};updateCases([...cases,next],next.id);}
   function removeCase(){if(cases.length===1)return;const next=cases.filter(item=>item.id!==selected);updateCases(next,next[0].id);}
-  const parts=inputParts(input,names);
+  const parts=useMemo(()=>inputParts(input,names),[input,names]);
   const [pane, setPane] = useState<"run" | "debug">("run");
   const [result, setResult] = useState<Result | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -95,10 +100,7 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     {!snapshot && result && <p className="muted">上次运行</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
     {result?.truncated && <p role="alert">输出达到上限，已截断并终止进程。</p>}
-    {result?.results.map((raw,index)=>{
-      const value=displayResult(raw,index);
-      return <section key={index} className="case-result" title="本地结果不代表通过力扣判题"><header><span>{snapshot?.caseName??"用例 "+value.caseNumber}{snapshot?.caseName&&result.results.length>1?" · "+value.caseNumber:""}</span><span>{value.error?"执行失败":value.raw?"输出":"返回值"}</span></header>{value.error?<pre role="alert" className="error">{value.error}</pre>:<pre className="local-result">{value.value}</pre>}<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details></section>;
-    })}
+    {result?.results.map((raw,index)=><CaseResult key={index} raw={raw} index={index} caseName={snapshot?.caseName} multiple={result.results.length>1}/>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
 
