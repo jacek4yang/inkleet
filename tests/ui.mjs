@@ -1974,6 +1974,14 @@ try {
   await providerPage.keyboard.type("N");
   await providerPage.waitForFunction(()=>window.__providerTest.calls.length>=2);
   assert.equal(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1).triggerKind),1,"late response after Escape cannot restore incomplete context");
+  await providerPage.keyboard.press("Escape");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.calls=[];s.defer=true;s.reply=null;s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:"item"},selection:{anchor:4}});s.view.focus();s.client.commands.completion(s.view);});
+  await providerPage.waitForFunction(()=>typeof window.__providerTest.reply==="function");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.oldReply=s.reply;s.reply=null;s.client.commands.completion(s.view);s.oldReply();});
+  await providerPage.waitForFunction(()=>window.__providerTest.calls.length>=2&&typeof window.__providerTest.reply==="function");
+  assert.equal(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1).triggerKind),1,"explicit command replaces a pending completion");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.defer=false;s.reply();});
+  await providerPage.getByRole("option",{name:"itemName",exact:true}).waitFor();
   await providerPage.evaluate(()=>{window.__providerTest.client.destroy();window.__providerTest.view.destroy();});
   await providerPage.close();
   await writeFile("evidence/COMPLETION_CONTEXT_UI_RESULT.txt","PASS: actual CodeMirror keyboard manual context1, adjacent incomplete context3, provider-specific > context2 and manual override. Mocked IPC; native adapter verification is a separate required check.\\n");
