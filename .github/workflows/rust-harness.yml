@@ -1,8 +1,8 @@
 name: Rust local test harness
 on:
   push:
-    branches: [feat/first-workbench, main]
-    paths: ['crates/managed-env/src/rust_harness.rs', 'crates/managed-env/src/rust_harness_support.rs', 'crates/managed-env/examples/rust_harness_probe.rs', '.github/workflows/rust-harness.yml']
+    branches: [feat/first-workbench, main, feat/language-adapter-contract]
+    paths: ['crates/managed-env/src/lsp_scaffold.rs', 'crates/managed-env/src/rust_harness.rs', 'crates/managed-env/src/rust_harness_support.rs', 'crates/managed-env/examples/rust_harness_probe.rs', '.github/workflows/rust-harness.yml']
   workflow_dispatch:
 permissions:
   contents: read

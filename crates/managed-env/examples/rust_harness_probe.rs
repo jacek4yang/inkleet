@@ -68,6 +68,11 @@ fn case(install:&std::collections::HashMap<&str,PathBuf>,root:&Path,index:usize,
     case(&install,&root,7,"use std::{rc::Rc,cell::RefCell}; impl Solution{pub fn identity(v:Option<Rc<RefCell<TreeNode>>>)->Option<Rc<RefCell<TreeNode>>>{let n=v.as_ref().unwrap();n.borrow_mut().left=Some(n.clone());v}}","TreeNode","[1]",None,"move",false)?;
     case(&install,&root,8,"impl Solution{pub fn identity(v:Vec<char>)->Vec<char>{v}}","character[]",r#"["中","\"","🦀"]"#,Some(json!(["中","\"","🦀"])),"move",false)?;
     case(&install,&root,9,"impl Solution{pub fn identity(v:Option<Box<ListNode>>)->Option<Box<ListNode>>{v}}","ListNode","[]",Some(Value::Null),"move",false)?;
-    println!("RUST_HARNESS_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"cases":10,"arrays":true,"nodes":true,"exactInteger":true,"unicode":true,"mutableBorrow":true,"panic":true,"cycleRejected":true,"systemPathUsed":false}));
+    case(&install,&root,10,"use std::collections::HashMap; impl Solution{pub fn identity(v:Vec<i32>)->Vec<i32>{let m:HashMap<usize,i32>=v.into_iter().enumerate().collect();(0..m.len()).map(|i|m[&i]).collect()}}","integer[]","[3,-1,8]",Some(json!([3,-1,8])),"move",false)?;
+    case(&install,&root,11,"use std::collections::{HashMap as Map,HashSet}; pub struct Solution; impl Solution{pub fn identity(v:Vec<i32>)->Vec<i32>{let m:Map<usize,i32>=v.into_iter().enumerate().collect();(0..m.len()).map(|i|m[&i]).collect()}}","integer[]","[3,-1,8]",Some(json!([3,-1,8])),"move",false)?;
+    case(&install,&root,12,"impl Solution{pub fn identity(v:Vec<i32>)->Vec<i32>{let m:std::collections::HashMap<usize,i32>=v.into_iter().enumerate().collect();(0..m.len()).map(|i|m[&i]).collect()}}","integer[]","[3,-1,8]",Some(json!([3,-1,8])),"move",false)?;
+    let authored_nodes=format!("pub struct Solution;\n{}\nimpl Solution{{pub fn identity(v:Option<Box<ListNode>>)->Option<Box<ListNode>>{{v}}}}",rust_harness::LIST_TYPES);
+    case(&install,&root,13,&authored_nodes,"ListNode","[1,2,3]",Some(json!([1,2,3])),"move",false)?;
+    println!("RUST_HARNESS_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"cases":14,"explicitImports":true,"authoredHelpers":true,"arrays":true,"nodes":true,"exactInteger":true,"unicode":true,"mutableBorrow":true,"panic":true,"cycleRejected":true,"systemPathUsed":false}));
     Ok(())
 }

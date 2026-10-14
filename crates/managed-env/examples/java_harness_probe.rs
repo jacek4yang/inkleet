@@ -38,6 +38,10 @@ fn case(runtime:&inkleet_managed_env::java_runtime::Runtime,root:&Path,index:usi
     case(&runtime,&root,7,"class Solution{TreeNode identity(TreeNode v){v.left=v;return v;}}","TreeNode","[1]",None,"TreeNode")?;
     case(&runtime,&root,8,"class Solution{List<List<Integer>> identity(int v){return List.of(List.of(v),List.of());}}","integer","1",Some(json!([[1],[]])),"list<list<integer>>")?;
     case(&runtime,&root,9,"class Solution{char[] identity(char[] v){return v;}}","character[]",r#"["中","\"","\n"]"#,Some(json!(["中","\"","\n"])),"character[]")?;
-    println!("JAVA_HARNESS_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"cases":10,"arrays":true,"nodes":true,"exactInteger":true,"unicode":true,"voidMutation":true,"exceptions":true,"cycleRejected":true,"genericLists":true,"systemPathUsed":false}));
+    case(&runtime,&root,10,"import java.util.List; class Solution{List<List<Integer>> identity(int v){return List.of(List.of(v),List.of());}}","integer","1",Some(json!([[1],[]])),"integer[][]")?;
+    case(&runtime,&root,11,"import java.util.List; class Solution{List<String> identity(String v){return List.of(v);}}","string",r#""中文""#,Some(json!(["中文"])),"string[]")?;
+    case(&runtime,&root,12,"import java.util.HashMap; class Solution{int identity(int v){HashMap<String,Integer> m=new HashMap<>();m.put(\"v\",v);return m.get(\"v\");}}","integer","42",Some(json!(42)),"integer")?;
+    case(&runtime,&root,13,"class ListNode{int val;ListNode next;ListNode(int v,ListNode n){val=v;next=n;}} class Solution{ListNode identity(ListNode v){return v;}}","ListNode","[1,2,3]",Some(json!([1,2,3])),"ListNode")?;
+    println!("JAVA_HARNESS_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"cases":14,"officialCollectionMetadata":true,"explicitImports":true,"authoredHelpers":true,"arrays":true,"nodes":true,"exactInteger":true,"unicode":true,"voidMutation":true,"exceptions":true,"cycleRejected":true,"genericLists":true,"systemPathUsed":false}));
     Ok(())
 }

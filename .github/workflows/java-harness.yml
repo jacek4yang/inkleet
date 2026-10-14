@@ -1,8 +1,8 @@
 name: Java local test harness
 on:
   push:
-    branches: [feat/first-workbench, main]
-    paths: ['crates/managed-env/src/java_harness.rs', 'crates/managed-env/src/java_runtime.rs', 'crates/managed-env/src/java_launcher_windows.*', 'crates/managed-env/src/java_harness_support.java', 'crates/managed-env/examples/java_harness_probe.rs', '.github/workflows/java-harness.yml']
+    branches: [feat/first-workbench, main, feat/language-adapter-contract]
+    paths: ['crates/managed-env/src/lsp_scaffold.rs', 'crates/managed-env/src/java_harness.rs', 'crates/managed-env/src/java_runtime.rs', 'crates/managed-env/src/java_launcher_windows.*', 'crates/managed-env/src/java_harness_support.java', 'crates/managed-env/examples/java_harness_probe.rs', '.github/workflows/java-harness.yml']
   workflow_dispatch:
 permissions:
   contents: read
