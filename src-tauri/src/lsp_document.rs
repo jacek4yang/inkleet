@@ -10,7 +10,7 @@ pub fn contextual_source(language:&str,text:&str,context:&Context)->(String,u32)
 }
 pub fn source(language:&str,text:&str)->(String,u32){
     let prefix=match language{
-        "cpp"=>"#include <vector>\n#include <string>\n#include <algorithm>\n#include <array>\n#include <map>\n#include <unordered_map>\n#include <set>\n#include <unordered_set>\n#include <queue>\n#include <stack>\n#include <deque>\n#include <list>\n#include <tuple>\n#include <utility>\n#include <numeric>\n#include <functional>\n#include <limits>\n#include <climits>\n#include <cmath>\n#include <cstdint>\nusing namespace std;\n",
+        "cpp"=>inkleet_managed_env::cpp_harness::STANDARD_PRELUDE,
         "c"=>"#include <stdlib.h>\n#include <stdio.h>\n#include <string.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <limits.h>\n#include <math.h>\n",
         _=>"",
     };

@@ -24,6 +24,7 @@ fn case(zig:&Path,base:&Path,index:usize,source:&str,kind:&str,input:&str,expect
     let records=fs::read_to_string(work.join("results.jsonl")).map_err(|e|e.to_string())?;
     let record:Value=serde_json::from_str(records.trim()).map_err(|e|e.to_string())?;
     match expected{Some(value)=>{assert_eq!(record["ok"],true,"{record}");assert_eq!(if void{&record["argumentsAfterCall"]}else{&record["value"]},&value,"{record}");},None=>{assert_eq!(record["ok"],false,"{record}");assert!(record["error"].is_string());}}
+    assert_eq!(fs::read_to_string(work.join("solution.cpp")).map_err(|e|e.to_string())?,source,"source snapshot changed");
     println!("CPP_HARNESS_CASE {index} PASS");
     Ok(())
 }
@@ -40,6 +41,10 @@ fn case(zig:&Path,base:&Path,index:usize,source:&str,kind:&str,input:&str,expect
     case(&zig,&root,5,"class Solution{public:void identity(vector<int>& v){reverse(v.begin(),v.end());}};","integer[]","[1,2,3]",Some(json!([[3,2,1]])),true)?;
     case(&zig,&root,6,"class Solution{public:ListNode* identity(ListNode* n){n->next=n;return n;}};","ListNode","[1]",None,false)?;
     case(&zig,&root,7,"class Solution{public:TreeNode* identity(TreeNode* n){return n;}};","TreeNode","[]",Some(Value::Null),false)?;
-    println!("CPP_HARNESS_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"cases":8,"arrays":true,"list":true,"tree":true,"exactInteger":true,"escapedUnicode":true,"voidMutation":true,"cycleRejected":true,"systemPathUsed":false}));
+    case(&zig,&root,8,"#include <unordered_map>\nclass Solution{public:int identity(int n){std::unordered_map<int,int> m;m[1]=n;return m.at(1);}};","integer","42",Some(json!(42)),false)?;
+    case(&zig,&root,9,"struct ListNode{int val;ListNode* next;ListNode(int v):val(v),next(nullptr){}};class Solution{public:ListNode* identity(ListNode* n){return n;}};","ListNode","[1,2,3]",Some(json!([1,2,3])),false)?;
+    case(&zig,&root,10,"struct TreeNode{int val;TreeNode* left;TreeNode* right;TreeNode(int v):val(v),left(nullptr),right(nullptr){}};class Solution{public:TreeNode* identity(TreeNode* n){return n;}};","TreeNode","[1,null,2,3]",Some(json!([1,null,2,3])),false)?;
+    case(&zig,&root,11,"class Solution{public:string identity(string s){std::ostringstream out;out<<s;return out.str();}};","string",r#""中文""#,Some(json!("中文")),false)?;
+    println!("CPP_HARNESS_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"cases":12,"explicitImports":true,"authoredHelpers":true,"sourcePreserved":true,"arrays":true,"list":true,"tree":true,"exactInteger":true,"escapedUnicode":true,"voidMutation":true,"cycleRejected":true,"systemPathUsed":false}));
     Ok(())
 }
