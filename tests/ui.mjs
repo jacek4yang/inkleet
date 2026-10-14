@@ -13,18 +13,109 @@ async function openSettings(page, category) {
 
 const server = spawn("npm", ["run", "dev", "--", "--port", "5173"], { stdio: "inherit" });
 const browser = await chromium.launch();
+const fixtures = JSON.parse(await readFile(new URL("./fixtures/public-questions.json", import.meta.url), "utf8"));
+async function testPage(options) {
+  const page = await browser.newPage(options);
+  await page.addInitScript(items => { window.__fixtureQuestions = items; }, fixtures);
+  return page;
+}
 await mkdir("evidence", { recursive: true });
 try {
   for (let i = 0; i < 60; i++) {
     try { if ((await fetch("http://127.0.0.1:5173")).ok) break; } catch {}
     await new Promise(r => setTimeout(r, 500));
   }
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  // Fresh production startup has no built-in mock problem or hidden draft file.
+  const cataloguePage = await testPage({ viewport:{width:1440,height:900} });
+  await cataloguePage.addInitScript(() => {
+    window.isTauri=true;
+    window.__catalogueTest={requests:[],documents:[],saves:[]};
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      const state=window.__catalogueTest;
+      if(command==="load_recent_questions") return [];
+      if(command==="search_questions") return new Promise(resolve=>state.requests.push({args,resolve}));
+      if(command==="get_question") return {question:{...window.__fixtureQuestions[0],titleSlug:args.slug},cacheWarning:null,fromCache:false};
+      if(command==="load_document"){state.documents.push(args);return {code:null,notes:null};}
+      if(command==="save_text"){state.saves.push(args);return;}
+      if(command==="external_editor_supported")return false;
+      if(command==="open_login"||command==="cancel_login"||command==="stop_language_service")return;
+      if(command==="verify_login")return {username:"catalogue-test",account:"account-A",persistence:"memory-only"};
+      if(command==="list_judgements")return [];
+      throw Error("No service in catalogue test: "+command);
+    }};
+  });
+  await cataloguePage.goto("http://127.0.0.1:5173");
+  await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===1);
+  assert.equal(await cataloguePage.locator('[aria-label="代码编辑器"]').count(),0);
+  assert.deepEqual(await cataloguePage.evaluate(()=>window.__catalogueTest.documents),[]);
+  assert.equal(await cataloguePage.getByText("整数数组求和",{exact:true}).count(),0);
+  assert.equal(await cataloguePage.getByRole("combobox",{name:"完成状态",exact:true}).isDisabled(),true);
+  await cataloguePage.screenshot({path:"evidence/empty-workspace.png",fullPage:true});
+  await cataloguePage.evaluate(()=>{
+    const q=window.__fixtureQuestions[0];
+    window.__catalogueTest.requests[0].resolve({questions:[{frontendQuestionId:q.questionFrontendId,title:q.title,titleCn:q.translatedTitle,titleSlug:q.titleSlug,difficulty:"Easy",paidOnly:false,status:null}],total:1,hasMore:false});
+  });
+  await cataloguePage.locator('.question-sidebar [data-slug="inkleet-test-fixture"]').click();
+  await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).waitFor();
+  await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).fill("// retained while filtering");
+  await cataloguePage.getByRole("combobox",{name:"题目难度"}).selectOption("EASY");
+  await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===2);
+  await cataloguePage.getByRole("textbox",{name:"搜索题目",exact:true}).fill("new");
+  await cataloguePage.getByRole("button",{name:"搜索题库",exact:true}).click();
+  await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===3);
+  await cataloguePage.evaluate(()=>{
+    const row={frontendQuestionId:"2",title:"New response",titleCn:null,titleSlug:"new-result",difficulty:"Easy",paidOnly:false,status:null};
+    window.__catalogueTest.requests[2].resolve({questions:[row],total:1,hasMore:false});
+    window.__catalogueTest.requests[1].resolve({questions:[{...row,title:"Old response",titleSlug:"old-result"}],total:1,hasMore:false});
+  });
+  await cataloguePage.locator('.question-sidebar [data-slug="new-result"]').waitFor();
+  assert.equal(await cataloguePage.locator('.question-sidebar [data-slug="old-result"]').count(),0,"late filter response is discarded");
+  assert.equal(await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).innerText(),"// retained while filtering");
+  assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[2].args.difficulty),"EASY");
+  await cataloguePage.getByRole("button",{name:"登录力扣",exact:true}).click();
+  await cataloguePage.getByRole("button",{name:"已完成登录，校验会话",exact:true}).click();
+  await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===4);
+  assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[3].args.account),"account-A");
+  await cataloguePage.getByRole("combobox",{name:"完成状态",exact:true}).selectOption("AC");
+  await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===5);
+  assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[4].args.status),"AC");
+  await cataloguePage.getByRole("button",{name:"catalogue-test · 退出",exact:true}).click();
+  await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===6);
+  await cataloguePage.evaluate(()=>{
+    const row={frontendQuestionId:"3",title:"Prior account private progress",titleCn:null,titleSlug:"prior-account",difficulty:"Easy",paidOnly:false,status:"AC"};
+    window.__catalogueTest.requests[4].resolve({questions:[row],total:1,hasMore:false});
+    window.__catalogueTest.requests[3].resolve({questions:[row],total:1,hasMore:false});
+    window.__catalogueTest.requests[5].resolve({questions:[],total:0,hasMore:false});
+  });
+  await cataloguePage.getByText("没有匹配题目",{exact:true}).waitFor();
+  assert.equal(await cataloguePage.locator('.question-sidebar [data-slug="prior-account"]').count(),0,"logout invalidates all old account responses");
+  assert.equal(await cataloguePage.getByRole("combobox",{name:"完成状态",exact:true}).isDisabled(),true);
+  assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[5].args.status),"");
+  await cataloguePage.getByRole("group",{name:"题目列表",exact:true}).getByRole("button",{name:"最近",exact:true}).click();
+  assert.equal(await cataloguePage.locator('[data-problem="lc-900000001"]').count(),1,"opened question remains reachable without a fabricated catalogue");
+  await cataloguePage.close();
+  await writeFile("evidence/REAL_CATALOGUE_UI_RESULT.txt","PASS: fixture IPC only; production empty startup, no synthetic document writes, filtered real-schema list, stale search and account-result isolation, source retained while filtering. Live account authentication is not verified.\n");
+
+  const page = await testPage({ viewport: { width: 1440, height: 960 } });
+  // Fixtures live exclusively in tests and enter through the same cache IPC as real metadata.
+  await page.addInitScript(() => {
+    window.isTauri = true;
+    window.__TAURI_INTERNALS__ = { invoke: async (command) => {
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
+      if (command === "search_questions") return { questions:[],total:0,hasMore:false };
+      if (command === "load_document") return { code:null,notes:null };
+      if (command === "save_text" || command === "stop_language_service") return;
+      if (command === "external_editor_supported") return false;
+      if (command === "login_status") return null;
+      throw new Error("No native service in editor-only test fixture: " + command);
+    }};
+  });
   const errors = [];
   page.on("pageerror", e => errors.push(e.message));
   await page.goto("http://127.0.0.1:5173");
   const editor = page.getByRole("textbox", { name: "代码编辑器", exact: true });
-  await page.evaluate(() => document.fonts.ready);
+  await editor.waitFor({ state: "visible" });
+  await page.evaluate(async () => { await document.fonts.load('14px "Intel One Mono"'); await document.fonts.ready; });
   const fontLoaded = await page.evaluate(() => document.fonts.check('14px "Intel One Mono"'));
   assert.equal(fontLoaded, true, "必须实际加载内置 Intel One Mono");
   assert.ok((await editor.evaluate(el => getComputedStyle(el).fontFamily)).includes("Intel One Mono"));
@@ -202,7 +293,7 @@ try {
   assert.deepEqual(errors, []);
 
   // 仅模拟 IPC 的登录 UI 竞态测试；不冒充真实账号或原生登录验收。
-  const authPage = await browser.newPage();
+  const authPage = await testPage();
   const authErrors = [];
   authPage.on("pageerror", error => authErrors.push(error.message));
   await authPage.addInitScript(() => {
@@ -228,7 +319,7 @@ try {
         job.state = { state: "acknowledged", message: "测试：用户已核查，未重发" };
         return job;
       }
-      if (command === "load_recent_questions") return [];
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "search_questions") return { total: 1, hasMore: false, questions: [{
         frontendQuestionId: "T1", title: "UI Test", titleCn: "题库测试样例", titleSlug: "fixture-test", difficulty: "Easy", paidOnly: false
       }] };
@@ -267,7 +358,7 @@ try {
   await authPage.getByRole("button", { name: "中国站题库", exact: true }).click();
   await authPage.getByRole("textbox", { name: "搜索中国站题目" }).fill("test");
   await authPage.getByRole("button", { name: "搜索", exact: true }).click();
-  await authPage.getByRole("button", { name: /T1 题库测试样例/ }).click();
+  await authPage.getByRole("dialog", { name: "中国站题库", exact: true }).getByRole("button", { name: /T1 题库测试样例/ }).click();
   await authPage.getByRole("heading", { name: "题库测试样例", exact: true }).waitFor();
   assert.equal(await authPage.locator(".question-content script, .question-content img, .question-content iframe, .question-content a").count(), 0);
   assert.equal(await authPage.evaluate(() => !!window.__unsafeExecuted), false);
@@ -320,14 +411,15 @@ try {
 
 
   // 链接入口协议 fixture：测试竞态与草稿保护，不冒充真实中国站请求。
-  const linkPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const linkPage = await testPage({ viewport: { width: 390, height: 844 } });
   const linkErrors = [];
   linkPage.on("pageerror", error => linkErrors.push(error.message));
   await linkPage.addInitScript(() => {
     window.isTauri = true;
     window.__linkTest = { pending: [], saves: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
-      if (command === "load_recent_questions") return [];
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") { window.__linkTest.saves.push(args); return; }
       if (command === "get_question") return new Promise((resolve, reject) => {
@@ -399,7 +491,7 @@ try {
 
 
   // Environment manager UI uses mocked IPC here; real downloads/LSP run in the separate four-platform probe.
-  const envPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const envPage = await testPage({ viewport: { width: 390, height: 844 } });
   await envPage.addInitScript(() => {
     window.isTauri = true;
     window.__envTest = { starts: [], pending: [], groups: [], tools: [
@@ -409,7 +501,8 @@ try {
       { id: "pyright", version: "1.1.414", size: 4000000, downloaded: 4000000, phase: "ready", message: "" },
     ] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
-      if (command === "load_recent_questions") return [];
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") return;
       if (command === "environment_status") return JSON.parse(JSON.stringify({ platform: "linux-x64", supported: true, tools: window.__envTest.tools }));
@@ -469,14 +562,15 @@ try {
   await writeFile("evidence/ENVIRONMENT_UI_RESULT.txt", "PASS: mocked IPC only; duplicate install guard, close/reopen during background download, cancellation, manual retry, mobile layout. Real installer/protocol verified separately.\n");
 
 
-  const lspPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const lspPage = await testPage({ viewport: { width: 1440, height: 900 } });
   const lspErrors = []; lspPage.on("pageerror", error => lspErrors.push(error.message));
   await lspPage.addInitScript(() => {
     window.isTauri = true;
     window.__lspTest = { id: 0, version: 1, text: "", stops: [], requests: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__lspTest;
-      if (command === "load_recent_questions") return [];
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") return;
       if (command === "start_language_service") { state.text = args.text; state.version = 1; return { id: ++state.id, version: 1, server: "fixture", uri: "file:///fixture/solution.py" }; }
@@ -592,14 +686,15 @@ try {
   await writeFile("evidence/LSP_UI_RESULT.txt", "PASS: mocked IPC integration; completion applied, unsafe completion docs remain text, F12 opens explicit read-only declaration, source draft preserved and session stopped on language switch. Native real-server check is separate.\n");
 
 
-  const runPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const runPage = await testPage({ viewport: { width: 1440, height: 900 } });
   const runErrors = []; runPage.on("pageerror", error => runErrors.push(error.message));
   await runPage.addInitScript(() => {
     window.isTauri = true;
     window.__runTest = { starts: [], result: null, pending: [], debug: null, debugStarts: 0, debugCalls: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__runTest;
-      if (command === "load_recent_questions") return [];
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text" || command === "stop_language_service") return;
       if (command === "login_status") return null;
@@ -756,13 +851,14 @@ try {
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");
 
 
-  const conflictPage = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const conflictPage = await testPage({ viewport: { width: 1400, height: 900 } });
   const conflictErrors = []; conflictPage.on("pageerror", e => conflictErrors.push(e.message));
   await conflictPage.addInitScript(() => {
     window.isTauri = true; window.__conflictTest = { file: "initial", backups: [] };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__conflictTest;
-      if (command === "load_recent_questions") return [];
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: state.file, notes: "" };
       if (command === "login_status") return null;
       if (command === "start_language_service") throw Error("LSP omitted from conflict fixture");
@@ -843,13 +939,14 @@ try {
   await writeFile("evidence/CONFLICT_UI_RESULT.txt", "PASS: mocked IPC conflict comparison, stale external refusal, explicit resolution with both-version backup, deleted-file choice, editor reload and resumed saving. Native storage checked separately.\n");
 
 
-  const externalPage = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const externalPage = await testPage({ viewport: { width: 1400, height: 900 } });
   await externalPage.addInitScript(() => {
     window.isTauri = true; window.__externalTest = { notes: "# Before", opened: [], fail: false };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__externalTest;
       if (command === "external_editor_supported") return true;
-      if (command === "load_recent_questions") return [];
+      if (command === "search_questions") return {questions:[],total:0,hasMore:false};
+      if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "load_document") return { code: "original code", notes: state.notes };
       if (command === "login_status") return null;
       if (command === "start_language_service") throw Error("No LSP in external editor fixture");

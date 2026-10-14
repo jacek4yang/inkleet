@@ -126,9 +126,17 @@ async fn login_status(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Re
 }
 
 #[tauri::command]
-async fn search_questions(window: tauri::WebviewWindow, keyword: String, offset: u32) -> Result<leetcode::QuestionList, String> {
+async fn search_questions(window: tauri::WebviewWindow, app: tauri::AppHandle, keyword: String, offset: u32, difficulty: Option<String>, status: Option<String>, account: Option<String>) -> Result<leetcode::QuestionList, String> {
     check_origin(&window)?;
-    leetcode::Leetcode::new()?.search(&keyword, offset).await
+    let api = leetcode::Leetcode::new()?;
+    if let Some(account) = account {
+        let (credentials, generation) = auth::credentials_for(&app, &account)?;
+        let list = api.search_filtered(&keyword,offset,difficulty.as_deref(),status.as_deref(),Some((&credentials.cookie,&credentials.csrf))).await?;
+        if !auth::still_current(&app,generation) { return Err("账号已切换，已丢弃旧题目状态".into()); }
+        Ok(list)
+    } else {
+        api.search_filtered(&keyword,offset,difficulty.as_deref(),status.as_deref(),None).await
+    }
 }
 #[tauri::command]
 async fn get_question(window: tauri::WebviewWindow, app: tauri::AppHandle, slug: String) -> Result<FetchedQuestion, String> {

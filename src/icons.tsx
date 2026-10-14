@@ -1,6 +1,10 @@
 import React from "react";
 const paths = {
   settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 3h4l.7 2.4 2 .9 2.3-.6 2 3.4-1.6 1.8v2.2l1.6 1.8-2 3.4-2.3-.6-2 .9L14 22h-4l-.7-2.4-2-.9-2.3.6-2-3.4L4.6 14v-2.2L3 10l2-3.4 2.3.6 2-.9L10 3",
+  check: "m5 12 4 4L19 6",
+  attempt: "M12 4a8 8 0 1 0 8 8M12 7v6l4 2",
+  lock: "M6 10h12v11H6Zm3 0V6a3 3 0 0 1 6 0v4",
+  previous: "m15 5-7 7 7 7",
   chevron: "m9 5 7 7-7 7",
   close: "M6 6l12 12M18 6 6 18",
   play: "m8 5 11 7-11 7Z",

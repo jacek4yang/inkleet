@@ -1,0 +1,42 @@
+[
+  {
+    "questionId": "900000001",
+    "questionFrontendId": "TEST",
+    "title": "Authored integration fixture",
+    "translatedTitle": "自动化测试夹具",
+    "titleSlug": "inkleet-test-fixture",
+    "content": null,
+    "translatedContent": "<p>仅用于隔离自动化回归，不随软件分发。</p>",
+    "isPaidOnly": false,
+    "difficulty": "Easy",
+    "sampleTestCase": "[3, -1, 8]",
+    "exampleTestcases": "[3, -1, 8]",
+    "metaData": "{\"name\":\"solve\",\"inkleetFunctionStyle\":\"free\",\"params\":[{\"name\":\"values\",\"type\":\"integer[]\"}],\"return\":{\"type\":\"integer\"}}",
+    "codeSnippets": [
+      {
+        "langSlug": "rust",
+        "code": ""
+      },
+      {
+        "langSlug": "python3",
+        "code": ""
+      },
+      {
+        "langSlug": "golang",
+        "code": ""
+      },
+      {
+        "langSlug": "c",
+        "code": ""
+      },
+      {
+        "langSlug": "cpp",
+        "code": ""
+      },
+      {
+        "langSlug": "java",
+        "code": ""
+      }
+    ]
+  }
+]

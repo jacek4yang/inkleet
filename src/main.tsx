@@ -1,3 +1,4 @@
+import { QuestionSidebar } from "./question-sidebar";
 import { IconButton } from "./icons";
 import { SettingsHub, type SettingsSection, type SettingsAction } from "./settings-hub";
 import { RecoveryDialog } from "./recovery";
@@ -18,19 +19,7 @@ import { Login, type Identity } from "./login";
 import { useOnlineJudge } from "./online-judge";
 import { Catalogue, QuestionStatement, type RemoteQuestion } from "./catalogue";
 
-type WorkbenchProblem = { id: string; number: string; title: string; detail: string; input: string; output: string; official?: RemoteQuestion; cached?: boolean };
-const samples: WorkbenchProblem[] = [
-  { id: "sample-sum", number: "01", title: "整数数组求和", detail: "给定整数数组 values，返回所有元素的和。", input: "[3, -1, 8]", output: "10" },
-  { id: "sample-max", number: "02", title: "寻找最大值", detail: "给定非空整数数组 values，返回其中的最大值。", input: "[4, 9, 2]", output: "9" },
-];
-const templates: Record<Language, string> = {
-  rust: "// 自编测试题草稿\nfn solve(values: Vec<i32>) -> i32 {\n    todo!()\n}\n",
-  python3: "# 自编测试题草稿\ndef solve(values):\n    pass\n",
-  golang: "// 自编测试题草稿\nfunc solve(values []int) int {\n    return 0\n}\n",
-  c: "// 自编测试题草稿\nint solve(int* values, int valuesSize) {\n    return 0;\n}\n",
-  cpp: "// 自编测试题草稿\nint solve(vector<int>& values) {\n    return 0;\n}\n",
-  java: "// 自编测试题草稿\nclass Solution {\n    public int solve(int[] values) {\n        return 0;\n    }\n}\n",
-};
+type WorkbenchProblem = { id: string; number: string; title: string; official: RemoteQuestion; cached?: boolean };
 type Document = { code: string; notes: string };
 function download(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
@@ -55,14 +44,13 @@ function App() {
   const [paused, setPaused] = useState({ key: "", line: 0 });
   const [localRunner, setLocalRunner] = useState(false);
   const [environments, setEnvironments] = useState(false);
-  const [problems, setProblems] = useState<WorkbenchProblem[]>(samples);
+  const [problems, setProblems] = useState<WorkbenchProblem[]>([]);
   const [cacheWarning, setCacheWarning] = useState("");
   const [catalogue, setCatalogue] = useState(false);
   const [catalogueMode, setCatalogueMode] = useState<"search" | "link">("search");
-  const [problemId, setProblemId] = useState(samples[0].id);
+  const [problemId, setProblemId] = useState("");
   const [language, setLanguage] = useState<Language>("rust");
   const [tab, setTab] = useState("problem");
-  const [query, setQuery] = useState("");
   const [focus, setFocus] = useState(false);
   const [revision, refresh] = useState(0);
   const [status, setStatus] = useState("正在读取");
@@ -72,17 +60,18 @@ function App() {
   const sequence = useRef(0);
   const notes = useRef(new Map<string, string>());
   const queue = useRef(new SaveQueue());
-  const activeKey = draftKey({ account: "local", problem: problemId, language });
+  const activeKey = problemId ? draftKey({ account: "local", problem: problemId, language }) : "";
   const selected = useRef(activeKey); selected.current = activeKey;
-  const problem = problems.find(p => p.id === problemId)!;
-  const baseCode = problem.official ? (problem.official.codeSnippets?.find(s => s.langSlug === language)?.code ?? "") : templates[language];
+  const problem = problems.find(p => p.id === problemId);
+  const baseCode = problem?.official.codeSnippets?.find(s => s.langSlug === language)?.code ?? "";
   const doc = documents.current.get(activeKey) ?? { code: baseCode, notes: notes.current.get(problemId) ?? "" };
 
-  const judge = useOnlineJudge({ identity, question: problem.official, language, code: doc.code });
-  const editorLoading = loading || !documents.current.has(activeKey);
+  const judge = useOnlineJudge({ identity, question: problem?.official, language, code: doc.code });
+  const editorLoading = !problem || loading || !documents.current.has(activeKey);
 
   useEffect(() => {
     let alive = true;
+    if (!problemId) { setLoading(false); setStatus("选择题目"); return; }
     setLoading(true);
     queue.current.idle.then(async () => {
       if (!documents.current.has(activeKey)) {
@@ -113,8 +102,9 @@ function App() {
       if (!alive) return;
       setProblems(current => [...current, ...items.filter(q => !current.some(p => p.id === "lc-" + q.questionId)).map(q => ({
         id: "lc-" + q.questionId, number: q.questionFrontendId, title: q.translatedTitle || q.title,
-        detail: "", input: "", output: "", official: q, cached: true,
+        official: q, cached: true,
       }))]);
+      if (items.length) setProblemId(current => current || "lc-" + items[0].questionId);
     }).catch(error => { if (alive) setCacheWarning(String(error)); });
     return () => { alive = false; };
   }, []);
@@ -281,7 +271,7 @@ function App() {
     finally { openingNotes.current = false; }
   }
   function chooseQuestion(question: RemoteQuestion, warning?: string | null, fromCache = false) {
-    const entry: WorkbenchProblem = { id: "lc-" + question.questionId, number: question.questionFrontendId, title: question.translatedTitle || question.title, detail: "", input: "", output: "", official: question, cached: fromCache };
+    const entry: WorkbenchProblem = { id: "lc-" + question.questionId, number: question.questionFrontendId, title: question.translatedTitle || question.title, official: question, cached: fromCache };
     setCacheWarning(warning ?? "");
     setProblems(current => [...current.filter(p => p.id !== entry.id), entry]);
     setProblemId(entry.id); setTab("problem");
@@ -299,26 +289,22 @@ function App() {
     { id:"external-editor", label:"系统编辑器", section:"notes", icon:"file", disabled:editorLoading || !externalEditors, run:() => settingsRun(() => void openExternalNotes("default")) },
     { id:"refresh-notes", label:"刷新文件", section:"notes", icon:"refresh", disabled:editorLoading || !externalEditors, run:() => settingsRun(() => void refreshExternalNotes()) },
   ];
-  const visible = problems.filter(p => (p.number + p.title).includes(query));
   return <main className={focus ? "workbench focus" : "workbench"}>
     <header className="topbar"><div className="brand-group"><IconButton icon="panel" label={focus ? "退出专注" : "专注"} onClick={() => setFocus(!focus)} /><strong>墨题</strong></div>
       <div><Login onIdentity={setIdentity} /><IconButton icon="search" label="中国站题库" disabled={!isTauri()} data-action="open-catalogue" onClick={() => { setCatalogueMode("search"); setCatalogue(true); }} /><IconButton icon="link" label="链接打开" disabled={!isTauri()} data-action="open-link" onClick={() => { setCatalogueMode("link"); setCatalogue(true); }} /><IconButton icon="settings" label="设置" data-action="open-settings" onClick={() => setSettings("editor")} /></div>
     </header>
-    <aside className="sidebar">
-      <label className="search"><input aria-label="搜索题目" placeholder="题号或名称" value={query} onChange={e => setQuery(e.target.value)} /></label>
-      {visible.map(p => <button className={p.id === problemId ? "problem-item selected" : "problem-item"} key={p.id} data-problem={p.id} onClick={() => setProblemId(p.id)}><span>{p.number}</span>{p.title}</button>)}
-      {!visible.length && <p className="empty">没有匹配的题目</p>}
-      {cacheWarning && <p className="cache-warning error" role="alert">{cacheWarning}；源码和笔记保存不受此缓存提示影响。</p>}
-    </aside>
+    <QuestionSidebar account={identity?.account ?? null} recent={problems} selected={problemId} onSelectRecent={setProblemId} onChoose={chooseQuestion} />
+
     <nav className="tabs" aria-label="工作区">{[["problem","题目"],["code","代码"],["notes","笔记"]].map(([id,label]) => <button key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>)}</nav>
     <section className={"reading " + (tab === "code" ? "mobile-hidden" : "")}>
-      {tab === "notes" ? <Notes onSettings={() => setSettings("notes")} onRecovery={isTauri() ? () => void openRecovery("notes") : undefined} key={problemId + ":" + reload + ":" + noteRevision} externalEditors={externalEditors} onExternal={editor => void openExternalNotes(editor)} onReload={() => void refreshExternalNotes()} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
-      <article>{problem.official ? <>{problem.cached && <p className="cache-warning">已缓存题面</p>}<QuestionStatement question={problem.official} /></> : <><p className="eyebrow">练习 {problem.number} <span className="badge">自编样例</span></p><h1>{problem.title}</h1><p className="description">{problem.detail}</p><h3>示例</h3><pre>输入：{problem.input}{"\n"}输出：{problem.output}</pre></>}</article>}
+      {!problem ? <div className="workspace-empty"><span>选择一道题目</span><IconButton icon="link" label="打开题目链接" disabled={!isTauri()} onClick={() => { setCatalogueMode("link"); setCatalogue(true); }} /></div> : tab === "notes" ? <Notes onSettings={() => setSettings("notes")} onRecovery={isTauri() ? () => void openRecovery("notes") : undefined} key={problemId + ":" + reload + ":" + noteRevision} externalEditors={externalEditors} onExternal={editor => void openExternalNotes(editor)} onReload={() => void refreshExternalNotes()} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
+      <article>{problem.cached && <p className="cache-warning" title="本机公开题面缓存">已缓存题面</p>}<QuestionStatement question={problem.official} /></article>}
+      {cacheWarning && <p className="cache-warning error" role="alert">{cacheWarning}</p>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
-      <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
-      {editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
-      {localRunner && <LocalRunner onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={problemId} code={doc.code} language={language} title={problem.title} metadata={problem.official ? localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code) : JSON.stringify({ name: "solve", inkleetFunctionStyle: "free", params: [{ name: "values", type: "integer[]" }], return: { type: "integer" } })} sampleInput={problem.official?.sampleTestCase ?? problem.input} onClose={() => setLocalRunner(false)} />}
+      <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
+      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
+      {localRunner && problem && <LocalRunner onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={problemId} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} onClose={() => setLocalRunner(false)} />}
       {judge.panel}
     </section>
     {settings && <SettingsHub initial={settings} languageStatus={languageStatus} onClose={() => setSettings(null)} actions={settingsActions} />}
