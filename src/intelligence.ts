@@ -242,7 +242,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     semanticField, semanticTheme,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([{ key: "Ctrl-Shift-Space", run() { void signatureHelp(); return true; } }, { key: "Escape", run(target) { ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }, { key: "F12", run(target) { void definition(target.state.selection.main.head); return true; } }]),
+    keymap.of([{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } }, { key: "Escape", run(target) { ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }, { key: "F12", run(target) { void definition(target.state.selection.main.head); return true; } }]),
     EditorView.domEventHandlers({ mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
@@ -261,6 +261,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   ];
   return {
     extensions,
+    commands:{rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
     async format(text:string):Promise<string>{
       if(queuedFormats>=8)throw Error("格式化请求过多，请稍后保存");
       ++queuedFormats;

@@ -41,6 +41,7 @@ export function renameSymbol(request: Request, status: (text: string) => void) {
     provide: f => showTooltip.from(f),
   });
   function open(view: EditorView) {
+    if(view.composing)return false;
     const doc = view.state.doc, pos = view.state.selection.main.head, line = doc.lineAt(pos);
     const symbol = [...line.text.matchAll(/[\p{L}\p{N}_$]+/gu)].find(m => pos >= line.from + m.index! && pos <= line.from + m.index! + m[0].length);
     if (!symbol) { status("请将光标放在要重命名的符号上"); return true; }
@@ -52,13 +53,13 @@ export function renameSymbol(request: Request, status: (text: string) => void) {
       const input = document.createElement("input"); input.value = symbol[0]; input.maxLength = 128; input.setAttribute("aria-label", "新名称"); input.autocomplete = "off"; input.spellcheck = false; label.append(input);
       const apply = document.createElement("button"); apply.type = "submit"; apply.textContent = "重命名";
       const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "取消"; cancel.onclick = dismiss;
-      const info = document.createElement("p"); info.textContent = "仅修改本题源码 · 可撤销";
       const error = document.createElement("p"); error.setAttribute("role", "alert");
-      dom.append(label, apply, cancel, info, error);
-      let pending = false;
-      dom.onkeydown = event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); dismiss(); } };
+      dom.append(label, apply, cancel, error);
+      let pending = false, composing = false;
+      input.oncompositionstart=()=>{composing=true;};input.oncompositionend=()=>{composing=false;};
+      dom.onkeydown = event => { event.stopPropagation(); if(event.isComposing||event.keyCode===229)return; if (event.key === "Escape") { event.preventDefault(); dismiss(); } };
       dom.onsubmit = async event => {
-        event.preventDefault(); if (pending) return;
+        event.preventDefault(); if (pending || composing || view.composing) return;
         const name = input.value.trim();
         if (!name || !/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(name)) { error.textContent = "请输入有效的标识符"; return; }
         if (name === symbol[0]) { dismiss(); return; }
@@ -81,5 +82,5 @@ export function renameSymbol(request: Request, status: (text: string) => void) {
     return true;
   }
   const extensions: Extension[] = [field, keymap.of([{ key: "F2", run: open }])];
-  return { extensions, destroy() { destroyed = true; ++generation; } };
+  return { extensions, open, destroy() { destroyed = true; ++generation; } };
 }

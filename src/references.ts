@@ -81,5 +81,5 @@ export function findReferences(request: Request, status: (text: string) => void)
     { key: "Shift-F12", run(view) { void open(view); return true; } },
     { key: "Escape", run: close },
   ]))];
-  return { extensions, destroy() { destroyed = true; ++generation; pending = false; } };
+  return { extensions, open, destroy() { destroyed = true; ++generation; pending = false; } };
 }
