@@ -997,13 +997,21 @@ try:
         subprocess.run(["xdotool","key","i"],check=True)
         wait_for(lambda:text(".editor-status-mode")=="INSERT","native global INSERT status")
         def measured_insert_block():
-            # Measurement may replace the visual-only overlay between read calls.
-            # Re-locate only for this read; never repeat the keyboard mutation.
-            node=element(".code-pane .inkleet-insert-cursor")
-            rect=cmd("GET",f"/element/{node}/rect")
-            return rect if rect["width"]>5 and rect["height"]>10 else None
+            # WebKit's element-rect endpoint hit-tests the node and rejects this
+            # intentionally pointer-transparent overlay. Read layout without a
+            # hit-test; do not change pointer-events or repeat keyboard input.
+            rect=cmd("POST","/execute/sync",{"script":"""
+                const node=document.querySelector('.code-pane .inkleet-insert-cursor');
+                if(!node)return null;
+                const r=node.getBoundingClientRect(),style=getComputedStyle(node);
+                return {x:r.x,y:r.y,width:r.width,height:r.height,pointerEvents:style.pointerEvents,
+                    inViewport:r.width>0&&r.height>0&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight};
+            ""","args":[]})
+            return rect if rect and rect["width"]>5 and rect["height"]>10 and rect["inViewport"] else None
         rect=wait_for(measured_insert_block,"native measured INSERT block geometry")
         assert rect["width"]>5 and rect["height"]>10,"native block geometry"
+        assert rect["pointerEvents"]=="none","visual cursor must not intercept editing"
+        (evidence/"vim-cursor-geometry.json").write_text(json.dumps(rect))
         time.sleep(1.5)
         assert cmd("GET",f"/element/{element('.code-pane .inkleet-insert-cursor')}/displayed"),"native block does not blink"
         assert source_text(code)=="one two\nthree four","cursor cosmetics preserve insertion semantics"
