@@ -673,6 +673,16 @@ try {
         if (args.expected !== state.file) throw Error("外部文件已变化，保留两份内容后再处理");
         state.file = args.text; return;
       }
+      if (command === "list_recovery") return { entries: state.backups.map((_, i) => ({ id: "conflict-" + i + ".json", modified: 1, bytes: 200 })), unreadable: 0 };
+      if (command === "read_recovery") return { format: "inkleet-conflict-v1", file: "solution.rs", choice: "local", ...state.backups[Number(args.id.match(/conflict-([0-9]+)/)[1])] };
+      if (command === "restore_recovery") {
+        if (args.expected !== state.file) throw Error("外部文件再次变化，请刷新对比后重试");
+        const selected = state.backups[Number(args.id.match(/conflict-([0-9]+)/)[1])][args.side];
+        if (selected !== args.reviewed) throw Error("恢复副本已变化");
+        state.backups.push({ local: args.local, external: state.file });
+        state.file = selected ?? "";
+        return { text: state.file, backup: "new-backup.json" };
+      }
       if (command === "resolve_file_conflict") {
         if (args.expected !== state.file) throw Error("外部文件再次变化，请刷新对比后重试");
         state.backups.push({ local: args.local, external: state.file });
@@ -713,6 +723,22 @@ try {
   assert.equal(await conflictPage.evaluate(() => window.__conflictTest.file), null);
   await conflictEditor.fill("after recovery");
   await conflictPage.waitForFunction(() => window.__conflictTest.file === "after recovery");
+  await conflictPage.locator('[data-action="code-recovery"]').click();
+  const recoveryDialog = conflictPage.getByRole("dialog", { name: "源码恢复副本", exact: true });
+  await recoveryDialog.locator('[data-recovery-id="conflict-0.json"]').click();
+  assert.equal(await recoveryDialog.getByLabel("恢复编辑器副本").inputValue(), "local draft");
+  assert.equal(await recoveryDialog.getByLabel("恢复文件副本").inputValue(), "changed again");
+  await conflictPage.evaluate(() => { window.__conflictTest.file = "new outside edit"; });
+  await recoveryDialog.locator('[data-recovery="local"]').click();
+  await recoveryDialog.getByRole("alert").filter({ hasText: "外部文件再次变化" }).waitFor();
+  assert.equal(await conflictEditor.innerText(), "after recovery");
+  await recoveryDialog.locator('[data-recovery="refresh"]').click();
+  await recoveryDialog.locator('[data-recovery-id="conflict-0.json"]').click();
+  await recoveryDialog.locator('[data-recovery="local"]').click();
+  await recoveryDialog.waitFor({ state: "hidden" });
+  assert.equal(await conflictEditor.innerText(), "local draft");
+  assert.equal(await conflictPage.evaluate(() => window.__conflictTest.file), "local draft");
+  assert.deepEqual(await conflictPage.evaluate(() => window.__conflictTest.backups.at(-1)), { local: "after recovery", external: "new outside edit" });
   assert.deepEqual(conflictErrors, []);
   await conflictPage.close();
   await writeFile("evidence/CONFLICT_UI_RESULT.txt", "PASS: mocked IPC conflict comparison, stale external refusal, explicit resolution with both-version backup, deleted-file choice, editor reload and resumed saving. Native storage checked separately.\n");

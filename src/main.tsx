@@ -1,3 +1,4 @@
+import { RecoveryDialog } from "./recovery";
 import { ConflictDialog, type FileConflict } from "./conflict";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -35,6 +36,7 @@ function download(name: string, content: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function App() {
+  const [recovery, setRecovery] = useState<FileConflict | null>(null);
   const [conflict, setConflict] = useState<FileConflict | null>(null);
   const [reload, reloadEditors] = useState(0);
   const [noteRevision, reloadNotes] = useState(0);
@@ -188,6 +190,41 @@ function App() {
     if (selected.current === current.key) setStatus("已处理冲突 · 两份内容已保留");
   }
 
+
+  async function openRecovery(kind: "code" | "notes") {
+    const key = activeKey;
+    try {
+      const target = await readConflict({ key, saveKey: kind === "notes" ? problemId + "/notes" : key, problem: problemId, language, kind });
+      if (selected.current === key) setRecovery(target);
+    } catch (e) { if (selected.current === key) setStatus("无法打开恢复副本：" + String(e)); }
+  }
+  async function restoreRecovery(id: string, side: "local" | "external", reviewed: string | null) {
+    if (!recovery) return;
+    const target = recovery;
+    const currentText = () => target.kind === "notes" ? notes.current.get(target.problem) ?? "" : documents.current.get(target.key)?.code ?? "";
+    await queue.current.idle;
+    if (selected.current !== target.key || currentText() !== target.local) throw new Error("当前草稿已变化，请刷新记录与当前版本");
+    const result = await invoke<{ text: string | null; backup: string }>("restore_recovery", {
+      problem: target.problem, language: target.language, kind: target.kind, id, side, reviewed, expected: target.external, local: target.local,
+    });
+    persisted.current.set(target.saveKey, result.text);
+    if (currentText() !== target.local) {
+      setRecovery({ ...target, local: currentText(), external: result.text });
+      throw new Error("恢复期间编辑器又有更新，新草稿仍被保留，请刷新后确认");
+    }
+    queue.current.discard(target.saveKey);
+    const text = result.text ?? "";
+    if (target.kind === "notes") {
+      notes.current.set(target.problem, text);
+      for (const [key, value] of documents.current) if (JSON.parse(key)[1] === target.problem) documents.current.set(key, { ...value, notes: text });
+    } else {
+      const previous = documents.current.get(target.key);
+      if (previous) documents.current.set(target.key, { ...previous, code: text });
+    }
+    setRecovery(null); reloadEditors(n => n + 1); refresh(n => n + 1);
+    if (selected.current === target.key) setStatus("已恢复所选副本 · 恢复前的两份内容仍已保留");
+  }
+
   useEffect(() => {
     if (!isTauri()) return;
     let alive = true;
@@ -195,7 +232,7 @@ function App() {
     return () => { alive = false; };
   }, []);
   async function refreshExternalNotes() {
-    if (!isTauri() || editorLoading || conflict || refreshingNotes.current) return;
+    if (!isTauri() || editorLoading || conflict || recovery || refreshingNotes.current) return;
     refreshingNotes.current = true;
     const key = activeKey, target = problemId, saveKey = target + "/notes";
     try {
@@ -218,12 +255,12 @@ function App() {
     finally { refreshingNotes.current = false; }
   }
   useEffect(() => {
-    if (!externalEditors || editorLoading || conflict) return;
+    if (!externalEditors || editorLoading || conflict || recovery) return;
     const onFocus = () => { void refreshExternalNotes(); };
     const onVisible = () => { if (document.visibilityState === "visible") onFocus(); };
     window.addEventListener("focus", onFocus); document.addEventListener("visibilitychange", onVisible);
     return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVisible); };
-  }, [externalEditors, editorLoading, conflict, activeKey]);
+  }, [externalEditors, editorLoading, conflict, recovery, activeKey]);
   async function openExternalNotes(editor: "default" | "typora") {
     if (openingNotes.current) return;
     openingNotes.current = true;
@@ -259,19 +296,20 @@ function App() {
     </aside>
     <nav className="tabs" aria-label="工作区">{[["problem","题目"],["code","代码"],["notes","笔记"]].map(([id,label]) => <button key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>)}</nav>
     <section className={"reading " + (tab === "code" ? "mobile-hidden" : "")}>
-      {tab === "notes" ? <Notes key={problemId + ":" + reload + ":" + noteRevision} externalEditors={externalEditors} onExternal={editor => void openExternalNotes(editor)} onReload={() => void refreshExternalNotes()} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
+      {tab === "notes" ? <Notes onRecovery={isTauri() ? () => void openRecovery("notes") : undefined} key={problemId + ":" + reload + ":" + noteRevision} externalEditors={externalEditors} onExternal={editor => void openExternalNotes(editor)} onReload={() => void refreshExternalNotes()} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
       <article>{problem.official ? <>{problem.cached && <p className="cache-warning">已缓存题面 · 可离线编辑；重新搜索可更新题面。</p>}<QuestionStatement question={problem.official} /></> : <><p className="eyebrow">练习 {problem.number} <span className="badge">自编样例</span></p><h1>{problem.title}</h1><p className="description">{problem.detail}</p><h3>示例</h3><pre>输入：{problem.input}{"\n"}输出：{problem.output}</pre><h3>写下你的第一种思路</h3><p className="muted">先想清楚边界，再开始写代码。笔记和每种语言的草稿相互独立。</p></>}</article>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
       <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><button disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本机执行 当前语言代码，不上传">本地</button><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
       {editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
-      <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button onClick={() => setEnvironments(true)} data-action="open-environments">开发环境</button><button disabled={editorLoading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
+      <div className="editor-foot"><button onClick={() => setFontInfo(true)} title="内置字体与开源许可">Intel One Mono</button><button onClick={() => setEnvironments(true)} data-action="open-environments">开发环境</button><button data-action="code-recovery" disabled={editorLoading || !isTauri()} onClick={() => void openRecovery("code")}>恢复副本</button><button disabled={editorLoading} onClick={() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)}>导出源码</button></div>
       {localRunner && <LocalRunner breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={problemId} code={doc.code} language={language} title={problem.title} metadata={problem.official ? localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code) : JSON.stringify({ name: "solve", inkleetFunctionStyle: "free", params: [{ name: "values", type: "integer[]" }], return: { type: "integer" } })} sampleInput={problem.official?.sampleTestCase ?? problem.input} onClose={() => setLocalRunner(false)} />}
       {judge.panel}
     </section>
     {environments && <Environments onClose={() => setEnvironments(false)} />}
     {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
     {catalogue && <Catalogue initialMode={catalogueMode} onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
+    {recovery && <RecoveryDialog target={recovery} onClose={() => setRecovery(null)} onRefresh={async () => { setRecovery(await readConflict(recovery)); }} onRestore={restoreRecovery} />}
     {conflict && <ConflictDialog conflict={conflict} onClose={() => { ++conflictSequence.current; setConflict(null); }} onRefresh={async () => { setConflict(await readConflict(conflict)); }} onResolve={resolveConflict} />}
     <footer className="statusbar" role="status"><span>{status}{queue.current.failed(activeKey) && <button data-action="review-code-conflict" onClick={() => void openConflict("code")}>对比源码</button>}{queue.current.failed(problemId + "/notes") && <button data-action="review-notes-conflict" onClick={() => void openConflict("notes")}>对比笔记</button>}{(queue.current.failed(activeKey) || queue.current.failed(problemId + "/notes")) && <button onClick={retrySave}>重试保存</button>}</span><span>源码和笔记本机保存 · 评测按需上传代码</span></footer>
   </main>;

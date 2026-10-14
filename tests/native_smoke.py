@@ -186,6 +186,21 @@ try:
     wait_for(lambda: notes.read_text()=="# Resolved note","blocked save queue resumes on reviewed baseline")
     (evidence/"CONFLICT_GUI_RESULT.txt").write_text("PASS: actual native comparison, concurrent external-change refusal, explicit file-version choice, two-version recovery snapshot, editor reload and subsequent atomic save.\n")
 
+    click('[data-action="notes-recovery"]')
+    wait_for(lambda:element(".file-recovery"),"native recovery history")
+    click(".recovery-list button:first-child")
+    wait_for(lambda:element('textarea[aria-label="恢复编辑器副本"]'),"recovery record preview")
+    preview_node=element('textarea[aria-label="恢复编辑器副本"]')
+    preview=cmd("GET",f"/element/{preview_node}/property/value")
+    assert preview=="# Pending local edit"
+    click('[data-recovery="local"]')
+    wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".file-recovery"}),"explicit recovery completed")
+    wait_for(lambda:text(note)=="# Pending local edit","recovered note visible")
+    assert notes.read_text()=="# Pending local edit"
+    all_backups=[json.loads(p.read_text()) for p in notes.parent.joinpath(".inkleet-recovery").glob("conflict-*.json")]
+    assert any(b["local"]=="# Resolved note" and b["external"]=="# Resolved note" for b in all_backups),"pre-restore versions not preserved"
+    (evidence/"RECOVERY_GUI_RESULT.txt").write_text("PASS: native recovery list and two-version preview, explicit restore updates real notes.md and editor while preserving both pre-restore versions in a new backup.\n")
+
     (evidence/"RESULT.txt").write_text("PASS: real Linux Tauri/WebKitGTK launch, native IPC, plain source and notes save, process restart restore, external conflict preserving both texts. No LeetCode verification.\n")
     if os.environ.get("INKLEET_MANAGED_ENV") == "1":
         click('[data-action="open-environments"]')

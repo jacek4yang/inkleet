@@ -102,3 +102,7 @@
 .lsp-references > div:first-child { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
 .lsp-reference-list { display: flex; flex-direction: column; max-height: 260px; overflow: auto; margin-top: 8px; }
 .lsp-reference-list button { text-align: left; white-space: pre; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; font-family: "Intel One Mono", monospace; }
+
+.recovery-list { display:flex; flex-direction:column; gap:6px; max-height:170px; overflow:auto; margin:12px 0; }
+.recovery-list button { text-align:left; overflow-wrap:anywhere; flex-shrink:0; }
+.file-recovery { max-height:90vh; overflow:auto; }
