@@ -405,3 +405,5 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 }
 
 .debug-meta>p[role=status]{flex-shrink:0;max-width:50%}
+
+.topbar .login-area>.icon-button{width:30px;height:30px;padding:6px}.judge-toggle{padding:2px 8px;min-height:32px}.judge-toggle>.icon-button{width:28px;height:28px;padding:5px}

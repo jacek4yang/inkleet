@@ -1,3 +1,4 @@
+import { IconButton } from "./icons";
 import React, { useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 export type Identity = { username: string; account: string; persistence: string };
@@ -29,10 +30,8 @@ export function Login({ onIdentity }: { onIdentity: (value: Identity | null) => 
     finally { if (token === generation.current) setBusy(false); }
   }
   return <div className="login-area">
-    <button disabled={busy || !isTauri()} onClick={identity ? cancel : begin}
-      title={isTauri() ? "力扣中国站登录" : "请在原生客户端登录"}>
-      {identity ? identity.username + " · 退出" : "登录力扣"}
-    </button>
+    <IconButton icon="leetcode" label={identity ? identity.username + " · 退出" : "登录力扣"} disabled={busy || !isTauri()} onClick={identity ? cancel : begin}
+      title={identity ? identity.username + " · 退出" : isTauri() ? "登录 LeetCode" : "请在原生客户端登录"} />
     {(open || message) && <div className="login-panel" role="status">
       {message && <p className="error">{message}</p>}
       {open && <div><button disabled={busy} onClick={verify}>{busy ? "正在校验…" : "验证登录"}</button><button onClick={cancel}>取消登录</button></div>}
