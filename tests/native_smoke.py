@@ -458,7 +458,7 @@ try:
         click(code)
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
         wait_for(lambda: "断点：2。" in text(".debug-panel"), "F9 breakpoint on function body, not module definition")
-        click_debug_action(".debug-panel .local-actions button:first-of-type")
+        click_debug_action('.debug-panel [aria-label="开始调试"]')
         wait_for(lambda: "已暂停" in text(".debug-panel"), "real debugger breakpoint", seconds=45)
         wait_for(lambda: element(".debug-inspector > div:first-child > button"), "real call stack loaded")
         click(".debug-inspector > div:first-child > button")
@@ -589,7 +589,7 @@ try:
         keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
         cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-breakpoint","actions":keys}]})
         wait_for(lambda: "断点：4。" in text(".debug-panel"),"Java original source breakpoint")
-        click_debug_action(".debug-panel .local-actions button:first-of-type")
+        click_debug_action('.debug-panel [aria-label="开始调试"]')
         wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
         wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
         def java_total():
@@ -677,7 +677,7 @@ try:
                 keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
                 cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-breakpoint","actions":keys}]})
                 wait_for(lambda: "断点：3。" in text(".debug-panel"),f"{group} breakpoint uses original source line")
-                click_debug_action(".debug-panel .local-actions button:first-of-type")
+                click_debug_action('.debug-panel [aria-label="开始调试"]')
                 wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
                 wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
                 def local_total():
