@@ -345,11 +345,11 @@ button:disabled{opacity:.48}
 .debug-body{padding:8px 12px}
 .debug-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:22px;font-size:11px;color:var(--muted)}
 .debug-meta>p[role=status]{font-size:11px;margin:0;min-width:0;overflow-wrap:anywhere}
-.debug-meta .breakpoint-summary{font-size:10px;white-space:nowrap}
+.debug-meta .breakpoint-summary{font-size:10px;min-width:0;overflow-wrap:anywhere}
 .debug-inspector{gap:12px}
 .debug-inspector h4,.debug-watches h4{color:var(--muted);font-weight:500;letter-spacing:.025em;margin:9px 0 6px}
 .debug-frames{border-right-color:var(--line);padding-right:10px}
-.debug-frames>button{display:flex;align-items:center;gap:8px;min-height:27px;font:11px/1.5 var(--font-mono);border-radius:3px}
+.debug-inspector>.debug-frames>button{display:flex;align-items:center;gap:8px;min-height:27px;font:11px/1.5 var(--font-mono);border-radius:3px}
 .debug-frame-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .debug-frame-line{flex-shrink:0;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
 .debug-variable{margin:1px 0;min-height:25px}
@@ -403,3 +403,5 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
   .debug-inspector{grid-template-columns:minmax(0,1fr)}
   .debug-frames{border-right:0;border-bottom:1px solid var(--line);padding:0 0 8px}
 }
+
+.debug-meta>p[role=status]{flex-shrink:0;max-width:50%}

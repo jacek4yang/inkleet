@@ -75,7 +75,8 @@ try {
   assert.equal(await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).innerText(),"// retained while filtering");
   assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[2].args.difficulty),"EASY");
   await cataloguePage.getByRole("button",{name:"登录力扣",exact:true}).click();
-  assert.equal(await cataloguePage.locator(".login-panel").innerText(),"验证登录\n取消登录","login panel contains only concise actions until an error occurs");
+  assert.deepEqual(await cataloguePage.locator(".login-panel button").allTextContents(),["验证登录","取消登录"],"login panel retains verification and cancellation");
+  assert.equal(await cataloguePage.locator(".login-panel p:not(.error)").count(),0,"login help lives in the manual");
   await cataloguePage.getByRole("button",{name:"验证登录",exact:true}).click();
   await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===4);
   assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[3].args.account),"account-A");
@@ -200,7 +201,15 @@ try {
       return {left:outer.left,right:outer.right,controls,scroll:document.documentElement.scrollWidth,viewport:innerWidth};
     });
     assert.ok(geometry.controls.every(r=>r.width>15 && r.left>=geometry.left-1 && r.right<=geometry.right+1),"all editor toolbar controls stay inside pane at "+width);
+
+    const ordered=[...geometry.controls].sort((a,b)=>a.left-b.left);
+    assert.ok(ordered.every((r,i)=>i===0 || r.left>=ordered[i-1].right-1),"toolbar controls do not overlap at "+width);
     assert.ok(geometry.scroll<=geometry.viewport+1,"no page-level horizontal overflow at "+width);
+    await page.locator(".solution-menu>summary").click();
+    const menuAction=page.getByRole("button",{name:"复制解答",exact:true});
+    await menuAction.click();
+    await page.getByRole("dialog",{name:"复制解答",exact:true}).getByRole("button",{name:"取消",exact:true}).click();
+
   }
   await page.setViewportSize({width:1440,height:960});
   const editorSurface=await page.locator(".code-pane .cm-editor").evaluate(node=>getComputedStyle(node).backgroundColor);
@@ -871,12 +880,24 @@ try {
   assert.match(await runPanel.locator(".debug-watch").innerText(), /3/);
 
   assert.equal(await runPanel.getByRole("button",{name:"添加监视表达式",exact:true}).locator("svg[aria-hidden=true]").count(),1,"watch add uses the same accessible SVG control");
-  const scalar=runPanel.locator(".debug-variable>button:disabled").first();
-  if(await scalar.count()) assert.equal(await scalar.evaluate(node=>getComputedStyle(node).opacity),"1","scalar values remain legible despite having no expansion action");
   assert.equal(await runPanel.locator(".debug-inspector>div").first().evaluate(node=>getComputedStyle(node).overflowY),"visible","inspector uses a single outer scroll surface");
   await runPage.screenshot({path: "evidence/debugger-variable-tree-watches.png", fullPage:true});
   await runPanel.getByRole("button", {name: "caller · 1", exact: true}).click();
   await runPanel.getByRole("button", {name: "caller_only", exact:true}).waitFor();
+  const scalar=runPanel.getByRole("button",{name:"caller_only",exact:true});
+  assert.equal(await scalar.isDisabled(),true,"scalar has no expansion action");
+  assert.equal(await scalar.evaluate(node=>getComputedStyle(node).opacity),"1","scalar values remain legible despite having no expansion action");
+  assert.equal(await runPanel.locator(".debug-frames>button").first().evaluate(node=>getComputedStyle(node).display),"flex","stack name and line occupy separate columns");
+  // Pure layout stress fixture: temporarily lengthen the rendered breakpoint label.
+  // This does not claim breakpoint protocol coverage; real F9 assertions remain below.
+  const overflow=await runPanel.locator(".debug-meta").evaluate(meta=>{
+    const label=meta.querySelector(".breakpoint-summary"),previous=label.textContent;
+    label.textContent="断点："+Array.from({length:100},(_,i)=>i+1).join(", ")+"。";
+    const overflow=meta.scrollWidth>meta.clientWidth+1;
+    label.textContent=previous;return overflow;
+  });
+  assert.equal(overflow,false,"long breakpoint labels wrap without hiding the adjacent session state");
+
   assert.equal(await runPanel.getByRole("button", {name: "x", exact: true}).count(),0,"frame switch discards old child references");
   assert.match(await runPanel.locator(".debug-watch").innerText(), /—/, "watch never presents previous frame result as current");
   await runPanel.getByRole("button", {name: "solve · 1", exact:true}).click();
