@@ -1,3 +1,4 @@
+import {indentGuides} from "./indent-guides";
 import {editorCommands} from "./editor-commands";
 import {formatBinding,type Command} from "./command-registry";
 import type { DebugPosition } from "./debug-position";
@@ -79,7 +80,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
     ];
     const extensions = [editorCommands(commands),
-      basicSetup, syntax(language), theme,
+      basicSetup, syntax(language), theme, ...(language==="markdown"?[]:[indentGuides]),
       ...(intelligence&&formatting?formatOnSave({enabled:()=>!!formatOptions.current?.enabled,saved:text=>formatOptions.current?.saved(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),

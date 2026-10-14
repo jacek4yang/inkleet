@@ -770,6 +770,28 @@ try:
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
+            if group=="rust":
+                hash_source="fn example() {\n    let _map = \n}\n"
+                fill(code,hash_source)
+                focus_code_editor()
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home","Down","End"],check=True)
+                subprocess.run(["xdotool","type","--clearmodifiers","--delay","80","HashM"],check=True)
+                wait_for(lambda:"HashMap" in text(".cm-tooltip-autocomplete"),"automatic unimported HashMap completion",seconds=45)
+                screenshot("rust-hashmap-candidates-native.png")
+                original_hash=text(code)
+                choices=cmd("POST","/elements",{"using":"css selector","value":".cm-tooltip-autocomplete li"})
+                choice=next(item[EID] for item in choices if cmd("GET",f"/element/{item[EID]}/text").lstrip().startswith("HashMap"))
+                cmd("POST",f"/element/{choice}/click",{})
+                wait_for(lambda:"use std::collections::HashMap;" in text(code) and "let _map = HashMap" in text(code),"resolved HashMap inserts type and import atomically",seconds=15)
+                accepted_hash=text(code)
+                assert accepted_hash.count("use std::collections::HashMap;")==1,"one import only"
+                screenshot("rust-hashmap-autoimport-native.png")
+                focus_code_editor()
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+                wait_for(lambda:text(code)==original_hash,"one undo removes completion and import")
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
+                wait_for(lambda:text(code)==accepted_hash,"redo restores exact completion and import")
+                (evidence/"RUST_AUTOIMPORT_NATIVE_RESULT.txt").write_text("PASS: actual typing HashM triggers private rust-analyzer candidate, resolve inserts HashMap with one std import, one undo removes both and redo restores both.\n")
             if group in ("golang","cpp","c","rust"):
                 local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
                 if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"

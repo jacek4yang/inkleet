@@ -1475,7 +1475,7 @@ try {
   await semanticPage.evaluate(async()=>{
     const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
     const {EditorState}=await import("/node_modules/.vite/deps/@codemirror_state.js");
-    const {languageIntelligence}=await import("/src/intelligence.ts");
+    const {languageIntelligence,completionChanges}=await import("/src/intelligence.ts");
     const {rust}=await import("/node_modules/.vite/deps/@codemirror_lang-rust.js");
     const {basicSetup}=await import("/node_modules/.vite/deps/codemirror.js");
     const state=window.__semanticTest={version:1,requests:0,active:0,maxActive:0,defer:true,reply:null,revision:0,fail:true};
@@ -1571,6 +1571,80 @@ try {
   await commandPage.screenshot({path:"evidence/editor-command-palette-closed.png"});
   await commandPage.close();
   await writeFile("evidence/COMMAND_UI_RESULT.txt","PASS: real editor palette search and shared select-all execution, Escape focus restoration, no placeholder commands. Global workbench registry remains future work.\n");
+
+
+  const inputPage=await browser.newPage({viewport:{width:1200,height:800}});
+  await inputPage.route("**/input-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor' style='width:600px'></div></body></html>"}));
+  await inputPage.goto("http://127.0.0.1:5173/input-test");
+  await inputPage.evaluate(async()=>{
+    const {EditorView,EditorState,basicSetup,indentGuides,indentationColumns,indentUnit,acceptCompletion,completionStatus,selectedCompletionIndex,languageIntelligence,rust}=await import("/tests/input-harness.ts");
+    const state=window.__inputTest={version:1,resolves:0,reply:null,status:[],text:"fn example() {\n    let _map = HashM\n}",defer:true};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:72,version:1,server:"fixture",uri:"file:///s.rs",completionResolve:true};
+      if(command==="stop_language_service")return;
+      if(command==="update_language_document"){state.text=args.text;state.version=args.version;return;}
+      if(command==="language_diagnostics")return {version:state.version,diagnostics:[]};
+      if(command==="language_request"){
+        if(args.kind==="completion")return [{label:"HashMap",kind:7,_inkleetCompletion:1,textEdit:{range:{start:{line:1,character:15},end:{line:1,character:20}},newText:"HashMap"}}];
+        return null;
+      }
+      if(command==="language_completion_resolve"){
+        state.resolves++;
+        const result={label:"HashMap",textEdit:{range:{start:{line:1,character:15},end:{line:1,character:20}},newText:"HashMap"},additionalTextEdits:[{range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"use std::collections::HashMap;\n"}]};
+        if(state.defer)return new Promise(resolve=>{state.reply=()=>resolve(result);});
+        return result;
+      }
+      throw Error("unexpected input command "+command);
+    }};
+    const client=languageIntelligence("rust",message=>state.status.push(message),()=>{});
+    const view=new EditorView({state:EditorState.create({doc:state.text,extensions:[basicSetup,rust(),indentUnit.of("    "),indentGuides,client.extensions,EditorView.theme({".cm-scroller":{maxHeight:"240px",overflow:"auto"}})]}),parent:document.querySelector("#editor")});
+    state.client=client;state.view=view;state.accept=()=>acceptCompletion(view);state.columns=indentationColumns;state.completionStatus=()=>completionStatus(view);state.selectedIndex=()=>selectedCompletionIndex(view);
+    state.boundaryCheck=async()=>{const {completionChanges}=await import("/src/intelligence.ts");const doc=EditorState.create({doc:"HashM"}).doc;const result=completionChanges(doc,{label:"HashMap",textEdit:{range:{start:{line:0,character:0},end:{line:0,character:5}},newText:"HashMap"},additionalTextEdits:[{range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"use std::collections::HashMap;\n"}]},0,5);const change=EditorState.create({doc:"HashM"}).update({changes:result.changes,selection:{anchor:result.anchor}});return {text:change.state.doc.toString(),cursor:change.state.selection.main.head};};
+    await client.connect(view);view.dispatch({selection:{anchor:view.state.doc.line(2).to}});view.focus();
+  });
+  const boundary=await inputPage.evaluate(()=>window.__inputTest.boundaryCheck());
+  assert.equal(boundary.text,"use std::collections::HashMap;\nHashMap");
+  assert.equal(boundary.cursor,boundary.text.length,"same-offset import precedes primary and cursor maps correctly");
+  await inputPage.keyboard.press("Control+Space");
+  await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
+  await inputPage.waitForTimeout(150);
+  await writeFile("evidence/completion-before-accept.json",JSON.stringify(await inputPage.evaluate(()=>({focused:window.__inputTest.view.hasFocus,composing:window.__inputTest.view.composing,text:window.__inputTest.view.state.doc.toString(),options:[...document.querySelectorAll('[role="option"]')].map(el=>el.outerHTML)})),null,2));
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.accept()),true,"shared-module completion command accepts the visible candidate");
+  await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","unresolved acceptance inserts nothing");
+  await inputPage.evaluate(()=>window.__inputTest.reply());
+  await inputPage.waitForFunction(()=>window.__inputTest.view.state.doc.toString().startsWith("use std::collections::HashMap;"));
+  assert.match(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),/let _map = HashMap/);
+  await inputPage.keyboard.press("Control+z");
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","atomic import and primary edit undo together");
+  await inputPage.evaluate(()=>{window.__inputTest.reply=null;});
+  await inputPage.keyboard.press("Control+Space");await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
+  await inputPage.waitForTimeout(150);
+  await inputPage.keyboard.press("Enter");
+  await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
+  await inputPage.keyboard.press("ArrowLeft");
+  await inputPage.evaluate(()=>window.__inputTest.reply());
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","cursor movement discards resolve result without partial imports");
+  await inputPage.evaluate(()=>{const s=window.__inputTest;s.reply=null;s.view.dispatch({selection:{anchor:s.view.state.doc.line(2).to}});});
+  await inputPage.keyboard.press("Control+Space");await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
+  await inputPage.waitForTimeout(150);await inputPage.keyboard.press("Enter");
+  await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
+  await inputPage.keyboard.press("Escape");
+  await inputPage.evaluate(()=>window.__inputTest.reply());
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","Escape cancels pending acceptance even when autocomplete consumes the key");
+
+  assert.deepEqual(await inputPage.evaluate(()=>window.__inputTest.columns("  \tvalue",4)),{columns:4,blank:false});
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.columns(" ".repeat(1000000),4).columns),128);
+  await inputPage.evaluate(()=>{const s=window.__inputTest;const text="fn example() {\n    if true {\n        let value = 1;\n\n        println!(\"{value}\");\n    }\n}";s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:text},selection:{anchor:text.indexOf("let value")}});});
+  await inputPage.locator(".cm-indent-guide-active").first().waitFor();
+  assert.equal(await inputPage.locator(".cm-indent-guide-active").first().evaluate(el=>getComputedStyle(el,"::after").pointerEvents),"none");
+  await inputPage.screenshot({path:"evidence/indent-guides.png"});
+  await inputPage.evaluate(()=>{const s=window.__inputTest;s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:Array.from({length:10000},(_,i)=>"    let v"+i+" = 1;").join("\n")},selection:{anchor:1}});});
+  assert.ok(await inputPage.locator(".cm-indent-guides").count()<500,"guide decorations are viewport-bounded, not document-sized");
+  await inputPage.evaluate(()=>{window.__inputTest.client.destroy();window.__inputTest.view.destroy();});
+  await inputPage.close();
+  await writeFile("evidence/INPUT_RELIABILITY_UI_RESULT.txt","PASS: resolve-before-insert, atomic import undo, stale cursor rejection, bounded indentation helpers and viewport-only guide rendering. Mocked IPC; real Rust native test is separate.\\n");
 
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

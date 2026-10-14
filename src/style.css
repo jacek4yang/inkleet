@@ -436,3 +436,5 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .editor-command-palette>input[type=text]{appearance:none;-webkit-appearance:none;border-radius:0;box-shadow:none}
 .editor-command-palette>input[type=text]:focus,.editor-command-palette>input[type=text]:focus-visible{outline:none;box-shadow:none}
 .editor-command-palette:focus-within{border-color:var(--accent)}
+
+.lsp-completion-documentation{max-height:min(320px,40vh);overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}

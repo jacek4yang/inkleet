@@ -1,3 +1,4 @@
+import { isolateHistory } from "@codemirror/commands";
 import { decodeSemanticSpans, semanticField, semanticTheme, setSemanticTokens } from "./semantic-tokens";
 // Bound pending formatter work across destroyed/recreated EditorViews.
 let formatQueue:Promise<unknown>=Promise.resolve();let queuedFormats=0;
@@ -12,19 +13,40 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean };
+type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean };
 export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" | "c" | "cpp" };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 function offset(doc: Text, position: unknown): number | null {
   if (!object(position) || !Number.isInteger(position.line) || !Number.isInteger(position.character) || position.line < 0 || position.character < 0 || position.line >= doc.lines) return null;
   const line = doc.line(position.line + 1);
-  return position.character <= line.length ? line.from + position.character : null;
+  const col=position.character;
+  if(col>line.length||col>0&&col<line.length&&/[\uD800-\uDBFF]/.test(line.text[col-1])&&/[\uDC00-\uDFFF]/.test(line.text[col]))return null;
+  return line.from+col;
 }
 function range(doc: Text, value: unknown) {
   if (!object(value)) return null;
   const from = offset(doc, value.start), to = offset(doc, value.end);
   return from !== null && to !== null && from <= to ? { from, to } : null;
+}
+export function completionChanges(doc:Text,item:Record<string,any>,from:number,to:number){
+  if(item.insertTextFormat===2)return null;
+  const primary=object(item.textEdit)?item.textEdit:null;
+  const span=primary?range(doc,primary.range??primary.replace??primary.insert):{from,to};
+  const insert=primary?.newText??item.insertText??item.label;
+  if(!span||typeof insert!=="string"||insert.length>65536||span.from>to||span.to<from)return null;
+  const main={...span,insert},changes=[main];
+  if(item.additionalTextEdits!==undefined){
+    if(!Array.isArray(item.additionalTextEdits)||item.additionalTextEdits.length>20)return null;
+    for(const edit of item.additionalTextEdits){
+      const r=object(edit)?range(doc,edit.range):null;
+      if(!r||typeof edit.newText!=="string"||edit.newText.length>65536)return null;
+      changes.push({...r,insert:edit.newText});
+    }
+  }
+  changes.sort((a,b)=>a.from-b.from||a.to-b.to||Number(a===main)-Number(b===main));
+  for(let i=1;i<changes.length;i++)if(changes[i].from<changes[i-1].to)return null;
+  return {changes,anchor:span.from+insert.length+changes.filter(c=>c!==main&&(c.from<span.from||c.from===span.from&&c.to===c.from)).reduce((sum,c)=>sum+c.insert.length-(c.to-c.from),0)};
 }
 function content(value: unknown): string {
   if (typeof value === "string") return value.slice(0, 32768);
@@ -99,10 +121,11 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     const result = await invoke("language_request", { id, version: askedVersion, kind, line: line.number - 1, character: pos - line.from, newName: newName ?? null });
     return !closed && session?.id === id && version === askedVersion && view.state.doc === doc ? result : null;
   }
+  let completionApplyGeneration=0,activeCompletionResolves=0;
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
     const word = context.matchBefore(/\w*/);
-    if (!context.explicit && !word?.text && context.state.sliceDoc(Math.max(0, context.pos - 1), context.pos) !== ".") return null;
+    if (!context.explicit && !word?.text && !/[.:]$/.test(context.state.sliceDoc(Math.max(0, context.pos - 2), context.pos))) return null;
     context.addEventListener("abort", () => {}, { onDocChange: true });
     const doc = context.state.doc;
     try {
@@ -127,28 +150,42 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       candidates.sort((a, b) => String(a.sortText ?? a.label).localeCompare(String(b.sortText ?? b.label)));
       for (const item of candidates.slice(0, 300)) {
         if (!object(item) || typeof item.label !== "string" || item.label.length > 512 || item.insertTextFormat === 2) continue;
-        const primary = object(item.textEdit) ? item.textEdit : null;
-        const editRange = primary ? range(doc, primary.range ?? primary.replace ?? primary.insert) : { from: word?.from ?? context.pos, to: context.pos };
-        const insert = primary?.newText ?? item.insertText ?? item.label;
-        if (!editRange || typeof insert !== "string" || insert.length > 65536) continue;
-        const changes = [{ ...editRange, insert }];
-        let valid = true;
-        if (Array.isArray(item.additionalTextEdits)) {
-          if (item.additionalTextEdits.length > 20) continue;
-          for (const edit of item.additionalTextEdits) {
-            const r = object(edit) ? range(doc, edit.range) : null;
-            if (!r || typeof edit.newText !== "string" || edit.newText.length > 65536) { valid = false; break; }
-            changes.push({ ...r, insert: edit.newText });
-          }
-        }
-        changes.sort((a, b) => a.from - b.from || a.to - b.to);
-        for (let i = 1; i < changes.length; i++) if (changes[i].from < changes[i - 1].to || changes[i].from === changes[i - 1].from) valid = false;
-        if (!valid) continue;
-        const anchor = editRange.from + insert.length + changes.filter(c => c.from < editRange.from).reduce((sum, c) => sum + c.insert.length - (c.to - c.from), 0);
+        const result=completionChanges(doc,item,word?.from??context.pos,context.pos);
+        if(!result)continue;
+        const id=session?.id,askedVersion=version,resolve=session?.completionResolve===true,token=item._inkleetCompletion;
+        if(resolve&&(!Number.isSafeInteger(token)||token<=0))continue;
+        let resolution:Promise<unknown>|null=null;
+        const resolveItem=():Promise<unknown>=>{
+          if(!resolve)return Promise.resolve(item);
+          if(resolution)return resolution;
+          if(closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return Promise.reject(Error("补全快照已过期"));
+          if(activeCompletionResolves>=4)return Promise.reject(Error("补全解析繁忙，请重试"));
+          activeCompletionResolves++;
+          resolution=invoke<unknown>("language_completion_resolve",{id,version:askedVersion,token}).catch(error=>{resolution=null;throw error;}).finally(()=>{activeCompletionResolves--;});
+          return resolution;
+        };
         options.push({
           label: typeof item.filterText === "string" ? item.filterText.slice(0, 512) : item.label.trimStart(), displayLabel: item.label.trimStart(), detail: typeof item.detail === "string" ? item.detail.slice(0, 500) : undefined,
-          info: content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
-          apply(target) { if (!closed && target.state.doc === doc) target.dispatch({ changes, selection: { anchor }, userEvent: "input.complete" }); },
+          info: resolve ? async()=>{
+            try{
+              const resolved=await resolveItem();
+              if(closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return null;
+              const text=object(resolved)?content(resolved.documentation):"";if(!text)return null;
+              const dom=document.createElement("div");dom.className="lsp-completion-documentation";dom.textContent=text;return dom;
+            }catch{return null;}
+          } : content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
+          apply(target) {
+            const ticket=++completionApplyGeneration;
+            const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.main.head===context.pos&&target.state.selection.main.empty&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
+            if(!current())return;
+            void (async()=>{
+              const resolved=await resolveItem();
+              if(!current())return;
+              const applied=object(resolved)?completionChanges(doc,resolved,word?.from??context.pos,context.pos):null;
+              if(!applied)throw Error("补全或导入编辑无效，未修改源码");
+              target.dispatch({changes:applied.changes,selection:{anchor:applied.anchor},annotations:isolateHistory.of("full"),userEvent:"input.complete"});
+            })().catch(error=>{if(current())status("补全未应用 · "+String(error).slice(0,220));});
+          },
         });
       }
       if (context.explicit) status(options.length ? serverName + " 已连接 · F12 / Ctrl+单击查看定义" : serverName + " 未找到匹配补全 · 服务返回 " + items.length + " 项");
@@ -242,15 +279,16 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     semanticField, semanticTheme,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventHandlers({ mousedown(event, target) {
+    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
+    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing)++completionApplyGeneration;}}),
+    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;return false;}, compositionstart(){++completionApplyGeneration;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
       event.preventDefault(); void definition(pos); return true;
     }}),
     EditorView.updateListener.of(update => {
-      if (update.docChanged || update.selectionSet) { ++signatureGeneration; clearTimeout(signatureTimer); }
+      if (update.docChanged || update.selectionSet) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); }
       if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
       if (update.docChanged && !closed) {
         scheduleSemantic();
@@ -301,7 +339,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      references.destroy(); rename.destroy(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      references.destroy(); rename.destroy(); ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },

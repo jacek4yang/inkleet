@@ -7,6 +7,7 @@ mod download_settings;
 mod editor_settings;
 mod lsp;
 mod semantic_tokens;
+mod completion_cache;
 mod lsp_document;
 mod lsp_launch;
 mod lsp_native;
@@ -230,6 +231,11 @@ async fn language_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u6
     tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().request(id,version,&kind,line,character,new_name)).await.map_err(|_|"语言服务请求任务中断".to_owned())?
 }
 #[tauri::command]
+async fn language_completion_resolve(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32,token:u64)->Result<serde_json::Value,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().resolve_completion(id,version,token)).await.map_err(|_|"补全解析任务中断".to_owned())?
+}
+#[tauri::command]
 async fn language_semantic_tokens(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32)->Result<serde_json::Value,String>{
     check_origin(&window)?;
     tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().semantic_tokens(id,version)).await.map_err(|_|"语义分析任务中断".to_owned())?
@@ -364,7 +370,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_semantic_tokens, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_completion_resolve, language_semantic_tokens, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {
