@@ -561,6 +561,23 @@ try:
         assert text(code)=="def solve(values): return sum(values)"
         (evidence/"REFERENCES_GUI_RESULT.txt").write_text("PASS: actual native Shift+F12 real private Pyright declaration/reference lookup, two original source locations and navigation without modifying the draft.\n")
         fill(code, "def solve(values):\n    return sum(values)")
+        def font_probe():
+            node=element(code)
+            return {key:cmd("GET",f"/element/{node}/css/{key}") for key in ["font-family","font-size","font-weight","font-style","letter-spacing","text-shadow","transform"]}
+        focus_code_editor()
+        font_before=font_probe()
+        screenshot("editor-font-dock-closed-native.png")
+        click('.pane-heading .actions button[aria-label="本地"]')
+        focus_code_editor()
+        font_open=font_probe()
+        screenshot("editor-font-dock-open-native.png")
+        assert font_open==font_before,"opening dock changed native computed font"
+        click(".local-runner [aria-label='收起']")
+        focus_code_editor()
+        font_closed=font_probe()
+        screenshot("editor-font-dock-reclosed-native.png")
+        assert font_closed==font_before,"closing dock changed native computed font"
+        (evidence/"editor-font-dock.json").write_text(json.dumps({"before":font_before,"open":font_open,"closed":font_closed}))
         click('.pane-heading .actions button[aria-label="本地"]')
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
@@ -975,6 +992,32 @@ try:
         set_vim(True)
         focus_code_editor()
         subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:text(".editor-status-mode")=="NORMAL","native global NORMAL status")
+        assert len(cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-vim-panel"}))==0,"no local duplicate mode bar"
+        subprocess.run(["xdotool","key","i"],check=True)
+        wait_for(lambda:text(".editor-status-mode")=="INSERT","native global INSERT status")
+        def measured_insert_block():
+            # WebKit's element-rect endpoint hit-tests the node and rejects this
+            # intentionally pointer-transparent overlay. Read layout without a
+            # hit-test; do not change pointer-events or repeat keyboard input.
+            rect=cmd("POST","/execute/sync",{"script":"""
+                const node=document.querySelector('.code-pane .inkleet-insert-cursor');
+                if(!node)return null;
+                const r=node.getBoundingClientRect(),style=getComputedStyle(node);
+                return {x:r.x,y:r.y,width:r.width,height:r.height,pointerEvents:style.pointerEvents,
+                    inViewport:r.width>0&&r.height>0&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight};
+            ""","args":[]})
+            return rect if rect and rect["width"]>5 and rect["height"]>10 and rect["inViewport"] else None
+        rect=wait_for(measured_insert_block,"native measured INSERT block geometry")
+        assert rect["width"]>5 and rect["height"]>10,"native block geometry"
+        assert rect["pointerEvents"]=="none","visual cursor must not intercept editing"
+        (evidence/"vim-cursor-geometry.json").write_text(json.dumps(rect))
+        time.sleep(1.5)
+        assert cmd("GET",f"/element/{element('.code-pane .inkleet-insert-cursor')}/displayed"),"native block does not blink"
+        assert source_text(code)=="one two\nthree four","cursor cosmetics preserve insertion semantics"
+        screenshot("vim-insert-status-native.png")
+        subprocess.run(["xdotool","key","Escape"],check=True)
+        wait_for(lambda:text(".editor-status-mode")=="NORMAL","return native NORMAL")
         subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","gg0ciwONE"],check=True)
         subprocess.run(["xdotool","key","Escape"],check=True)
         wait_for(lambda:source_text(code)=="ONE two\nthree four","native Vim ciw")
@@ -985,6 +1028,7 @@ try:
         time.sleep(1.4)
         assert (data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()==marker,"Vim must not idle-save"
         subprocess.run(["xdotool","type","--clearmodifiers",":w"],check=True)
+        wait_for(lambda:element(".statusbar .cm-vim-panel input"),"native Ex prompt in global status")
         subprocess.run(["xdotool","key","Return"],check=True)
         wait_for(lambda:(data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()=="ONE two\nthree four","native Vim explicit write")
         screenshot("vim-native.png")

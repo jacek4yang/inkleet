@@ -439,7 +439,7 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 
 .lsp-completion-documentation{max-height:min(320px,40vh);overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
 
-.unsaved-mark{font-size:9px;color:var(--accent);width:12px;text-align:center;flex:none}.close-drafts{max-width:420px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);padding:20px}.close-drafts::backdrop{background:#0005}.close-drafts button{margin-right:8px}
+.unsaved-mark{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);flex:0 0 6px;align-self:center}.tabs>button{display:inline-flex;align-items:center;justify-content:center;gap:6px}.document-selectors>.unsaved-mark{margin-inline:4px}.close-drafts{max-width:420px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);padding:20px}.close-drafts::backdrop{background:#0005}.close-drafts button{margin-right:8px}
 
 /* Compact IDE surface: spacing and state hierarchy, without changing glyph slots. */
 :root{--control-radius:4px;--control-height:28px}
@@ -483,3 +483,40 @@ button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(
 
 
 .vim-switch{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:34px;font-size:12px}.vim-switch input{width:15px;height:15px;accent-color:var(--accent)}
+
+.judge-result-kind{font-size:11px;color:var(--muted);padding:6px 0}
+.judge-readable>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0 12px}
+.verdict{font-size:15px;font-weight:600;color:var(--ink)}.verdict.accepted{color:#53754c}
+.judge-metrics{display:flex;gap:12px;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.judge-comparison{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.judge-field{min-width:0}.judge-field h4{font-size:11px;font-weight:500;color:var(--muted);margin:0 0 5px}
+.judge-field pre{margin:0;padding:9px 11px;border:1px solid var(--line);background:var(--surface);font-size:12px;min-height:34px;max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.judge-error{grid-column:1/-1}.judge-error pre{color:#a4493d}
+.judge-raw{margin-top:12px;color:var(--muted);font-size:11px}.judge-raw pre{max-height:280px;overflow:auto}
+.judge-blocker{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line);font-size:11px}
+@media(max-width:760px){.judge-comparison{grid-template-columns:1fr}}
+
+/* One quiet workbench status line; input and command panels retain native CM focus. */
+:root{--vim-cursor:rgba(91,112,88,.38);--vim-mode-bg:#e2e7dc;--vim-mode-ink:#485a42}
+.statusbar{gap:8px;padding:0 8px 0 0;height:24px;min-height:24px;white-space:nowrap;font-size:11px;line-height:24px}
+.editor-status{display:contents}
+.statusbar .editor-status-mode{display:inline-flex;align-items:center;justify-content:center;align-self:stretch;min-width:66px;padding:0 10px;background:var(--vim-mode-bg);color:var(--vim-mode-ink);font-size:10px;font-weight:600;letter-spacing:.045em;order:0}
+.editor-status-mode:empty{visibility:hidden}
+.statusbar .editor-status-meta{display:flex;gap:16px;align-items:center;margin-left:auto;order:4;font-variant-numeric:tabular-nums}
+.statusbar .editor-status-meta>span{display:inline}
+.statusbar .storage-status{order:1;min-width:0;overflow:auto;white-space:nowrap}
+.statusbar>.icon-button{order:3;flex:none}
+#vim-command-slot{order:2;flex:1;min-width:0}
+#vim-command-slot:empty{display:none}
+.vim-command-host{display:none}
+.vim-command-host[data-active=true]:has(.cm-panel){display:block}
+#vim-command-slot .cm-panels{position:static;border:0;background:transparent;color:var(--ink)}
+#vim-command-slot .cm-vim-panel{height:23px;min-height:0;padding:0 4px;line-height:23px;background:transparent;font:inherit}
+#vim-command-slot .cm-vim-panel input{outline:0;border:0;border-radius:0;padding:0;min-height:0;line-height:23px;background:transparent;color:var(--ink)}
+.inkleet-steady-vim .cm-fat-cursor{background:var(--vim-cursor)!important;color:var(--ink)!important}
+.inkleet-steady-vim:not(.cm-focused) .cm-fat-cursor{background:transparent!important;outline:1px solid var(--muted)!important;color:transparent!important}
+@media(max-width:760px){.statusbar{padding:0 6px 0 0;gap:5px}.statusbar .editor-status-meta{gap:8px}.statusbar .editor-status-mode{min-width:60px;padding:0 7px}.statusbar .storage-status{max-width:45vw}}
+
+.statusbar>.lsp-status{position:static;display:inline-flex;align-items:center;gap:5px;order:3;flex:none;height:23px;max-height:23px;padding:0 7px;border:0;background:transparent;font-size:10px;line-height:23px}.statusbar>.lsp-status>span{display:inline}.statusbar>.lsp-status i{display:block;flex:none}
+
+.judge-wide{grid-column:1/-1}

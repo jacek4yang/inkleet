@@ -48,7 +48,7 @@ export function MarkdownPreview({ text }: { text: string }) {
       : <p className="muted">暂无笔记</p>}
   </div>;
 }
-export function Notes({ vimEnabled=false, documentKey, value, loading, onChange, onSettings, onSave, dirty=false }: {
+export function Notes({ vimEnabled=false, documentKey, value, loading, onChange, onSettings, onSave }: {
   vimEnabled?:boolean;
   documentKey: string; value: string; loading: boolean;
   onChange: (value: string) => void; onExport: () => void;
@@ -58,7 +58,7 @@ export function Notes({ vimEnabled=false, documentKey, value, loading, onChange,
 }) {
   const [preview, setPreview] = useState(false);
   return <>
-    <div className="pane-heading notes-heading"><div>{dirty&&<span className="unsaved-mark" role="img" aria-label="笔记未保存" title="未保存">●</span>}<IconButton icon="save" label="保存笔记" shortcut="Ctrl+S" disabled={loading} onClick={onSave} />
+    <div className="pane-heading notes-heading"><div><IconButton icon="save" label="保存笔记" shortcut="Ctrl+S" disabled={loading} onClick={onSave} />
       <IconButton icon={preview ? "edit" : "eye"} label={preview ? "返回编辑" : "预览笔记"} disabled={loading} aria-pressed={preview} onClick={() => setPreview(v => !v)} />
       <IconButton icon="settings" label="笔记设置" onClick={onSettings} />
     </div></div>

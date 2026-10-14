@@ -1,3 +1,4 @@
+import {JudgeResult} from "./judge-result";
 import { useResizablePanel } from "./resizable-panel";
 import { IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
@@ -19,9 +20,6 @@ function Confirm({ title, children, accept, dismiss }: { title: string; children
     <h2>{title}</h2>{children}<div><button onClick={dismiss}>取消</button><button className="primary" onClick={accept}>确认</button></div>
   </dialog>;
 }
-function printable(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? "";
-}
 export function useOnlineJudge({ identity, question, language, solution = "default", code }: {
   identity: Identity | null; question: RemoteQuestion | undefined; language: Language; solution?: string; code: string;
 }) {
@@ -40,7 +38,8 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
   const input = question ? cases[question.questionId] ?? question.exampleTestcases ?? question.sampleTestCase ?? "" : "";
   const related = jobs.filter(j => j.snapshot.account === account && j.snapshot.questionId === question?.questionId);
   const current = [...related].reverse().find(j => j.snapshot.language === language && (j.snapshot.solution ?? "default") === solution);
-  const blocked = related.some(j => ["waiting", "unknown"].includes(j.state.state));
+  const blockingJobs = related.filter(j => ["waiting", "unknown"].includes(j.state.state));
+  const blocked = blockingJobs.length>0;
   function remember(job: Job) { setJobs(old => [...old.filter(j => j.snapshot.id !== job.snapshot.id), job]); }
   useEffect(() => {
     const token = ++generation.current;
@@ -116,33 +115,29 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
   const panel = question && <>
     <div className="judge-toggle"><IconButton icon="tests" label={open ? "收起测试与结果" : "测试用例与结果"} aria-expanded={open} onClick={() => setOpen(!open)} /></div>
     <section ref={resize.panel} style={resize.style} hidden={!open} className="judge-panel resizable-panel" aria-label="在线评测">{resize.handle}<div className="judge-content">
-      <label>测试用例<textarea aria-label="在线测试用例" spellCheck={false} value={input} onChange={e => setCases(old => ({ ...old, [question.questionId]: e.target.value }))} /></label>
+      <label>运行用例<textarea aria-label="在线测试用例" spellCheck={false} value={input} onChange={e => setCases(old => ({ ...old, [question.questionId]: e.target.value }))} /></label>
       {phase && <p role="status">{phase}</p>}
       {error && <p role="alert" className="error">{error}</p>}
       {current && <div className="judge-result">
-        <strong>{current.snapshot.kind === "submission" ? "正式提交" : "在线运行"} · {current.snapshot.language}</strong>
+        <div className="judge-result-kind">{current.snapshot.kind === "submission" ? "正式提交" : "在线运行"} · {current.snapshot.language}</div>
         {stale && <p className="cache-warning">结果对应发起时的代码和用例快照；当前内容已改变。</p>}
         {current.state.state === "waiting" && <><p>评测编号：{current.state.server_id}</p>
           {busy ? <button onClick={stopWaiting}>停止等待</button> : <button onClick={() => resume(current)}>继续查询</button>}</>}
-        {current.state.state === "unknown" && <><p className="error">{current.state.message}</p><button disabled={busy} onClick={() => setAck(current)}>我已核查官方记录</button></>}
+        {current.state.state === "unknown" && <><p className="error">{current.state.message}</p><button disabled={busy} onClick={() => setAck(current)}>{current.snapshot.kind==="online-run"?"处理未确认运行":"我已核查官方记录"}</button></>}
         {["rejected", "acknowledged"].includes(current.state.state) && <p>{"message" in current.state ? current.state.message : ""}</p>}
-        {current.state.state === "finished" && <>
-          <p>{printable(current.state.result.status_msg ?? "评测已结束")} · 编号 {current.state.server_id}</p>
-          {current.snapshot.kind === "online-run" && <p className="cache-warning">这是测试用例运行结果，不代表正式提交通过。</p>}
-          {Object.entries(current.state.result).filter(([key]) => key !== "status_msg").map(([key, value]) =>
-            <details key={key} open={["full_compile_error", "full_runtime_error", "code_output", "expected_output"].includes(key)}><summary>{key}</summary><pre>{printable(value)}</pre></details>)}
-        </>}
+        {current.state.state === "finished" && <JudgeResult result={current.state.result} submission={current.snapshot.kind==="submission"} serverId={current.state.server_id} input={current.snapshot.testCase}/>}
+
       </div>}
-      {blocked && !current && <p>其他解答有待确认评测，请切回处理。</p>}
+      {blockingJobs.filter(job=>job.snapshot.id!==current?.snapshot.id).map(job=><section className="judge-blocker" key={job.snapshot.id} aria-label="待处理评测"><strong>{job.snapshot.language} · {job.snapshot.solution??"default"}</strong><span>{job.state.state==="waiting"?"评测尚未结束":"发送结果待确认"}</span>{job.state.state==="waiting"?<button disabled={busy} onClick={()=>resume(job)}>继续查询</button>:<button disabled={busy} onClick={()=>setAck(job)}>{job.snapshot.kind==="online-run"?"处理未确认运行":"我已核查官方记录"}</button>}</section>)}
     </div></section>
     {confirm && <Confirm title="确认正式提交" dismiss={() => setConfirm(null)} accept={() => send(confirm)}>
       <p>将这份 {confirm.language} 代码快照发送给 leetcode.cn，记入账号 {identity?.username} 的正式提交记录。</p>
       <p>题目：{confirm.slug}；代码 {confirm.code.length} 字符。不会上传笔记。</p>
     </Confirm>}
-    {ack && <Confirm title="解除未知提交保护" dismiss={() => setAck(null)} accept={() => acknowledge(ack)}>
-      <p>只有确认已查看官方提交记录后再继续。上次请求可能已被接收，再次提交可能产生重复记录。</p>
+    {ack && <Confirm title={ack.snapshot.kind==="online-run"?"处理未确认运行":"解除未知提交保护"} dismiss={() => setAck(null)} accept={() => acknowledge(ack)}>
+      <p>{ack.snapshot.kind==="online-run"?"上次运行可能已被接收，但没有可查询的编号。解除保护后可以手动重新运行，也可能产生重复运行。":"只有确认已查看官方提交记录后再继续。上次请求可能已被接收，再次提交可能产生重复记录。"}</p>
       <p>这一步只解除保护，不会自动重发代码。</p>
     </Confirm>}
   </>;
-  return { busy, blocked, run: () => request("online-run"), submit: () => request("submission"), panel };
+  return { busy, blocked, blockedReason:blocked?"有尚未结束或待确认的评测，请打开测试与结果处理":"", run: () => request("online-run"), submit: () => request("submission"), panel };
 }
