@@ -50,3 +50,16 @@ test("无效语言与操作 ID 拒绝", () => {
   assert.throws(() => draftKey({ ...key, language: "shell" } as any));
   assert.throws(() => createSnapshot(key, { code: "", cursor: 0, revision: 0 }, "submission", "", ""));
 });
+
+test("命名解答保留旧键并隔离同语言代码与结果",()=>{
+ const a={...key,solution:"a".repeat(32)},b={...key,solution:"b".repeat(32)},book=new DraftBook();
+ assert.equal(draftKey(key),draftKey({...key,solution:"default"}));
+ book.edit(a,"same",1);book.edit(b,"same",2);
+ const old=book.read(a),snapshot=createSnapshot(a,old,"submission","","named");
+ assert.equal(snapshot.solution,a.solution);
+ assert.equal(belongsToCurrent({state:"finished",snapshot,message:"ok"},b,book.read(b)),false);
+ const gate=new SubmissionGate();gate.begin(snapshot);
+ assert.throws(()=>gate.begin(createSnapshot(b,book.read(b),"submission","","other")));
+ assert.equal(book.read(key).code,"");
+ for(const id of ["../escape","","A".repeat(32)])assert.throws(()=>draftKey({...key,solution:id}));
+});

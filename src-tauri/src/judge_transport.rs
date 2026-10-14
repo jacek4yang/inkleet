@@ -8,6 +8,8 @@ use std::time::Duration;
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub solution: Option<String>,
     pub id: String, pub account: String, pub question_id: String, pub slug: String,
     pub language: String, pub code: String, pub test_case: String, pub kind: Kind,
 }
@@ -34,6 +36,7 @@ fn identifier(value: &str, max: usize) -> bool {
         && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 pub fn validate(snapshot: &Snapshot) -> Result<(), String> {
+    if snapshot.solution.as_deref().is_some_and(|id|id!="default" && (id.len()!=32 || !id.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)))) { return Err("无效解答标识".into()); }
     if !identifier(&snapshot.id, 80) || snapshot.account.is_empty() || snapshot.account.len() > 200 {
         return Err("评测操作标识或账号无效".into());
     }
@@ -168,7 +171,7 @@ async fn bounded_json(mut response: reqwest::Response) -> Result<Value, String> 
 mod tests {
     use super::*;
     fn snapshot() -> Snapshot {
-        Snapshot { id: "test-1".into(), account: "test-user".into(), question_id: "1".into(),
+        Snapshot { solution:None, id: "test-1".into(), account: "test-user".into(), question_id: "1".into(),
             slug: "fixture".into(), language: "rust".into(), code: "// authored fixture".into(),
             test_case: "[1,2]".into(), kind: Kind::OnlineRun }
     }

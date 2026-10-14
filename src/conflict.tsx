@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
-export type FileConflict = { key: string; saveKey: string; problem: string; language: string; kind: "code" | "notes"; local: string; external: string | null };
+export type FileConflict = { key: string; saveKey: string; problem: string; language: string; solution?: string; kind: "code" | "notes"; local: string; external: string | null };
 export function ConflictDialog({ conflict, onRefresh, onResolve, onClose }: {
   conflict: FileConflict; onRefresh: () => Promise<void>;
   onResolve: (choice: "local" | "external") => Promise<void>; onClose: () => void;

@@ -7,7 +7,7 @@ export const languages = [
   { id: "java", label: "Java", extension: "java" },
 ] as const;
 export type Language = typeof languages[number]["id"];
-export type DraftKey = Readonly<{ account: string; problem: string; language: Language }>;
+export type DraftKey = Readonly<{ account: string; problem: string; language: Language; solution?: string }>;
 export type Draft = Readonly<{ code: string; cursor: number; revision: number }>;
 export type OperationKind = "online-run" | "local-run" | "submission";
 export type Snapshot = Readonly<DraftKey & {
@@ -23,7 +23,9 @@ export type Outcome =
 export function draftKey(key: DraftKey): string {
   if (!key.account || !key.problem || !languages.some(l => l.id === key.language))
     throw new Error("无效的草稿标识");
-  return JSON.stringify([key.account, key.problem, key.language]);
+  const solution = key.solution ?? "default";
+  if (solution !== "default" && !/^[a-f0-9]{32}$/.test(solution)) throw new Error("无效解答标识");
+  return JSON.stringify(solution === "default" ? [key.account, key.problem, key.language] : [key.account, key.problem, key.language, solution]);
 }
 
 export function createSnapshot(
@@ -33,7 +35,7 @@ export function createSnapshot(
   if (!id) throw new Error("操作 ID 不能为空");
   // 所有字段都是标量；复制并冻结，后续编辑不能改变评测对应的代码。
   return Object.freeze({
-    account: key.account, problem: key.problem, language: key.language,
+    account: key.account, problem: key.problem, language: key.language, solution: key.solution,
     id, kind, code: draft.code, testCase, revision: draft.revision,
   });
 }

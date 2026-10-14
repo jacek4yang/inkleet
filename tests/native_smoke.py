@@ -66,6 +66,27 @@ def source_text(css):
     lines=cmd("POST",f"/element/{element(css)}/elements",{"using":"css selector","value":".cm-line"})
     return "\n".join(cmd("GET",f"/element/{line[EID]}/property/textContent") for line in lines)
 
+
+def reveal_debug_control(css):
+    # Native WebKit does not reliably auto-scroll controls in nested inspectors.
+    # Use the real pointer wheel over the outer padding, never execute JS clicks.
+    for _ in range(12):
+        panel=cmd("GET",f"/element/{element('.debug-body')}/rect")
+        try: target=cmd("GET",f"/element/{element(css)}/rect")
+        except RuntimeError as error:
+            if "element not interactable" not in str(error): raise
+            target=None
+        top=panel["y"]+4; bottom=panel["y"]+panel["height"]-4
+        if target and target["height"]>0 and target["y"]>=top and target["y"]+target["height"]<=bottom:
+            return
+        window=cmd("GET","/window/rect")
+        x=int(window["x"]+panel["x"]+4)
+        y=int(window["y"]+panel["y"]+panel["height"]/2)
+        direction="5" if target is None or target["y"]+target["height"]>bottom else "4"
+        subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","--repeat","2","--delay","80",direction],check=True)
+        time.sleep(.15)
+    raise AssertionError("Debug control remains unreachable through real wheel: "+css)
+
 def click(css):
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
@@ -198,6 +219,37 @@ try:
     wait_for(lambda: source.exists() and source.read_text() == marker, "plain source persisted")
     wait_for(lambda: "已保存到本机文件" in text('.statusbar[role="status"]'), "save acknowledgement")
     screenshot("desktop-code-native.png")
+
+    def named_action(action,name):
+        click(".solution-menu>summary")
+        button=cmd("POST","/element",{"using":"xpath","value":f"//details[contains(@class,'solution-menu')]/div/button[text()='{action}']"})
+        cmd("POST",f"/element/{button[EID]}/click",{})
+        fill('[aria-label="解答名称"]',name)
+        click('.solution-name-dialog button[type="submit"]')
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".solution-name-dialog"}),"named operation committed")
+    named_action("复制解答","双指针")
+    first_id=cmd("GET",f"/element/{element('select[aria-label=\"解答\"]')}/property/value")
+    assert len(first_id)==32
+    named_source=source.parent/".solutions"/"rust"/first_id/"solution.rs"
+    wait_for(lambda:named_source.exists() and named_source.read_text()==marker,"native duplicate preserves current source")
+    fill(code,"// named solution")
+    wait_for(lambda:named_source.read_text()=="// named solution","named source saves independently")
+    assert source.read_text()==marker
+    named_action("重命名","优化版")
+    assert json.loads(named_source.with_name("name.json").read_text())["name"]=="优化版"
+    assert cmd("GET",f"/element/{element('select[aria-label=\"解答\"]')}/property/value")==first_id
+    screenshot("named-solutions-native.png")
+    click('select[aria-label="解答"] option[value="default"]')
+    wait_for(lambda:source_text(code)==marker,"default solution unchanged")
+    stop();start()
+    wait_for(lambda:element(f'select[aria-label="解答"] option[value="{first_id}"]'),"named solution listed after restart")
+    click(f'select[aria-label="解答"] option[value="{first_id}"]')
+    wait_for(lambda:source_text(code)=="// named solution","named source restored after native restart")
+    assert json.loads(named_source.with_name("name.json").read_text())["name"]=="优化版"
+    click('select[aria-label="解答"] option[value="default"]')
+    wait_for(lambda:source_text(code)==marker,"legacy default remains intact after restart")
+    (evidence/"NAMED_SOLUTIONS_NATIVE_RESULT.txt").write_text("PASS: real UI duplicate and rename, immutable ID, independent plain-text persistence, restart restoration, unchanged legacy default. No simulated IPC.\n")
+
     click('nav[aria-label="工作区"] button:last-child')
     note = '[aria-label="Markdown 笔记"]'
     fill(note, "# Native note")
@@ -287,7 +339,9 @@ try:
             {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}
         ]}]})
         typed="return len(values)"
-        cmd("POST",f"/element/{element(code)}/value",{"text":typed,"value":list(typed)})
+        # Send once through the OS keyboard; WebKit element/value may reset its transport.
+        # Never replay an uncertain mutation. Enter and exact source assertions remain below.
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","5",typed],check=True)
         (evidence/"indent-input-observation.json").write_text(json.dumps({"rendered":text(code),"lines":source_text(code)},ensure_ascii=False))
         wait_for(lambda:source_text(code)=="def solve(values):\n    return len(values)","native Python Enter produces four-space indentation")
         python_saved=source.with_name("solution.py")
@@ -304,7 +358,7 @@ try:
             {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"},
             {"type":"keyDown","value":"\ue003"},{"type":"keyUp","value":"\ue003"}
         ]}]})
-        cmd("POST",f"/element/{element(code)}/value",{"text":"pass","value":list("pass")})
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","5","pass"],check=True)
         wait_for(lambda:source_text(code)=="def solve(values):\npass","native Backspace removes the whole indentation unit")
         (evidence/"EDITOR_KEYS_RESULT.txt").write_text("PASS: actual native WebKitGTK keyboard input; Python Enter uses four spaces, Shift+Tab dedents, Tab restores indentation and Backspace removes the full indentation unit. Completion popup click tested separately.\n")
         fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
@@ -451,7 +505,9 @@ try:
         wait_for(lambda:all(value in child_values() for value in ["3","-1","8"]),"expanded array children preserve exact values")
 
         fill('[aria-label="调试表达式输入"]',"inner_total")
+        reveal_debug_control('[aria-label="添加监视表达式"]')
         click('[aria-label="添加监视表达式"]')
+        reveal_debug_control('[aria-label="刷新监视 inner_total"]')
         click('[aria-label="刷新监视 inner_total"]')
         def watch_result():
             return cmd("GET",f"/element/{element('.debug-watch > span')}/property/textContent")
@@ -523,8 +579,8 @@ try:
         wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
         wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
         def java_total():
-            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='total']]/code"})[EID]
-            return cmd("GET",f"/element/{node}/text")
+            node=element('.debug-variable > button[aria-label="total"] + code')
+            return cmd("GET",f"/element/{node}/property/textContent")
         wait_for(lambda: java_total()=="0","Java initial total")
         wait_for(lambda: "部分断点尚未验证" not in text(".debug-panel"),"Java asynchronous breakpoint verification reaches the UI")
         screenshot("java-debug-native.png")
@@ -611,8 +667,8 @@ try:
                 wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
                 wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
                 def local_total():
-                    node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='total']]/code"})[EID]
-                    return cmd("GET",f"/element/{node}/text")
+                    node=element('.debug-variable > button[aria-label="total"] + code')
+                    return cmd("GET",f"/element/{node}/property/textContent")
                 wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
                 screenshot(group+"-debug-native.png")
                 for _ in range(3):

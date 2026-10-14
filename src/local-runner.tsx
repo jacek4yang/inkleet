@@ -3,11 +3,11 @@ import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { DebugPanel } from "./debug-panel";
 import type { Language } from "./domain";
-type Snapshot = { code: string; input: string; metadata: string; title: string; language: Language };
+type Snapshot = { documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "compiling", "running", "canceling"].includes(r.phase);
-export function LocalRunner({ code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine, onSettings }: {
-  onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (line: number) => void;
+export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine, onSettings }: {
+  documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (line: number) => void;
 }) {
   const [input, setInput] = useState(sampleInput);
   const [pane, setPane] = useState<"run" | "debug">("run");
@@ -34,7 +34,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
   async function run() {
     if (guard.current || busy(result)) return;
     guard.current = true; setPending(true); setError("");
-    const next = { code, input, metadata, title, language };
+    const next = { documentKey, code, input, metadata, title, language };
     try {
       const id = await invoke<number>("start_local_run", { snapshot: next });
       if (alive.current) {
@@ -52,7 +52,7 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
     catch (e) { if (alive.current) setError(String(e)); }
     finally { guard.current = false; }
   }
-  const stale = snapshot && (snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
+  const stale = snapshot && (snapshot.documentKey !== documentKey || snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
   return <section className="local-runner" aria-label="本地运行">
     <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><div className="local-actions"><IconButton icon="settings" label="运行与调试设置" onClick={onSettings} /><IconButton icon="close" label="收起" onClick={onClose} /></div></header>
 
@@ -69,6 +69,6 @@ export function LocalRunner({ code, language, title, metadata, sampleInput, onCl
 
     {result && !busy(result) && <small className="exit-code" title="本地结果不代表通过力扣判题">退出码 {result.exitCode ?? "无"}</small>}
     </div>
-    <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel snapshot={{ code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
+    <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel snapshot={{ documentKey, code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
   </section>;
 }

@@ -1,3 +1,4 @@
+import { SolutionPicker } from "./solution-picker";
 import { QuestionSidebar } from "./question-sidebar";
 import { IconButton } from "./icons";
 import { SettingsHub, type SettingsSection, type SettingsAction } from "./settings-hub";
@@ -50,6 +51,10 @@ function App() {
   const [catalogueMode, setCatalogueMode] = useState<"search" | "link">("search");
   const [problemId, setProblemId] = useState("");
   const [language, setLanguage] = useState<Language>("rust");
+  const [solutionSelections,setSolutionSelections] = useState<Record<string,string>>({});
+  const solutionGroup = JSON.stringify([problemId,language]);
+  const solution = solutionSelections[solutionGroup] ?? "default";
+  const selectSolution = (id:string) => setSolutionSelections(current => ({...current,[solutionGroup]:id}));
   const [tab, setTab] = useState("problem");
   const [focus, setFocus] = useState(false);
   const [revision, refresh] = useState(0);
@@ -60,13 +65,13 @@ function App() {
   const sequence = useRef(0);
   const notes = useRef(new Map<string, string>());
   const queue = useRef(new SaveQueue());
-  const activeKey = problemId ? draftKey({ account: "local", problem: problemId, language }) : "";
+  const activeKey = problemId ? draftKey({ account: "local", problem: problemId, language, solution }) : "";
   const selected = useRef(activeKey); selected.current = activeKey;
   const problem = problems.find(p => p.id === problemId);
   const baseCode = problem?.official.codeSnippets?.find(s => s.langSlug === language)?.code ?? "";
   const doc = documents.current.get(activeKey) ?? { code: baseCode, notes: notes.current.get(problemId) ?? "" };
 
-  const judge = useOnlineJudge({ identity, question: problem?.official, language, code: doc.code });
+  const judge = useOnlineJudge({ identity, question: problem?.official, language, solution, code: doc.code });
   const editorLoading = !problem || loading || !documents.current.has(activeKey);
 
   useEffect(() => {
@@ -76,7 +81,7 @@ function App() {
     queue.current.idle.then(async () => {
       if (!documents.current.has(activeKey)) {
         if (isTauri()) {
-          const loaded = await invoke<{code: string | null; notes: string | null}>("load_document", { problem: problemId, language });
+          const loaded = await invoke<{code: string | null; notes: string | null}>("load_document", { problem: problemId, language, solution });
           // 迟到的读取不能覆盖已打开/已编辑的草稿；笔记跨语言共享，不能被新语言读取重置。
           if (!notes.current.has(problemId)) {
             notes.current.set(problemId, loaded.notes ?? "");
@@ -124,7 +129,7 @@ function App() {
     queue.current.enqueue({
       key: saveKey,
       write: async () => {
-        await invoke("save_text", { problem: problemId, language, kind, text, expected: persisted.current.get(saveKey) ?? null });
+        await invoke("save_text", { problem: problemId, language, solution, kind, text, expected: persisted.current.get(saveKey) ?? null });
         persisted.current.set(saveKey, text);
       },
       saved: () => { if (selected.current === key && generation === sequence.current) setStatus("已保存到本机文件"); },
@@ -146,14 +151,14 @@ function App() {
   }
   async function readConflict(target: Omit<FileConflict, "local" | "external">): Promise<FileConflict> {
     await queue.current.idle;
-    const loaded = await invoke<{ code: string | null; notes: string | null }>("load_document", { problem: target.problem, language: target.language });
+    const loaded = await invoke<{ code: string | null; notes: string | null }>("load_document", { problem: target.problem, language: target.language, solution: target.solution });
     const local = target.kind === "notes" ? notes.current.get(target.problem) ?? "" : documents.current.get(target.key)?.code ?? "";
     return { ...target, local, external: loaded[target.kind] };
   }
   async function openConflict(kind: "code" | "notes") {
     const token = ++conflictSequence.current, key = activeKey;
     try {
-      const value = await readConflict({ key, saveKey: kind === "notes" ? problemId + "/notes" : key, problem: problemId, language, kind });
+      const value = await readConflict({ key, saveKey: kind === "notes" ? problemId + "/notes" : key, problem: problemId, language, solution, kind });
       if (token === conflictSequence.current && selected.current === key) setConflict(value);
     } catch (e) { if (selected.current === key) setStatus("无法读取对比：" + String(e)); }
   }
@@ -164,7 +169,7 @@ function App() {
     await queue.current.idle;
     if (currentText() !== current.local) throw new Error("编辑器内容已改变，请先刷新对比");
     const resolved = await invoke<{ text: string | null; backup: string }>("resolve_file_conflict", {
-      problem: current.problem, language: current.language, kind: current.kind,
+      problem: current.problem, language: current.language, solution: current.solution, kind: current.kind,
       expected: current.external, local: current.local, choice,
     });
     persisted.current.set(current.saveKey, resolved.text);
@@ -189,7 +194,7 @@ function App() {
   async function openRecovery(kind: "code" | "notes") {
     const key = activeKey;
     try {
-      const target = await readConflict({ key, saveKey: kind === "notes" ? problemId + "/notes" : key, problem: problemId, language, kind });
+      const target = await readConflict({ key, saveKey: kind === "notes" ? problemId + "/notes" : key, problem: problemId, language, solution, kind });
       if (selected.current === key) setRecovery(target);
     } catch (e) { if (selected.current === key) setStatus("无法打开恢复副本：" + String(e)); }
   }
@@ -200,7 +205,7 @@ function App() {
     await queue.current.idle;
     if (selected.current !== target.key || currentText() !== target.local) throw new Error("当前草稿已变化，请刷新记录与当前版本");
     const result = await invoke<{ text: string | null; backup: string }>("restore_recovery", {
-      problem: target.problem, language: target.language, kind: target.kind, id, side, reviewed, expected: target.external, local: target.local,
+      problem: target.problem, language: target.language, solution: target.solution, kind: target.kind, id, side, reviewed, expected: target.external, local: target.local,
     });
     persisted.current.set(target.saveKey, result.text);
     if (currentText() !== target.local) {
@@ -302,9 +307,13 @@ function App() {
       {cacheWarning && <p className="cache-warning error" role="alert">{cacheWarning}</p>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
-      <div className="pane-heading"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select><div className="actions"><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
+      <div className="pane-heading"><div className="document-selectors"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select>{problem && <SolutionPicker key={solutionGroup} problem={problemId} language={language} value={solution} code={doc.code} template={baseCode} disabled={editorLoading} onChange={selectSolution} onCreated={(entry,text) => {
+        const key=draftKey({account:"local",problem:problemId,language,solution:entry.id});
+        documents.current.set(key,{code:text,notes:notes.current.get(problemId)??""});
+        persisted.current.set(key,isTauri()?text:null);selectSolution(entry.id);
+      }} />}</div><div className="actions"><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} onClick={() => setLocalRunner(v => !v)} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title="将当前代码与用例发送到中国站运行">运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title="确认后正式提交到中国站">提交</button></div></div>
       {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor onSettings={() => setSettings("environment")} onStatus={setLanguageStatus} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedLine={paused.key === activeKey ? paused.line : 0} value={doc.code} onChange={text => edit("code", text)} />}
-      {localRunner && problem && <LocalRunner onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={problemId} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} onClose={() => setLocalRunner(false)} />}
+      {localRunner && problem && <LocalRunner onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={line => setPaused({ key: activeKey, line })} key={activeKey} documentKey={activeKey} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} onClose={() => setLocalRunner(false)} />}
       {judge.panel}
     </section>
     {settings && <SettingsHub initial={settings} languageStatus={languageStatus} onClose={() => setSettings(null)} actions={settingsActions} />}

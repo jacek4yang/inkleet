@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     use crate::judge_transport::Kind;
     fn snapshot(id: &str) -> Snapshot {
-        Snapshot { id: id.into(), account: "fixture-account".into(), question_id: "1".into(),
+        Snapshot { solution:None, id: id.into(), account: "fixture-account".into(), question_id: "1".into(),
             slug: "fixture".into(), language: "rust".into(), code: "// authored journal fixture".into(),
             test_case: "[1]".into(), kind: Kind::Submission }
     }
