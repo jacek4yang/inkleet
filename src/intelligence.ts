@@ -12,7 +12,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean };
+type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; prepareRename?: boolean };
 export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" | "c" | "cpp" };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -234,7 +234,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
   const references = findReferences((pos, doc) => request("references", pos, doc), status, !commandsOwned);
-  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned, () => { const id=session?.id; return () => !closed && id!==undefined && session?.id===id; });
+  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned, () => { const id=session?.id; return () => !closed && id!==undefined && session?.id===id; }, (pos,doc) => session?.prepareRename ? request("prepareRename",pos,doc) : Promise.resolve({supported:false}));
   const extensions: Extension[] = [
     ...references.extensions,
     ...rename.extensions,

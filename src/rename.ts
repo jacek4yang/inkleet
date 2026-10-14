@@ -1,6 +1,6 @@
 import { isolateHistory } from "@codemirror/commands";
 import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
-import { EditorView, keymap, showTooltip, type Tooltip } from "@codemirror/view";
+import { EditorView, keymap, showTooltip, repositionTooltips, type Tooltip } from "@codemirror/view";
 
 type Request = (pos: number, doc: Text, name: string) => Promise<unknown>;
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -31,6 +31,7 @@ function edits(doc: Text, value: unknown) {
 export function renameSymbol(
   request: Request, status: (text: string) => void, keybindings=true,
   captureValidity: () => (() => boolean) = () => () => true,
+  prepare?: (pos:number,doc:Text)=>Promise<unknown>,
 ) {
   const effect = StateEffect.define<Tooltip | null>();
   let generation = 0, destroyed = false;
@@ -48,8 +49,8 @@ export function renameSymbol(
     if(view.composing)return false;
     const doc = view.state.doc, pos = view.state.selection.main.head, line = doc.lineAt(pos);
     const symbol = [...line.text.matchAll(/[\p{L}\p{N}_$]+/gu)].find(m => pos >= line.from + m.index! && pos <= line.from + m.index! + m[0].length);
-    if (!symbol) { status("请将光标放在要重命名的符号上"); return true; }
-    const originalName=symbol[0];
+    if (!symbol&&!prepare) { status("请将光标放在要重命名的符号上"); return true; }
+    let originalName=symbol?.[0]??"";
     const token = ++generation, sessionCurrent=captureValidity();
     const current=()=>!destroyed&&token===generation&&view.state.doc===doc&&sessionCurrent();
     let owned:HTMLElement|null=null;
@@ -70,12 +71,14 @@ export function renameSymbol(
       const review=document.createElement("section"); review.className="lsp-rename-preview";review.hidden=true;review.setAttribute("aria-label","重命名预览");
       const heading=document.createElement("div");heading.className="lsp-rename-summary";heading.tabIndex=-1;
       const rows=document.createElement("div");rows.className="lsp-rename-changes";
-      const commit=document.createElement("button");commit.type="button";commit.textContent="应用";
+      const commit=document.createElement("button");commit.type="button";commit.textContent="应用";commit.dataset.action="rename-apply";
       const back=document.createElement("button");back.type="button";back.textContent="返回";
       review.append(heading,rows,commit,back);
       const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "取消"; cancel.onclick = dismiss;
       const error = document.createElement("p"); error.setAttribute("role", "alert");
       dom.append(editing,review,cancel,error);
+      let ready=!prepare;
+      input.readOnly=!ready;apply.disabled=!ready;preview.disabled=!ready;
       let pending = false, composing = false, proposed:ReturnType<typeof edits>|null=null;
       function applyChanges(changes:ReturnType<typeof edits>){
         if(!current()||composing||view.composing){proposed=null;dismiss();return;}
@@ -98,10 +101,13 @@ export function renameSymbol(
         }
         const restore=dom.contains(document.activeElement);
         proposed=changes;heading.textContent="本题源码 · "+changes.length+" 处修改";
-        editing.hidden=true;review.hidden=false;if(restore)heading.focus();
+        dom.style.visibility="hidden";
+        editing.hidden=true;review.hidden=false;review.append(cancel);
+        repositionTooltips(view);
+        view.requestMeasure({read:()=>null,write:()=>{if(current()&&dom.isConnected){dom.style.visibility="";if(restore&&dom.contains(document.activeElement))heading.focus();}}});
       }
       async function submit(previewOnly:boolean){
-        if(pending||composing||view.composing||!current()||!review.hidden)return;
+        if(!ready||pending||composing||view.composing||!current()||!review.hidden)return;
         const name=input.value.trim();
         if(!name||new TextEncoder().encode(name).length>128||!/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(name)){error.textContent="请输入有效的标识符（最多 128 字节）";return;}
         if(name===originalName){dismiss();return;}
@@ -132,8 +138,27 @@ export function renameSymbol(
       dom.onsubmit=event=>{event.preventDefault();void submit(false);};
       preview.onclick=()=>{void submit(true);};
       commit.onclick=()=>{if(proposed)applyChanges(proposed);};
-      back.onclick=()=>{proposed=null;review.hidden=true;editing.hidden=false;error.textContent="";input.focus();input.select();};
-      return {dom,mount(){input.focus();input.select();},destroy(){proposed=null;owned=null;}};
+      back.onclick=()=>{proposed=null;dom.insertBefore(cancel,error);review.hidden=true;editing.hidden=false;error.textContent="";input.focus();input.select();};
+      async function initialize(){
+        if(!prepare)return;
+        try{
+          const response=await prepare(pos,doc);
+          if(!current())return;
+          if(!object(response))throw Error("重命名准备结果无效");
+          if(response.supported===false){
+            if(!symbol)throw Error("请将光标放在要重命名的符号上");
+            originalName=symbol[0];dom.dataset.prepared="fallback";
+          }else if(response.supported===true&&object(response.range)){
+            const from=offset(doc,response.range.start),to=offset(doc,response.range.end);
+            if(from===null||to===null||from>=to||pos<from||pos>to)throw Error("重命名准备范围无效");
+            if(response.placeholder!==null&&response.placeholder!==undefined&&(typeof response.placeholder!=="string"||!response.placeholder||new TextEncoder().encode(response.placeholder).length>512))throw Error("重命名占位名称无效");
+            originalName=response.placeholder??doc.sliceString(from,to);dom.dataset.prepared="server";
+          }else throw Error("此位置不能重命名");
+          input.value=originalName;ready=true;input.readOnly=false;apply.disabled=false;preview.disabled=false;
+          if(dom.contains(document.activeElement)){input.focus();input.select();}
+        }catch(e){if(current())error.textContent=String(e).slice(0,500);}
+      }
+      return {dom,mount(){input.focus();input.select();void initialize();},destroy(){proposed=null;owned=null;}};
     } }) });
     return true;
   }

@@ -745,6 +745,7 @@ try {
   assert.equal(await renameRequests(),previewBefore+1);
   assert.equal(await renamePreview.locator(".lsp-rename-change").count(),2);
   assert.deepEqual(await renamePreview.locator(".lsp-rename-after").allTextContents(),["previewed","previewed"]);
+  assert.deepEqual(await renamePreview.locator(".lsp-rename-before").first().evaluate(el=>{const s=getComputedStyle(el);return {border:s.borderTopWidth,background:s.backgroundColor,padding:s.paddingTop};}),{border:"0px",background:"rgba(0, 0, 0, 0)",padding:"2px"},"rename preview avoids Markdown card styling");
   await lspPage.screenshot({path:"evidence/rename-preview.png"});
   await renamePreview.getByRole("button",{name:"应用",exact:true}).click();
   assert.equal(await lspEditor.innerText(),"previewed = []\npreviewed.append(1)");
@@ -1528,12 +1529,19 @@ try {
     const {basicSetup}=await import("/node_modules/.vite/deps/codemirror.js");
     const {renameSymbol}=await import("/src/rename.ts");
     const {formatOnSave}=await import("/src/format-on-save.ts");
-    const state=window.__renameTest={formats:0,defer:false,reply:null};
+    const state=window.__renameTest={formats:0,defer:false,reply:null,requests:0,prepares:0,prepareMode:"fallback",prepareReply:null};
     const rename=renameSymbol(async(_pos,_doc,name)=>{
+      state.requests++;
       const result=[{range:{start:{line:0,character:0},end:{line:0,character:5}},newText:name}];
       if(state.defer)return new Promise(resolve=>{state.reply=()=>resolve(result);});
       return result;
-    },()=>{});
+    },()=>{},true,()=>()=>true,async()=>{
+      state.prepares++;
+      if(state.prepareMode==="reject")return null;
+      if(state.prepareMode==="defer")return new Promise(resolve=>{state.prepareReply=()=>resolve({supported:true,range:{start:{line:0,character:0},end:{line:0,character:5}},placeholder:"items"});});
+      if(state.prepareMode==="server")return {supported:true,range:{start:{line:0,character:0},end:{line:0,character:5}},placeholder:"items"};
+      return {supported:false};
+    });
     const view=new EditorView({state:EditorState.create({doc:"items = []",extensions:[basicSetup,rename.extensions,formatOnSave({enabled:()=>true,saved:async()=>true,request:async text=>{state.formats++;return text;},report:()=>{}})]}),parent:document.querySelector("#editor")});
     state.view=view;state.rename=rename;view.focus();view.dispatch({selection:{anchor:1}});
   });
@@ -1567,6 +1575,26 @@ try {
   assert.equal(await renamePage.evaluate(()=>window.__renameTest.view.state.doc.toString()),"items = []");
   await renamePage.keyboard.type("x");
   await renamePage.waitForFunction(()=>window.__renameTest.formats===1);
+
+  await renamePage.evaluate(()=>{const s=window.__renameTest;s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:"items = []"},selection:{anchor:1}});s.prepareMode="server";});
+  await renamePage.keyboard.press("F2");
+  await renamePage.locator('.lsp-rename[data-prepared="server"]').waitFor();
+  assert.equal(await renamePage.getByRole("textbox",{name:"新名称",exact:true}).inputValue(),"items");
+  await renamePage.getByRole("button",{name:"取消",exact:true}).click();
+  await renamePage.evaluate(()=>{window.__renameTest.prepareMode="reject";});
+  const beforeRejectedPrepare=await renamePage.evaluate(()=>window.__renameTest.requests);
+  await renamePage.keyboard.press("F2");
+  await renamePage.getByRole("alert").filter({hasText:"重命名准备结果无效"}).waitFor();
+  assert.equal(await renamePage.getByRole("textbox",{name:"新名称",exact:true}).isEditable(),false);
+  await renamePage.keyboard.press("Enter");
+  assert.equal(await renamePage.evaluate(()=>window.__renameTest.requests),beforeRejectedPrepare,"rejected preparation cannot fall back to rename");
+  await renamePage.getByRole("button",{name:"取消",exact:true}).click();
+  await renamePage.evaluate(()=>{window.__renameTest.prepareMode="defer";});
+  await renamePage.keyboard.press("F2");
+  await renamePage.waitForFunction(()=>typeof window.__renameTest.prepareReply==="function");
+  await renamePage.getByRole("button",{name:"取消",exact:true}).click();
+  await renamePage.evaluate(()=>window.__renameTest.prepareReply());
+  assert.equal(await renamePage.locator(".lsp-rename").count(),0,"canceled prepare cannot reopen name input");
   await renamePage.evaluate(()=>{window.__renameTest.rename.destroy();window.__renameTest.view.destroy();});
   await renamePage.close();
   await writeFile("evidence/RENAME_PREVIEW_UI_RESULT.txt","PASS: real keyboard fast/preview routes, exact stored edits, undo, IME, stale document invalidation, outside focus and default-on formatter exclusion. Browser fixture, native Pyright checked separately.\\n");
