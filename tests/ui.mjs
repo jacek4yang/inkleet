@@ -1110,7 +1110,7 @@ try {
   await conflictPage.goto("http://127.0.0.1:5173");
   const conflictEditor = conflictPage.getByRole("textbox", { name: "代码编辑器", exact: true });
   await conflictPage.locator('.statusbar[data-storage-state="已读取本机文件"]').waitFor();
-  assert.equal(await conflictPage.locator(".statusbar").innerText(),"","successful file loading adds no persistent sentence");
+  assert.equal(await conflictPage.locator(".storage-status").innerText(),"","successful file loading adds no persistent sentence");
   assert.equal(await conflictPage.getByText("在线评测需要登录中国站",{exact:true}).count(),0,"login explanation is not permanent workbench clutter");
   await conflictPage.evaluate(() => { window.__conflictTest.file = "external"; });
   await conflictEditor.fill("local draft");
@@ -1659,6 +1659,10 @@ try {
   await vimPage.keyboard.press("Escape");await vimCode.click();
   await vimPage.waitForFunction(()=>document.querySelector(".editor-status-meta")?.textContent?.includes("Rust"));
   assert.equal(await vimText(),beforeVimToggle,"code/notes focus routing preserves code");
+  await vimNotes.click();
+  await vimPage.getByRole("button",{name:"题目",exact:true}).click();
+  await vimPage.waitForFunction(()=>document.querySelector(".editor-status-meta")?.textContent?.includes("Rust"));
+  assert.equal(await vimPage.locator(".editor-status-mode").innerText(),"NORMAL","closing active notes restores remaining code status");
   await openSettings(vimPage,"编辑器");
   await vimPage.getByRole("checkbox",{name:"Vim",exact:true}).uncheck();
   await vimPage.getByRole("button",{name:"保存设置",exact:true}).click();

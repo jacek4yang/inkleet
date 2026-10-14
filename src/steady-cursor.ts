@@ -21,7 +21,6 @@ export function steadyVimCursor(){
    if(this.destroyed||this.view.composing||!this.cm?.state.vim?.insertMode||this.cm.state.overwrite||!this.view.hasFocus)return [];
    const view=this.view,base=view.scrollDOM.getBoundingClientRect();
    return view.state.selection.ranges.flatMap(range=>{
-    if(!range.empty)return [];
     const pos=view.coordsAtPos(range.head,1);if(!pos)return [];
     const char=view.coordsForChar(range.head),line=view.state.doc.lineAt(range.head);
     const isTab=view.state.sliceDoc(range.head,range.head+1)==="\t";
@@ -38,7 +37,8 @@ export function steadyVimCursor(){
  }),EditorView.theme({
   "&.inkleet-steady-vim .cm-cursorLayer":{animation:"none !important"},
   "&.inkleet-steady-vim:not(.inkleet-composing) .cm-content":{caretColor:"transparent !important"},
-  "&.inkleet-steady-vim .cm-cursorLayer:not(.cm-vimCursorLayer)":{display:"none"},
+  "&.inkleet-steady-vim:not(.inkleet-composing) .cm-cursorLayer:not(.cm-vimCursorLayer)":{display:"none"},
+  "&.inkleet-steady-vim.inkleet-composing .cm-content":{caretColor:"var(--accent) !important"},
   ".inkleet-insert-cursors":{position:"absolute",inset:"0",pointerEvents:"none",zIndex:"150"},
   ".inkleet-insert-cursor":{position:"absolute",background:"var(--vim-cursor)",borderRadius:"0"},
  })];

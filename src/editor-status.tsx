@@ -6,6 +6,7 @@ type Snapshot={mode:string;language:string;line:number;column:number;document:st
 const empty:Snapshot={mode:"",language:"",line:0,column:0,document:""};
 let current=empty,active:object|null=null;
 const listeners=new Set<()=>void>();
+const owners=new Map<object,{language:string;sync:()=>void}>();
 const subscribe=(fn:()=>void)=>{listeners.add(fn);return()=>{listeners.delete(fn);};};
 function publish(owner:object,next:Snapshot){
  active=owner;
@@ -22,7 +23,7 @@ export function editorStatus(language:string,documentKey:string,commandHost:HTML
   private cm:ReturnType<typeof getCM>=null;
   private disposed=false;
   private event=()=>{this.sync();};
-  constructor(readonly view:EditorView){this.sync();}
+  constructor(readonly view:EditorView){owners.set(this,{language,sync:()=>this.sync()});this.sync();}
   sync(){
    if(this.disposed)return;
    const cm=getCM(this.view);
@@ -35,6 +36,6 @@ export function editorStatus(language:string,documentKey:string,commandHost:HTML
   }
   update(update:ViewUpdate){if(update.selectionSet||update.docChanged||update.focusChanged||update.transactions.some(tr=>tr.reconfigured))this.sync();}
   detach(){this.cm?.off("vim-mode-change",this.event);this.cm?.off("vim-command-done",this.event);this.cm?.off("dialog",this.event);}
-  destroy(){this.disposed=true;this.detach();if(active===this){active=null;current=empty;for(const fn of listeners)fn();}}
+  destroy(){this.disposed=true;this.detach();owners.delete(this);if(active===this){const fallback=[...owners].find(([,owner])=>owner.language!=="markdown")??[...owners][0];if(fallback){active=fallback[0];fallback[1].sync();}else{active=null;current=empty;for(const fn of listeners)fn();}}}
  });
 }
