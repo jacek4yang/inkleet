@@ -4,7 +4,7 @@ import type { Language } from "./domain";
 import type { RemoteQuestion } from "./catalogue";
 import type { Identity } from "./login";
 type Kind = "online-run" | "submission";
-type Snapshot = Readonly<{ id: string; account: string; questionId: string; slug: string; language: Language; code: string; testCase: string; kind: Kind }>;
+type Snapshot = Readonly<{ id: string; account: string; questionId: string; slug: string; language: Language; solution?: string; code: string; testCase: string; kind: Kind }>;
 type State =
   | { state: "waiting"; server_id: string }
   | { state: "finished"; server_id: string; result: Record<string, unknown> }
@@ -20,8 +20,8 @@ function Confirm({ title, children, accept, dismiss }: { title: string; children
 function printable(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? "";
 }
-export function useOnlineJudge({ identity, question, language, code }: {
-  identity: Identity | null; question: RemoteQuestion | undefined; language: Language; code: string;
+export function useOnlineJudge({ identity, question, language, solution = "default", code }: {
+  identity: Identity | null; question: RemoteQuestion | undefined; language: Language; solution?: string; code: string;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [cases, setCases] = useState<Record<string, string>>({});
@@ -36,7 +36,7 @@ export function useOnlineJudge({ identity, question, language, code }: {
   const account = identity?.account ?? "";
   const input = question ? cases[question.questionId] ?? question.exampleTestcases ?? question.sampleTestCase ?? "" : "";
   const related = jobs.filter(j => j.snapshot.account === account && j.snapshot.questionId === question?.questionId);
-  const current = [...related].reverse().find(j => j.snapshot.language === language);
+  const current = [...related].reverse().find(j => j.snapshot.language === language && (j.snapshot.solution ?? "default") === solution);
   const blocked = related.some(j => ["waiting", "unknown"].includes(j.state.state));
   function remember(job: Job) { setJobs(old => [...old.filter(j => j.snapshot.id !== job.snapshot.id), job]); }
   useEffect(() => {
@@ -84,7 +84,7 @@ export function useOnlineJudge({ identity, question, language, code }: {
     if (!code.trim()) { setOpen(true); setError("请先编写代码。"); return; }
     const snapshot: Snapshot = Object.freeze({
       id: crypto.randomUUID(), account, questionId: question.questionId, slug: question.titleSlug,
-      language, code, testCase: input, kind,
+      language, solution, code, testCase: input, kind,
     });
     if (kind === "submission") setConfirm(snapshot); else void send(snapshot);
   }
@@ -130,7 +130,7 @@ export function useOnlineJudge({ identity, question, language, code }: {
             <details key={key} open={["full_compile_error", "full_runtime_error", "code_output", "expected_output"].includes(key)}><summary>{key}</summary><pre>{printable(value)}</pre></details>)}
         </>}
       </div>}
-      {blocked && !current && <p>此题另一种语言仍有待确认评测，请切回对应语言处理。</p>}
+      {blocked && !current && <p>其他解答有待确认评测，请切回处理。</p>}
     </section>}
     {confirm && <Confirm title="确认正式提交" dismiss={() => setConfirm(null)} accept={() => send(confirm)}>
       <p>将这份 {confirm.language} 代码快照发送给 leetcode.cn，记入账号 {identity?.username} 的正式提交记录。</p>

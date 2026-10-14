@@ -11,7 +11,7 @@ export function RecoveryDialog({ target, onClose, onRefresh, onRestore }: {
   const [entries, setEntries] = useState<Entry[]>([]), [unreadable, setUnreadable] = useState(0);
   const [selected, setSelected] = useState<{ id: string; backup: Backup } | null>(null);
   const [pending, setPending] = useState(false), [error, setError] = useState("");
-  const args = { problem: target.problem, language: target.language, kind: target.kind };
+  const args = { problem: target.problem, language: target.language, solution: target.solution, kind: target.kind };
   async function act(fn: () => Promise<void>) {
     if (guard.current) return;
     guard.current = true; setPending(true); setError("");

@@ -35,6 +35,7 @@ try {
       if(command==="load_recent_questions") return [];
       if(command==="search_questions") return new Promise(resolve=>state.requests.push({args,resolve}));
       if(command==="get_question") return {question:{...window.__fixtureQuestions[0],titleSlug:args.slug},cacheWarning:null,fromCache:false};
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if(command==="load_document"){state.documents.push(args);return {code:null,notes:null};}
       if(command==="save_text"){state.saves.push(args);return;}
       if(command==="external_editor_supported")return false;
@@ -104,6 +105,7 @@ try {
     window.__TAURI_INTERNALS__ = { invoke: async (command) => {
       if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "search_questions") return { questions:[],total:0,hasMore:false };
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code:null,notes:null };
       if (command === "save_text" || command === "stop_language_service") return;
       if (command === "external_editor_supported") return false;
@@ -330,6 +332,7 @@ try {
         content: null, isPaidOnly: false, difficulty: "Easy", sampleTestCase: "[]", exampleTestcases: "[]", metaData: "{}",
         codeSnippets: [{ langSlug: "rust", code: "// official-shaped test template" }, { langSlug: "python3", code: "# test template" }]
       }, cacheWarning: null };
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: args.language === "java" ? "// restored Java draft" : null, notes: null };
       if (command === "open_login" || command === "save_text") return;
       if (command === "cancel_login") { window.__inkAuthTest.cancelled++; return; }
@@ -421,6 +424,7 @@ try {
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") { window.__linkTest.saves.push(args); return; }
       if (command === "get_question") return new Promise((resolve, reject) => {
@@ -504,6 +508,7 @@ try {
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") return;
       if (command === "environment_status") return JSON.parse(JSON.stringify({ platform: "linux-x64", supported: true, tools: window.__envTest.tools }));
@@ -572,6 +577,7 @@ try {
       const state = window.__lspTest;
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") return;
       if (command === "start_language_service") { state.text = args.text; state.version = 1; return { id: ++state.id, version: 1, server: "fixture", uri: "file:///fixture/solution.py" }; }
@@ -696,6 +702,7 @@ try {
       const state = window.__runTest;
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text" || command === "stop_language_service") return;
       if (command === "login_status") return null;
@@ -897,6 +904,7 @@ try {
       const state = window.__conflictTest;
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: state.file, notes: "" };
       if (command === "login_status") return null;
       if (command === "start_language_service") throw Error("LSP omitted from conflict fixture");
@@ -987,6 +995,7 @@ try {
       if (command === "external_editor_supported") return true;
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
+      if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: "original code", notes: state.notes };
       if (command === "login_status") return null;
       if (command === "start_language_service") throw Error("No LSP in external editor fixture");

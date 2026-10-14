@@ -4,7 +4,7 @@ import { IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { Language } from "./domain";
-type Snapshot = { code: string; input: string; metadata: string; title: string; language: Language };
+type Snapshot = { documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type State = { id: number; phase: string; title: string; threadId: number | null; epoch: number; output: string; truncated: boolean; reason: string; error: string; breakpoints: { line?: number; verified?: boolean; message?: string }[] };
 type Variable = DebugVariable;
 type Watch = { id: number; expression: string; result?: string; error?: string; token?: string };
@@ -26,7 +26,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   frameRef.current = selectedFrame;
   const alive = useRef(true), guard = useRef(false), latest = useRef<State | null>(null), version = useRef(0), pauseCallback = useRef(onPauseLine);
   pauseCallback.current = onPauseLine;
-  const stale = (!!active(state) && !original) || (!!original && (original.code !== snapshot.code || original.metadata !== snapshot.metadata || original.input !== snapshot.input || original.title !== snapshot.title || original.language !== snapshot.language));
+  const stale = (!!active(state) && !original) || (!!original && (original.documentKey !== snapshot.documentKey || original.code !== snapshot.code || original.metadata !== snapshot.metadata || original.input !== snapshot.input || original.title !== snapshot.title || original.language !== snapshot.language));
   useEffect(() => {
     alive.current = true;
     let timer: ReturnType<typeof setTimeout>;
