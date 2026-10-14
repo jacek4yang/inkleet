@@ -572,7 +572,7 @@ try {
   const lspErrors = []; lspPage.on("pageerror", error => lspErrors.push(error.message));
   await lspPage.addInitScript(() => {
     window.isTauri = true;
-    window.__lspTest = { id: 0, version: 1, text: "", stops: [], requests: [] };
+    window.__lspTest = { id: 0, version: 1, text: "", stops: [], requests: [], events: [], failNextUpdate: false, holdNextUpdate: false };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__lspTest;
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
@@ -582,10 +582,14 @@ try {
       if (command === "save_text") return;
       if (command === "start_language_service") { state.text = args.text; state.version = 1; return { id: ++state.id, version: 1, server: "fixture", uri: "file:///fixture/solution.py" }; }
       if (command === "stop_language_service") { state.stops.push(args.id); return; }
-      if (command === "update_language_document") { state.version = args.version; state.text = args.text; return; }
+      if (command === "update_language_document") {
+        if (state.failNextUpdate) { state.failNextUpdate=false; state.events.push({type:"update-failed",...args}); throw Error("controlled sync failure"); }
+        if (state.holdNextUpdate) { state.holdNextUpdate=false; return new Promise((resolve,reject)=>{state.rejectHeldUpdate=()=>reject(Error("old session sync failure"));}); }
+        state.version=args.version; state.text=args.text; state.events.push({type:"update",...args}); return;
+      }
       if (command === "language_diagnostics") return { version: state.version, diagnostics: [] };
       if (command === "language_request") {
-        state.requests.push(args);
+        state.requests.push(args); state.events.push({type:"request",...args});
         if (args.kind === "references") {
           const result = { locations: [0,1].map(line => ({ range: { start: { line, character: 0 }, end: { line, character: 5 } } })), omitted: 1 };
           if (state.deferReferences) return new Promise(resolve => { state.referencesReply = () => resolve(result); });
@@ -610,6 +614,9 @@ try {
   await lspPage.getByRole("combobox", { name: "编程语言", exact: true }).selectOption("python3");
   await lspPage.locator('.lsp-status[data-status="Pyright 已连接 · F12 / Ctrl+单击查看定义"]').waitFor();
   const lspEditor = lspPage.getByRole("textbox", { name: "代码编辑器", exact: true });
+  await lspPage.evaluate(()=>{window.__lspTest.failNextUpdate=true;});
+  await lspEditor.fill("failed.");
+  await lspPage.waitForFunction(()=>window.__lspTest.events.some(e=>e.type==="update-failed"));
   await lspEditor.fill("items.");
   await lspEditor.press("Control+Space");
   await lspPage.getByRole("option", { name: /popleft/ }).waitFor();
@@ -623,6 +630,14 @@ try {
   await lspPage.waitForTimeout(150);
   await lspEditor.press("Tab");
   assert.equal(await lspEditor.innerText(), "items.popleft");
+  assert.equal(await lspPage.evaluate(()=>{
+    const events=window.__lspTest.events;
+    const failed=events.findIndex(e=>e.type==="update-failed");
+    const accepted=events.findIndex((e,i)=>i>failed&&e.type==="update"&&e.text==="items.");
+    const request=events.findIndex((e,i)=>i>accepted&&e.type==="request"&&e.kind==="completion"&&e.version===events[accepted]?.version);
+    return failed>=0&&accepted>failed&&request>accepted&&events[accepted].version>events[failed].version;
+  }),true,"a failed sync does not poison later work; newest document is accepted before completion request");
+
   assert.equal(await lspPage.locator(".cm-tooltip img").count(), 0);
   await lspEditor.press("Control+Shift+Space");
   await lspPage.locator(".lsp-signature").waitFor();
@@ -686,8 +701,18 @@ try {
   await lspPage.evaluate(() => window.__lspTest.renameReply());
   await lspPage.waitForTimeout(100);
   assert.equal(await lspEditor.innerText(), "new draft", "canceled/late rename must not overwrite a newer draft");
+  await lspPage.evaluate(()=>{window.__lspTest.holdNextUpdate=true;});
+  await lspEditor.fill("old session pending document");
+  await lspPage.waitForFunction(()=>typeof window.__lspTest.rejectHeldUpdate==="function");
+  const oldSession = await lspPage.evaluate(()=>window.__lspTest.id);
+  const requestBoundary = await lspPage.evaluate(()=>window.__lspTest.requests.length);
   await lspPage.getByRole("combobox", { name: "编程语言", exact: true }).selectOption("rust");
   await lspPage.waitForFunction(() => window.__lspTest.stops.length > 0);
+  await lspPage.waitForFunction(id=>window.__lspTest.id>id,oldSession);
+  await lspPage.evaluate(()=>window.__lspTest.rejectHeldUpdate());
+  await lspPage.waitForTimeout(200);
+  assert.equal(await lspPage.evaluate(({id,from})=>window.__lspTest.requests.slice(from).some(r=>r.id===id),{id:oldSession,from:requestBoundary}),false,"destroyed session cannot issue requests after its late failed sync");
+
   assert.deepEqual(lspErrors, []);
   await lspPage.close();
   await writeFile("evidence/LSP_UI_RESULT.txt", "PASS: mocked IPC integration; completion applied, unsafe completion docs remain text, F12 opens explicit read-only declaration, source draft preserved and session stopped on language switch. Native real-server check is separate.\n");
