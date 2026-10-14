@@ -43,7 +43,11 @@ try {
   await editor.press("Escape"); await editor.press("Tab");
   assert.equal(await editor.evaluate(el => el.contains(document.activeElement)), false, "Escape then Tab can leave the editor");
   await editor.fill("def solve(values):");
-  await editor.press("End"); await editor.press("Enter"); await editor.press("Backspace");
+  await editor.press("End"); await editor.press("Enter");
+  // This pause separates CodeMirror's documented 500 ms undo groups.
+  // It is not a save-completion check; native persistence is asserted separately.
+  await page.waitForTimeout(600);
+  await editor.press("Backspace");
   assert.equal((await editor.locator(".cm-line").allTextContents()).join("\n"), "def solve(values):\n", "Backspace removes one indentation unit, not a single space");
   await editor.press("Control+z");
   assert.equal((await editor.locator(".cm-line").allTextContents()).join("\n"), "def solve(values):\n    ", "indent deletion is undoable");
