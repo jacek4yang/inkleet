@@ -111,3 +111,8 @@
 .debug-evaluate label { display:flex; align-items:center; gap:8px; }
 .debug-evaluate input { flex:1; min-width:0; font-family:"Intel One Mono",monospace; }
 .debug-evaluation-result pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+
+/* Keep debugger controls reachable while inspecting long stacks/results. */
+.local-runner button, .local-runner input { scroll-margin-top: 145px; scroll-margin-bottom: 16px; }
+.debug-panel > .local-actions { position: sticky; top: 48px; z-index: 2; flex-wrap: wrap; justify-content: flex-start; padding: 8px 0; background: #faf9f5; border-bottom: 1px solid #ddd5ca; }
+.debug-panel > .local-actions > strong { width: 100%; }

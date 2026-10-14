@@ -317,6 +317,7 @@ try:
         apply_points=cmd("POST","/element",{"using":"xpath","value":"//button[text()='应用断点']"})[EID]
         cmd("POST",f"/element/{apply_points}/click",{})
         wait_for(lambda: "断点已更新" in text(".debug-panel"), "live debugger accepts cleared breakpoints")
+        wait_for(lambda: "断点：未设置。" in text(".debug-panel"), "cleared breakpoint list is reflected in actual UI")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-stop-keys","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
         wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
         click(".local-runner header > button:last-child")
