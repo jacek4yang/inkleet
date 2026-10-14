@@ -1,0 +1,55 @@
+name: Native rendering diagnostic
+on:
+  push:
+    branches: [feat/native-rendering-probe]
+    paths: ['tests/native_render_probe.py', '.github/workflows/native-rendering.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  rendering:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        compositing: [default, disabled]
+        scale: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate diagnostic syntax
+        run: python3 -m py_compile tests/native_render_probe.py
+      - name: Install native diagnostic dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2 webkit2gtk-driver xvfb dbus-x11 scrot xclip xdotool fonts-noto-cjk mesa-utils
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Fetch verified application artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 38586794129 --repo jacek4yang/inkleet --name native-ubuntu-24.04 --dir package
+          mkdir -p app evidence/native
+          tar -xzf package/src-tauri/target/release/bundle/portable/InkLeet-0.0.1-preview-4e65d24-linux-x86_64.tar.gz -C app
+          test "$(cat app/*/SOURCE_COMMIT.txt)" = 4e65d245bb86f52526e9ab67b6c46cea4f09b719
+          echo 'ae3e8e5d4b34126c884daf697f7ba3343755266a587ca84c458c0b1d74b364a4  package/src-tauri/target/release/bundle/portable/InkLeet-0.0.1-preview-4e65d24-linux-x86_64.tar.gz' | sha256sum -c -
+      - name: Capture native compositor and scale comparison
+        env:
+          GDK_SCALE: ${{ matrix.scale }}
+          COMPOSITING: ${{ matrix.compositing }}
+        run: |
+          export XDG_DATA_HOME="$(mktemp -d)" XDG_CONFIG_HOME="$(mktemp -d)" XDG_CACHE_HOME="$(mktemp -d)"
+          export INKLEET_TEST_BINARY="$(realpath app/*/inkleet)"
+          if [ "$COMPOSITING" = disabled ]; then export WEBKIT_DISABLE_COMPOSITING_MODE=1; else unset WEBKIT_DISABLE_COMPOSITING_MODE; fi
+          dpkg-query -W libwebkit2gtk-4.1-0 libgtk-3-0t64 > evidence/native/versions.txt
+          printf 'GDK_SCALE=%s\nCOMPOSITING=%s\n' "$GDK_SCALE" "$COMPOSITING" > evidence/native/environment.txt
+          xvfb-run -a -s '-screen 0 3200x1800x24' dbus-run-session -- sh -c 'glxinfo -B > evidence/native/renderer.txt 2>&1; python3 tests/native_render_probe.py'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: rendering-${{ matrix.compositing }}-scale-${{ matrix.scale }}
+          path: evidence/native/
+          retention-days: 7
