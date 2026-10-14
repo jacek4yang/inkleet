@@ -148,6 +148,31 @@ try:
     assert notes.read_text() == "# External editor", "external content overwritten"
     assert text(note) == "# Pending local edit", "pending draft lost"
     screenshot("conflict-native.png")
+    click('[data-action="review-notes-conflict"]')
+    wait_for(lambda: element(".file-conflict"),"native conflict review")
+    def conflict_value(label):
+        node=element(f'textarea[aria-label="{label}"]')
+        return cmd("GET",f"/element/{node}/property/value")
+    assert conflict_value("冲突编辑器版本")=="# Pending local edit"
+    assert conflict_value("冲突文件版本")=="# External editor"
+    screenshot("conflict-review-native.png")
+    notes.write_text("# Changed externally again")
+    click('[data-conflict="external"]')
+    wait_for(lambda: "外部文件再次变化" in text(".file-conflict [role=alert]"),"stale conflict choice is refused")
+    assert notes.read_text()=="# Changed externally again"
+    click('[data-conflict="refresh"]')
+    wait_for(lambda: conflict_value("冲突文件版本")=="# Changed externally again","fresh external comparison")
+    click('[data-conflict="external"]')
+    wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".file-conflict"}),"native conflict resolved")
+    wait_for(lambda: text(note)=="# Changed externally again","notes editor reloads chosen file without stale undo state")
+    backups=list(notes.parent.joinpath(".inkleet-recovery").glob("conflict-*.json"))
+    assert len(backups)==1
+    backup=json.loads(backups[0].read_text())
+    assert backup["local"]=="# Pending local edit" and backup["external"]=="# Changed externally again"
+    fill(note,"# Resolved note")
+    wait_for(lambda: notes.read_text()=="# Resolved note","blocked save queue resumes on reviewed baseline")
+    (evidence/"CONFLICT_GUI_RESULT.txt").write_text("PASS: actual native comparison, concurrent external-change refusal, explicit file-version choice, two-version recovery snapshot, editor reload and subsequent atomic save.\n")
+
     (evidence/"RESULT.txt").write_text("PASS: real Linux Tauri/WebKitGTK launch, native IPC, plain source and notes save, process restart restore, external conflict preserving both texts. No LeetCode verification.\n")
     if os.environ.get("INKLEET_MANAGED_ENV") == "1":
         click('[data-action="open-environments"]')

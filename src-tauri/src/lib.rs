@@ -51,6 +51,17 @@ async fn save_text(window: tauri::WebviewWindow, app: tauri::AppHandle, state: t
     }).await.map_err(|_| "保存任务中断".to_string())?
 }
 
+
+#[tauri::command]
+async fn resolve_file_conflict(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String,expected:Option<String>,local:String,choice:String)->Result<storage::ResolvedConflict,String>{
+    check_origin(&window)?;
+    let path=storage::file_path(&app.state::<Store>().root,&problem,&language,&kind)?;
+    tauri::async_runtime::spawn_blocking(move||{
+        let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"保存队列不可用")?;
+        storage::resolve_conflict(&path,expected.as_deref(),&local,&choice)
+    }).await.map_err(|_|"冲突处理任务中断".to_owned())?
+}
+
 #[tauri::command]
 async fn open_login(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
     check_origin(&window)?; auth::open(&app)
@@ -222,7 +233,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {

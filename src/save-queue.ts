@@ -5,6 +5,7 @@ export class SaveQueue {
   private pending = new Map<string, SaveJob>();
   private blocked = new Set<string>();
   private running = false;
+  private active: string | undefined;
   private settled: Promise<void> = Promise.resolve();
   private settle: (() => void) | undefined;
   get idle() { return this.settled; }
@@ -13,6 +14,10 @@ export class SaveQueue {
   enqueue(job: SaveJob) {
     this.pending.set(job.key, job);
     this.schedule();
+  }
+  discard(key: string) {
+    if (this.active === key) throw new Error("不能丢弃正在写入的快照");
+    this.pending.delete(key); this.blocked.delete(key);
   }
   retry(key: string) { this.blocked.delete(key); this.schedule(); }
   private schedule() {
@@ -26,13 +31,13 @@ export class SaveQueue {
       while (true) {
         const entry = [...this.pending].find(([key]) => !this.blocked.has(key));
         if (!entry) break;
-        const [key, job] = entry; this.pending.delete(key);
+        const [key, job] = entry; this.pending.delete(key); this.active = key;
         try { await job.write(); job.saved(); }
         catch (error) {
           this.blocked.add(key);
           if (!this.pending.has(key)) this.pending.set(key, job);
           job.failed(error);
-        }
+        } finally { this.active = undefined; }
       }
     } finally { this.running = false; this.settle?.(); this.settle = undefined; }
   }

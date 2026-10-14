@@ -86,3 +86,14 @@
 .lsp-rename button { margin-right: 6px; }
 .lsp-rename p { margin: 7px 0 0; font-size: 12px; }
 .lsp-rename [role="alert"] { color: #a23228; white-space: pre-wrap; }
+
+.file-conflict { width: min(1000px, 92vw); max-height: 90vh; overflow: auto; border: 1px solid #d8cfc1; border-radius: 12px; padding: 20px; background: #fcfcfa; color: #2b2621; }
+.file-conflict::backdrop { background: #24201b70; }
+.file-conflict header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.file-conflict h2 { margin: 0; font-size: 19px; }
+.file-conflict p { font-size: 13px; line-height: 1.6; }
+.conflict-versions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.conflict-versions label { min-width: 0; font-size: 13px; }
+.conflict-versions textarea { display: block; box-sizing: border-box; width: 100%; height: 36vh; margin-top: 7px; padding: 10px; resize: vertical; font: 12px/1.6 var(--font-mono); white-space: pre; }
+.conflict-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+@media (max-width: 700px) { .conflict-versions { grid-template-columns: 1fr; } .conflict-versions textarea { height: 22vh; } }

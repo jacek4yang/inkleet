@@ -96,3 +96,63 @@ mod tests {
                    file_path(d.path(), "sample", "cpp", "notes").unwrap());
     }
 }
+
+
+#[derive(serde::Serialize)]
+pub struct ResolvedConflict { pub text:Option<String>, pub backup:String }
+/// Explicit conflict resolution always preserves both reviewed versions first.
+/// A new external change aborts resolution rather than silently forcing a write.
+pub fn resolve_conflict(path:&Path,expected:Option<&str>,local:&str,choice:&str)->Result<ResolvedConflict,String>{
+    if local.len()>MAX_BYTES||expected.is_some_and(|s|s.len()>MAX_BYTES){return Err("冲突正文超过 2 MiB 限制".into());}
+    if !matches!(choice,"local"|"external"){return Err("无效的冲突处理选项".into());}
+    let external=read(path)?;
+    if external.as_deref()!=expected{return Err("外部文件再次变化，请刷新对比后重试".into());}
+    let parent=path.parent().ok_or("无效目录")?;
+    if parent.is_symlink(){return Err("拒绝符号链接目录".into());}
+    fs::create_dir_all(parent).map_err(|_|"无法创建恢复目录")?;
+    let recovery=parent.join(".inkleet-recovery");
+    if recovery.is_symlink(){return Err("拒绝符号链接恢复目录".into());}
+    fs::create_dir_all(&recovery).map_err(|_|"无法创建恢复目录")?;
+    let mut count=0usize;let mut size=0u64;
+    for entry in fs::read_dir(&recovery).map_err(|_|"无法检查恢复空间")?{
+        let entry=entry.map_err(|_|"恢复文件条目不可用")?;let info=entry.file_type().map_err(|_|"恢复文件类型不可用")?;
+        if !info.is_file()||info.is_symlink(){return Err("恢复目录含非普通文件，请手动检查".into());}
+        count+=1;size=size.saturating_add(entry.metadata().map_err(|_|"恢复文件信息不可用")?.len());
+    }
+    let record=serde_json::to_vec_pretty(&serde_json::json!({
+        "format":"inkleet-conflict-v1","file":path.file_name().and_then(|s|s.to_str()).ok_or("文件名无效")?,
+        "local":local,"external":external,"choice":choice,
+    })).map_err(|_|"无法编码恢复副本")?;
+    if count>=100||size.saturating_add(record.len() as u64)>64*1024*1024{return Err("本题恢复副本已达 64 MiB / 100 个限制，请先备份并整理恢复目录".into());}
+    let mut backup=tempfile::Builder::new().prefix("conflict-").suffix(".json").tempfile_in(&recovery).map_err(|_|"无法创建恢复副本")?;
+    backup.write_all(&record).map_err(|_|"无法写入恢复副本")?;backup.as_file().sync_all().map_err(|_|"恢复副本同步失败")?;
+    let name=backup.path().file_name().and_then(|s|s.to_str()).ok_or("恢复副本名无效")?.to_owned();
+    let (_file,_path)=backup.keep().map_err(|_|"无法保留恢复副本")?;
+    #[cfg(unix)]fs::File::open(&recovery).and_then(|f|f.sync_all()).map_err(|_|"恢复目录同步失败")?;
+    let text=if choice=="local"{save(path,expected,local)?;Some(local.to_owned())}
+        else{let current=read(path)?;if current.as_deref()!=expected{return Err("外部文件再次变化，请刷新对比后重试".into());}current};
+    Ok(ResolvedConflict{text,backup:name})
+}
+#[cfg(test)]mod conflict_tests{
+    use super::*;
+    #[test]fn explicit_resolution_keeps_both_versions_and_never_forces_stale_data(){
+        let root=tempfile::tempdir().unwrap();let path=root.path().join("solution.rs");
+        fs::write(&path,"external").unwrap();
+        let result=resolve_conflict(&path,Some("external"),"local","local").unwrap();
+        assert_eq!(read(&path).unwrap().as_deref(),Some("local"));
+        let record:serde_json::Value=serde_json::from_slice(&fs::read(root.path().join(".inkleet-recovery").join(result.backup)).unwrap()).unwrap();
+        assert_eq!(record["external"],"external");assert_eq!(record["local"],"local");
+        fs::write(&path,"changed again").unwrap();
+        assert!(resolve_conflict(&path,Some("external"),"local","local").is_err());
+        assert_eq!(read(&path).unwrap().as_deref(),Some("changed again"));
+        let result=resolve_conflict(&path,Some("changed again"),"unsaved","external").unwrap();
+        assert_eq!(result.text.as_deref(),Some("changed again"));
+        assert_eq!(read(&path).unwrap().as_deref(),Some("changed again"));
+    }
+    #[test]fn deleted_external_file_is_a_real_conflict_choice(){
+        let root=tempfile::tempdir().unwrap();let path=root.path().join("notes.md");
+        let result=resolve_conflict(&path,None,"local draft","external").unwrap();
+        assert!(result.text.is_none());assert!(!path.exists());
+        assert!(root.path().join(".inkleet-recovery").join(result.backup).is_file());
+    }
+}

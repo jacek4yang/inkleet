@@ -22,3 +22,18 @@ test("failed file retains the newest draft and never retries without explicit ac
   queue.retry("a"); await queue.idle;
   assert.equal(attempts, 2); assert.deepEqual(saved, ["other", "newest"]); assert.equal(queue.busy, false);
 });
+
+test("explicit conflict resolution discards only the blocked snapshot", async () => {
+  const queue = new SaveQueue(); const writes: string[] = [];
+  queue.enqueue({ key: "conflict", write: async () => { throw Error("changed"); }, saved() {}, failed() {} });
+  await queue.idle; queue.discard("conflict");
+  assert.equal(queue.failed("conflict"), false); assert.equal(queue.busy, false);
+  queue.enqueue({ key: "conflict", write: async () => { writes.push("new"); }, saved() {}, failed() {} });
+  await queue.idle; assert.deepEqual(writes, ["new"]);
+});
+test("cannot discard a write already in flight", async () => {
+  const queue = new SaveQueue(), gate = deferred();
+  queue.enqueue({ key: "a", write: () => gate.promise, saved() {}, failed() {} });
+  await Promise.resolve(); assert.throws(() => queue.discard("a"), /正在写入/);
+  gate.resolve(); await queue.idle; queue.discard("a");
+});

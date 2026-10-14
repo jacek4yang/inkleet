@@ -635,5 +635,65 @@ try {
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");
 
+
+  const conflictPage = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const conflictErrors = []; conflictPage.on("pageerror", e => conflictErrors.push(e.message));
+  await conflictPage.addInitScript(() => {
+    window.isTauri = true; window.__conflictTest = { file: "initial", backups: [] };
+    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      const state = window.__conflictTest;
+      if (command === "load_recent_questions") return [];
+      if (command === "load_document") return { code: state.file, notes: "" };
+      if (command === "login_status") return null;
+      if (command === "start_language_service") throw Error("LSP omitted from conflict fixture");
+      if (command === "stop_language_service") return;
+      if (command === "save_text") {
+        if (args.expected !== state.file) throw Error("外部文件已变化，保留两份内容后再处理");
+        state.file = args.text; return;
+      }
+      if (command === "resolve_file_conflict") {
+        if (args.expected !== state.file) throw Error("外部文件再次变化，请刷新对比后重试");
+        state.backups.push({ local: args.local, external: state.file });
+        if (args.choice === "local") state.file = args.local;
+        return { text: state.file, backup: "fixture.json" };
+      }
+      throw Error("Unexpected conflict fixture: " + command);
+    }};
+  });
+  await conflictPage.goto("http://127.0.0.1:5173");
+  const conflictEditor = conflictPage.getByRole("textbox", { name: "代码编辑器", exact: true });
+  await conflictPage.getByText("已读取本机文件", { exact: true }).waitFor();
+  await conflictPage.evaluate(() => { window.__conflictTest.file = "external"; });
+  await conflictEditor.fill("local draft");
+  await conflictPage.locator('[data-action="review-code-conflict"]').waitFor();
+  await conflictPage.locator('[data-action="review-code-conflict"]').click();
+  const conflictDialog = conflictPage.getByRole("dialog", { name: "源码文件冲突", exact: true });
+  assert.equal(await conflictDialog.getByLabel("冲突编辑器版本").inputValue(), "local draft");
+  assert.equal(await conflictDialog.getByLabel("冲突文件版本").inputValue(), "external");
+  await conflictPage.evaluate(() => { window.__conflictTest.file = "changed again"; });
+  await conflictDialog.getByRole("button", { name: "使用编辑器版本", exact: true }).click();
+  await conflictDialog.getByRole("alert").filter({ hasText: "外部文件再次变化" }).waitFor();
+  assert.equal(await conflictPage.evaluate(() => window.__conflictTest.file), "changed again");
+  await conflictDialog.getByRole("button", { name: "刷新对比", exact: true }).click();
+  await conflictPage.waitForFunction(() => document.querySelector('[aria-label="冲突文件版本"]').value === "changed again");
+  await conflictDialog.getByRole("button", { name: "使用编辑器版本", exact: true }).click();
+  await conflictDialog.waitFor({ state: "hidden" });
+  assert.equal(await conflictEditor.innerText(), "local draft");
+  assert.deepEqual(await conflictPage.evaluate(() => window.__conflictTest.backups), [{ local: "local draft", external: "changed again" }]);
+  await conflictPage.evaluate(() => { window.__conflictTest.file = null; });
+  await conflictEditor.fill("new local draft");
+  await conflictPage.locator('[data-action="review-code-conflict"]').waitFor();
+  await conflictPage.locator('[data-action="review-code-conflict"]').click();
+  await conflictDialog.getByText("文件版本（已删除）", { exact: true }).waitFor();
+  await conflictDialog.getByRole("button", { name: "使用文件版本", exact: true }).click();
+  await conflictDialog.waitFor({ state: "hidden" });
+  assert.equal(await conflictEditor.innerText(), "");
+  assert.equal(await conflictPage.evaluate(() => window.__conflictTest.file), null);
+  await conflictEditor.fill("after recovery");
+  await conflictPage.waitForFunction(() => window.__conflictTest.file === "after recovery");
+  assert.deepEqual(conflictErrors, []);
+  await conflictPage.close();
+  await writeFile("evidence/CONFLICT_UI_RESULT.txt", "PASS: mocked IPC conflict comparison, stale external refusal, explicit resolution with both-version backup, deleted-file choice, editor reload and resumed saving. Native storage checked separately.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }
