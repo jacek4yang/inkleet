@@ -66,6 +66,24 @@ def source_text(css):
     lines=cmd("POST",f"/element/{element(css)}/elements",{"using":"css selector","value":".cm-line"})
     return "\n".join(cmd("GET",f"/element/{line[EID]}/property/textContent") for line in lines)
 
+
+def reveal_debug_control(css):
+    # Native WebKit does not reliably auto-scroll controls in nested inspectors.
+    # Use the real pointer wheel over the outer padding, never execute JS clicks.
+    for _ in range(12):
+        panel=cmd("GET",f"/element/{element('.debug-body')}/rect")
+        target=cmd("GET",f"/element/{element(css)}/rect")
+        top=panel["y"]+4; bottom=panel["y"]+panel["height"]-4
+        if target["height"]>0 and target["y"]>=top and target["y"]+target["height"]<=bottom:
+            return
+        window=cmd("GET","/window/rect")
+        x=int(window["x"]+panel["x"]+4)
+        y=int(window["y"]+panel["y"]+panel["height"]/2)
+        direction="5" if target["y"]+target["height"]>bottom else "4"
+        subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","--repeat","2","--delay","80",direction],check=True)
+        time.sleep(.15)
+    raise AssertionError("Debug control remains unreachable through real wheel: "+css)
+
 def click(css):
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
@@ -482,7 +500,9 @@ try:
         wait_for(lambda:all(value in child_values() for value in ["3","-1","8"]),"expanded array children preserve exact values")
 
         fill('[aria-label="调试表达式输入"]',"inner_total")
+        reveal_debug_control('[aria-label="添加监视表达式"]')
         click('[aria-label="添加监视表达式"]')
+        reveal_debug_control('[aria-label="刷新监视 inner_total"]')
         click('[aria-label="刷新监视 inner_total"]')
         def watch_result():
             return cmd("GET",f"/element/{element('.debug-watch > span')}/property/textContent")
