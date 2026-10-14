@@ -1,3 +1,4 @@
+import type { DebugPosition } from "./debug-position";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { EditorState, StateEffect, Prec } from "@codemirror/state";
 import { EditorView, keymap, tooltips } from "@codemirror/view";
@@ -44,15 +45,15 @@ function syntax(language: Language | "markdown") {
 type Props = {
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void; onStatus?: (status: string) => void; reconnectToken?: number; onSettings?: () => void;
-  breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedLine?: number;
+  breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
-export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedLine = 0, onStatus, reconnectToken = 0, onSettings }: Props) {
+export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [lspStatus, setLspStatus] = useState("");
   const connection = reconnectToken;
   const [source, setSource] = useState<Source | null>(null);
   const callback = useRef(onChange), pointCallback = useRef(onBreakpoints);
-  const debugView = useRef<{ view: EditorView; stopped: (view: EditorView, line: number) => void } | null>(null);
+  const debugView = useRef<{ view: EditorView; stopped: (view: EditorView, position: DebugPosition|null) => void } | null>(null);
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => { onStatus?.(lspStatus); }, [lspStatus,onStatus]);
   useLayoutEffect(() => {
@@ -94,6 +95,6 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
       view.destroy();
     };
   }, [documentKey, language, label, connection, metadata]);
-  useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedLine); }, [pausedLine, documentKey, connection]);
+  useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection]);
   return <><div className="editor-host" ref={host} />{(language !== "markdown") && <button type="button" onClick={onSettings} className={"lsp-status " + (lspStatus.includes("已连接") ? "ready" : "unavailable")} data-status={lspStatus} aria-label="语言服务设置" title={lspStatus}><i /><span>LSP</span></button>}{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }

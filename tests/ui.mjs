@@ -778,7 +778,7 @@ try {
   const runErrors = []; runPage.on("pageerror", error => runErrors.push(error.message));
   await runPage.addInitScript(() => {
     window.isTauri = true;
-    window.__runTest = { starts: [], result: null, pending: [], debug: null, debugStarts: 0, debugCalls: [] };
+    window.__runTest = { starts: [], result: null, pending: [], debug: null, debugStarts: 0, debugCalls: [], column:27, endColumn:30 };
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__runTest;
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
@@ -791,7 +791,7 @@ try {
       if (command === "debug_status") return state.debug ? JSON.parse(JSON.stringify(state.debug)) : null;
       if (command === "start_debug") {
         ++state.debugStarts; state.debugCode=args.snapshot.code;
-        state.debug = { id: state.debugStarts, phase: "paused", title: args.snapshot.title, threadId: 1, epoch: 1, output: "", truncated: false, reason: "breakpoint", error: "", breakpoints: args.lines.map(line => ({ line, verified: true })) };
+        state.debug = { id: state.debugStarts, phase: "paused", title: args.snapshot.title, threadId: 1, epoch: 1, capabilities:{supportsStepInTargetsRequest:true}, output: "", truncated: false, reason: "breakpoint", error: "", breakpoints: args.lines.map(line => ({ line, verified: true })) };
         return state.debug.id;
       }
       if (command === "set_debug_breakpoints") {
@@ -807,8 +807,10 @@ try {
       }
       if (command === "debug_request") {
         state.debugCalls.push(args.kind);
+        if(args.kind==="stepInTargets"){if(state.deferTargets)return new Promise(resolve=>state.targetsReply=()=>resolve({targets:[{id:9,label:"stale"}]}));return {targets:[{id:7,label:"sum(values)"}]};}
+        if(args.kind==="stepInTarget"){state.selectedTarget=args.reference;state.debug.epoch++;return {};}
         if (args.kind === "threads") return { threads: [{id: 1, name: "MainThread"}, {id: 2, name: "Worker"}] };
-        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, source: { name: "solution.py", path: "/fixture/solution.py" } }, { id: 0, name: "caller", line: 1, source: { name: "solution.py" } }] };
+        if (args.kind === "stackTrace") return { stackFrames: [{ id: 1, name: "solve", line: 1, column:state.column,endColumn:state.endColumn,inkleetSource:true, source: { name: "solution.py", path: "/fixture/solution.py" } }, { id: 0, name: "caller", line: 1, source: { name: "solution.py" } }] };
         if (args.kind === "scopes") return { scopes: [{ name: "Locals", variablesReference: args.reference === 0 ? 4 : 1 }] };
         if (args.kind === "variables") {
           if (args.reference === 4) return { variables: [{name: "caller_only", value: "42", variablesReference: 0}] };
@@ -861,6 +863,24 @@ try {
   await runPage.getByRole("button",{name:"关闭使用手册",exact:true}).click();
   await runPage.getByRole("button", { name: "关闭设置", exact: true }).click();
 
+  const separator=runPage.getByRole("separator",{name:"调整本地面板高度",exact:true});
+  const initialHeight=(await runPanel.boundingBox()).height;
+  await separator.focus();await separator.press("ArrowUp");
+  assert.ok((await runPanel.boundingBox()).height>initialHeight,"keyboard resizes dock");
+  const dragBox=await separator.boundingBox();
+  await runPage.mouse.move(dragBox.x+dragBox.width/2,dragBox.y+3);await runPage.mouse.down();await runPage.mouse.move(dragBox.x+dragBox.width/2,dragBox.y-40,{steps:5});await runPage.mouse.up();
+  const resizedHeight=(await runPanel.boundingBox()).height;
+  assert.ok(resizedHeight>initialHeight+30,"pointer resizes dock");
+  await runPage.evaluate(()=>{window.__retainedDock=document.querySelector(".local-runner");});
+  await runPanel.getByRole("button",{name:"收起",exact:true}).click();
+  await runPanel.waitFor({state:"hidden"});
+  await runPage.getByRole("button",{name:"本地",exact:true}).click();
+  assert.equal(await runPage.evaluate(()=>window.__retainedDock===document.querySelector(".local-runner")),true,"collapse retains mounted panel");
+  assert.ok(Math.abs((await runPanel.boundingBox()).height-resizedHeight)<2,"collapse restores last height");
+  await runPage.getByRole("button",{name:"测试用例与结果",exact:true}).click();
+  await runPage.getByRole("separator",{name:"调整测试结果高度",exact:true}).waitFor();
+  assert.ok((await runPage.locator(".editor-host").first().boundingBox()).height>=130,"two panels reserve editor space");
+  await runPage.getByRole("button",{name:"收起测试与结果",exact:true}).click();
   await runPanel.locator('[data-local-tab="debug"]').click();
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).press("F9");
   await runPanel.getByText(/断点：1。/).waitFor();
@@ -876,6 +896,25 @@ try {
   await runPage.screenshot({ path: "evidence/debug-svg-toolbar.png", fullPage: true });
   await runPanel.getByRole("button", { name: "values", exact: true }).waitFor();
   await runPage.locator(".cm-debug-stopped").waitFor();
+  await runPage.locator(".cm-debug-range").filter({hasText:"sum"}).waitFor();
+  await runPage.evaluate(()=>{window.__runTest.column=11;window.__runTest.endColumn=17;window.__runTest.debug.epoch++;});
+  await runPage.locator(".cm-debug-range").filter({hasText:"values"}).waitFor();
+  await runPage.evaluate(()=>{window.__runTest.column=27;window.__runTest.endColumn=30;window.__runTest.debug.epoch++;});
+  await runPage.locator(".cm-debug-range").filter({hasText:"sum"}).waitFor();
+  await runPanel.getByRole("button",{name:"选择函数步入",exact:true}).click();
+  await runPanel.getByRole("button",{name:"sum(values)",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.selectedTarget===7);
+  await runPage.locator(".cm-debug-stopped").waitFor();
+  await runPage.evaluate(()=>{window.__runTest.deferTargets=true;});
+  await runPanel.getByRole("button",{name:"选择函数步入",exact:true}).click();
+  await runPage.waitForFunction(()=>typeof window.__runTest.targetsReply==="function");
+  await runPage.evaluate(()=>{window.__runTest.debug.epoch++;});
+  await runPage.waitForTimeout(350);
+  await runPage.evaluate(()=>{window.__runTest.targetsReply();window.__runTest.deferTargets=false;});
+  assert.equal(await runPanel.getByRole("button",{name:"stale",exact:true}).count(),0,"expired target list is discarded");
+  await runPage.evaluate(()=>{window.__runTest.debug.capabilities.supportsStepInTargetsRequest=false;});
+  await runPanel.getByRole("button",{name:"选择函数步入",exact:true}).waitFor({state:"hidden"});
+
   await runPanel.getByRole("textbox", { name: "调试表达式输入", exact: true }).fill("len(values)");
   await runPanel.getByRole("button", { name: "求值一次", exact: true }).click();
   await runPanel.locator(".debug-evaluation-result pre").filter({ hasText: "3" }).waitFor();
@@ -894,6 +933,8 @@ try {
   await runPage.screenshot({path: "evidence/debugger-variable-tree-watches.png", fullPage:true});
   await runPanel.getByRole("button", {name: "caller · 1", exact: true}).click();
   await runPanel.getByRole("button", {name: "caller_only", exact:true}).waitFor();
+  await runPage.locator(".cm-debug-frame").waitFor();
+  assert.equal(await runPage.locator(".cm-debug-stopped").count(),0,"inspected caller is not marked as execution PC");
   const scalar=runPanel.getByRole("button",{name:"caller_only",exact:true});
   assert.equal(await scalar.isDisabled(),true,"scalar has no expansion action");
   assert.equal(await scalar.evaluate(node=>getComputedStyle(node).opacity),"1","scalar values remain legible despite having no expansion action");

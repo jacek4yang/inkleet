@@ -1,3 +1,4 @@
+import type { DebugPosition } from "./debug-position";
 import { VariableNode } from "./debug-variable-tree";
 import { debugVariables, debugFrames, debugScopes, debugThreads, type DebugVariable, type DebugFrame as Frame, type DebugScope as Scope } from "./debug-model";
 import { IconButton } from "./icons";
@@ -5,14 +6,17 @@ import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { Language } from "./domain";
 type Snapshot = { documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
-type State = { id: number; phase: string; title: string; threadId: number | null; epoch: number; output: string; truncated: boolean; reason: string; error: string; breakpoints: { line?: number; verified?: boolean; message?: string }[] };
+type State = { id: number; phase: string; title: string; threadId: number | null; epoch: number; output: string; truncated: boolean; reason: string; error: string; capabilities?:{supportsStepInTargetsRequest?:boolean}; breakpoints: { line?: number; verified?: boolean; message?: string }[] };
 type Variable = DebugVariable;
 type Watch = { id: number; expression: string; result?: string; error?: string; token?: string };
 // One owned snapshot survives panel unmounts; never adopt an unknown session.
 let ownedSnapshot: { id: number; snapshot: Snapshot } | null = null;
 const active = (state: State | null) => state && state.phase !== "finished";
-export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { snapshot: Snapshot; breakpoints: number[]; onPauseLine: (line: number) => void; running: boolean }) {
+export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { snapshot: Snapshot; breakpoints: number[]; onPauseLine: (position:DebugPosition|null) => void; running: boolean }) {
   const [state, setState] = useState<State | null>(null), [original, setOriginal] = useState<Snapshot | null>(null);
+  const [targets,setTargets]=useState<{id:number;label:string}[]>([]),[choosing,setChoosing]=useState(false);
+  const targetVersion=useRef(0);
+  const topFrame=useRef<{id:number;thread:number}|null>(null);
   const [threads, setThreads] = useState<{id:number;name:string}[]>([]), [selectedThread, setThread] = useState<number | null>(null);
   const [inspectionRevision, setInspectionRevision] = useState(0), inspectionVersion = useRef(0);
   const [watches, setWatches] = useState<Watch[]>([]), watchNext = useRef(0);
@@ -38,7 +42,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
       finally { if (alive.current) timer = setTimeout(poll, 250); }
     }
     if (isTauri()) void poll();
-    return () => { alive.current = false; ++version.current; ++evaluationVersion.current; clearTimeout(timer); pauseCallback.current(0); };
+    return () => { alive.current = false; ++version.current; ++evaluationVersion.current; clearTimeout(timer); pauseCallback.current(null); };
   }, []);
   async function inspect(kind: string, reference: number, current: State) {
     return invoke<Record<string, unknown>>("debug_request", { id: current.id, epoch: current.epoch, kind, reference });
@@ -63,8 +67,8 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   }
   async function showFrame(frame: Frame, current = latest.current) {
     if (!current || current.phase !== "paused") return;
-    const request = ++version.current; ++evaluationVersion.current; setEvaluation(null); frameRef.current = frame.id; setFrame(frame.id); setVariables([]); setScopes([]);
-    if (!stale && original && (/(?:^|[\\/])(?:solution\.(?:py|go|cpp|c|rs)|Solution\.java)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current(frame.line);
+    const request = ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false); setEvaluation(null); frameRef.current = frame.id; setFrame(frame.id); setVariables([]); setScopes([]);
+    if (!stale && original && frame.inkleetSource!==false && (/(?:^|[\\/])(?:solution\.(?:py|go|cpp|c|rs)|Solution\.java)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current({line:frame.line,column:frame.column,endLine:frame.endLine,endColumn:frame.endColumn,frameId:frame.id,execution:topFrame.current?.id===frame.id&&topFrame.current.thread===(current.threadId??0)});
     else pauseCallback.current(0);
     try {
       const response = await inspect("scopes", frame.id, current);
@@ -80,12 +84,12 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     try {
       const response = await inspect("stackTrace", thread, current);
       if (request !== version.current || !currentPause(current)) return;
-      const items = debugFrames(response.stackFrames); setFrames(items);
+      const items = debugFrames(response.stackFrames); setFrames(items); topFrame.current=items[0]?{id:items[0].id,thread:thread||current.threadId||0}:null;
       if (items[0]) await showFrame(items[0], current);
     } catch (e) { if (request === version.current && currentPause(current)) setError(String(e)); }
   }
   useEffect(() => {
-    ++version.current; ++evaluationVersion.current; setEvaluation(null); setThreads([]); setThread(null); setFrames([]); setScopes([]); setVariables([]); setFrame(null); frameRef.current = null; pauseCallback.current(0);
+    ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false);setEvaluation(null); setThreads([]); setThread(null); setFrames([]); setScopes([]); setVariables([]); setFrame(null); frameRef.current = null; pauseCallback.current(0);
     if (!state || state.phase !== "paused") return;
     const current = state;
     void showThread(current.threadId ?? 0, current);
@@ -101,6 +105,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     const token = ++evaluationVersion.current;
     // Evaluation may mutate even when the adapter reports an error. Hide all
     // previous inspection values before sending; never replay other watches.
+    ++targetVersion.current;setTargets([]);setChoosing(false);
     const revision = ++inspectionVersion.current;
     setInspectionRevision(revision); ++version.current; setVariables([]);
     try {
@@ -130,9 +135,27 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
       }
     }
   }
-  async function action(kind: string) {
+  async function chooseTarget(){
+    const current=latest.current,frame=frameRef.current;
+    if(!current||!currentPause(current)||frame===null||stale||current.capabilities?.supportsStepInTargetsRequest!==true||guard.current||evaluationGuard.current)return;
+    const token=++targetVersion.current;setChoosing(true);setTargets([]);setError("");
+    try{
+      const response=await inspect("stepInTargets",frame,current);
+      if(token!==targetVersion.current||!currentPause(current)||frameRef.current!==frame)return;
+      const seen=new Set<number>();
+      const values=(Array.isArray(response.targets)?response.targets:[]).slice(0,100).flatMap((item:unknown)=>{
+        if(!item||typeof item!=="object")return [];
+        const value=item as {id?:unknown;label?:unknown};
+        if(typeof value.id!=="number"||!Number.isSafeInteger(value.id)||value.id<0||seen.has(value.id)||typeof value.label!=="string")return [];
+        seen.add(value.id);return [{id:value.id,label:value.label.slice(0,200)}];
+      });
+      setTargets(values);if(!values.length)setNotice("当前位置没有可选步入目标");
+    }catch(error){if(token===targetVersion.current&&currentPause(current))setError(String(error));}
+    finally{if(token===targetVersion.current&&alive.current)setChoosing(false);}
+  }
+  async function action(kind: string, target?:number) {
     if (guard.current || (evaluationGuard.current && kind !== "stop")) return;
-    guard.current = true; setPending(true); setError(""); setNotice("");
+    guard.current = true; ++targetVersion.current;setTargets([]);setChoosing(false);setPending(true); setError(""); setNotice("");
     try {
       if (kind === "start") {
         const value = { ...snapshot };
@@ -142,7 +165,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
       } else if (state) {
         if (kind === "breakpoints") { await invoke("set_debug_breakpoints", {id: state.id, code: snapshot.code, lines: breakpoints}); if (alive.current) setNotice("断点已更新"); }
         else if (kind === "stop") await invoke("stop_debug", { id: state.id });
-        else await invoke("debug_request", { id: state.id, epoch: state.epoch, kind, reference: 0 });
+        else await invoke("debug_request", { id: state.id, epoch: state.epoch, kind, reference: target??0 });
       }
     } catch (e) { if (alive.current) setError(String(e)); }
     finally { guard.current = false; if (alive.current) setPending(false); }
@@ -170,9 +193,10 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
       {!active(state) && <IconButton icon="play" label="开始调试" shortcut="F5" disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")} />}
       {active(state) && <><IconButton icon={paused ? "play" : "pause"} label={paused ? "继续" : "暂停"} shortcut={paused ? "F5" : undefined} disabled={pending || evaluating || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action(paused ? "continue" : "pause")} />
         {(["next", "stepIn", "stepOut"] as const).map((kind, index) => <IconButton key={kind} icon={(["next","into","out"] as const)[index]} label={["单步跳过", "单步进入", "单步跳出"][index]} shortcut={["F10","F11","Shift+F11"][index]} title={inspectionOnly ? "先选择当前暂停线程，再执行单步" : undefined} disabled={!paused || pending || evaluating || inspectionOnly} onClick={() => action(kind)} />)}
+        {state?.capabilities?.supportsStepInTargetsRequest===true&&<IconButton icon="target" label="选择函数步入" disabled={!paused||pending||evaluating||choosing||inspectionOnly||stale||selectedFrame!==topFrame.current?.id} onClick={()=>void chooseTarget()} />}
         <IconButton icon="breakpoint" label="应用断点" disabled={pending || evaluating || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")} /><IconButton icon="stop" label="停止调试" shortcut="Shift+F5" disabled={pending} onClick={() => action("stop")} /></>}
     </div>
-    <div className="debug-body"><div className="debug-meta"><span className="breakpoint-summary">断点：{breakpoints.join(", ") || "未设置"}。</span>
+    <div className="debug-body">    {targets.length>0&&<div className="debug-targets" role="group" aria-label="选择步入函数" onKeyDown={event=>{if(event.key==="Escape"){++targetVersion.current;setTargets([]);event.stopPropagation();}}}>{targets.map(target=><button key={target.id} onClick={()=>void action("stepInTarget",target.id)}>{target.label}</button>)}<IconButton icon="close" label="取消选择步入函数" onClick={()=>{++targetVersion.current;setTargets([]);}} /></div>}<div className="debug-meta"><span className="breakpoint-summary">断点：{breakpoints.join(", ") || "未设置"}。</span>
     <p role="status" hidden={!state} title={state?.reason}>{state ? state.phase === "paused" ? "已暂停" : state.phase === "finished" ? "调试结束 · " + state.reason : state.phase === "compiling" ? "正在编译调试快照…" : state.phase === "starting" ? "正在连接调试器…" : "调试运行中" : "尚未调试"}</p></div>
     {notice && <p role="status">{notice}</p>}
     {stale && <p className="cache-warning">代码或用例已改变，调试仍使用启动时快照；当前编辑器不显示旧快照停靠行。</p>}

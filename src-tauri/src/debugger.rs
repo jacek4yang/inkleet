@@ -75,15 +75,17 @@ impl Debugger{
     }
     pub fn request(&self,id:u64,epoch:u64,kind:&str,reference:i64)->Result<Value>{
         let session=self.session(id)?;
-        let _operation=if matches!(kind,"next"|"stepIn"|"stepOut"|"continue"|"pause"){Some(session.operation.try_lock().map_err(|_|"已有调试操作正在处理")?)}else{None};
-        if session.evaluating.load(Ordering::Acquire)&&matches!(kind,"next"|"stepIn"|"stepOut"|"continue"|"pause"){return Err("请等待表达式完成，或停止调试".into());}
-        let (thread,phase)={
+        let _operation=if matches!(kind,"next"|"stepIn"|"stepInTarget"|"stepOut"|"continue"|"pause"){Some(session.operation.try_lock().map_err(|_|"已有调试操作正在处理")?)}else{None};
+        if session.evaluating.load(Ordering::Acquire)&&matches!(kind,"next"|"stepIn"|"stepInTarget"|"stepOut"|"continue"|"pause"){return Err("请等待表达式完成，或停止调试".into());}
+        let (thread,phase,targets)={
             let view=session.view.lock().map_err(|_|"调试状态不可用")?;
             if view.epoch!=epoch{return Err("调试状态已经改变，请重试".into());}
-            (view.thread_id,view.phase.clone())
+            (view.thread_id,view.phase.clone(),view.capabilities["supportsStepInTargetsRequest"].as_bool()==Some(true))
         };
         let paused=phase=="paused";
         let args=match kind{
+            "stepInTargets" if paused&&targets&&reference>=0=>json!({"frameId":reference}),
+            "stepInTarget" if paused&&targets&&reference>=0=>json!({"threadId":thread.ok_or("暂停线程缺失")?,"targetId":reference}),
             "threads" if paused=>json!({}),
             "stackTrace" if paused=>json!({"threadId":if reference>0{reference}else{thread.ok_or("暂停线程缺失")?},"startFrame":0,"levels":64}),
             "scopes" if paused&&reference>=0=>json!({"frameId":reference}),
@@ -92,17 +94,28 @@ impl Debugger{
             "pause" if phase=="running"=>json!({"threadId":thread.unwrap_or(1)}),
             _=>return Err("当前调试状态不支持该操作".into())
         };
-        let response=session.client()?.request(kind,args,Duration::from_secs(10))?;
+        let mut response=session.client()?.request(if kind=="stepInTarget"{"stepIn"}else{kind},args,Duration::from_secs(10))?;
+        if kind=="stackTrace" {
+            if let Some(frames)=response.get_mut("stackFrames").and_then(Value::as_array_mut){
+                for frame in frames {
+                    let matches=frame.pointer("/source/path").and_then(Value::as_str)
+                        .and_then(|path|std::fs::canonicalize(path).ok())
+                        .zip(std::fs::canonicalize(&session.source).ok())
+                        .is_some_and(|(actual,owned)|actual==owned);
+                    frame["inkleetSource"]=json!(matches);
+                }
+            }
+        }
         // A successful resume request need not emit ContinuedEvent. Never overwrite
         // a newer stopped/terminated event that arrived before the response.
-        if matches!(kind,"next"|"stepIn"|"stepOut"|"continue"){
+        if matches!(kind,"next"|"stepIn"|"stepInTarget"|"stepOut"|"continue"){
             self.session(id)?;
             if !session.closed.load(Ordering::Acquire){
                 let mut view=session.view.lock().map_err(|_|"调试状态不可用")?;
                 resume_acknowledged(&mut view,epoch);
             }
         }
-        if matches!(kind,"threads"|"stackTrace"|"scopes"|"variables"){
+        if matches!(kind,"threads"|"stackTrace"|"scopes"|"variables"|"stepInTargets"){
             self.session(id)?;
             if session.closed.load(Ordering::Acquire)||session.view.lock().map_err(|_|"调试状态不可用")?.epoch!=epoch{return Err("忽略上一次暂停的结果".into());}
         }
@@ -282,7 +295,7 @@ fn validate_expression(frame:i64,expression:&str)->Result<()>{
 
 fn capability_flags(value:&Value)->Value{
     let mut flags=serde_json::Map::new();
-    for name in ["supportsConditionalBreakpoints","supportsHitConditionalBreakpoints","supportsLogPoints","supportsStepInTargetsRequest","supportsSingleThreadExecutionRequests","supportsEvaluateForHovers","supportsSetVariable","supportsSetExpression","supportsRestartFrame","supportsExceptionInfoRequest"]{
+    for name in ["supportsConditionalBreakpoints","supportsHitConditionalBreakpoints","supportsLogPoints","supportsStepInTargetsRequest","supportsSteppingGranularity","supportsSingleThreadExecutionRequests","supportsEvaluateForHovers","supportsSetVariable","supportsSetExpression","supportsRestartFrame","supportsExceptionInfoRequest"]{
         flags.insert(name.into(),json!(value.get(name).and_then(Value::as_bool).unwrap_or(false)));
     }
     Value::Object(flags)
