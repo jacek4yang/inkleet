@@ -30,25 +30,41 @@ def wait_for(fn, label, seconds=25):
         except Exception as error: last = error
         time.sleep(.2)
     raise AssertionError(f"{label}: {last}")
+def native_keys(payload):
+    # Real X11 events, prospectively selected instead of the flaky WebKit action
+    # transport. No mutation is retried; all source/selection assertions remain.
+    sources=payload.get("actions",[])
+    assert len(sources)==1 and sources[0].get("type")=="key", "unsupported native action source"
+    mapping={"\ue010":"End","\ue007":"Return","\ue008":"Shift_L","\ue004":"Tab","\ue003":"BackSpace","\ue009":"Control_L","\ue03c":"F12","\ue012":"Left","\ue011":"Home","\ue014":"Right","\ue032":"F2","\ue015":"Down","\ue039":"F9","\ue035":"F5","\ue00c":"Escape","\ue03a":"F10","z":"z"}
+    command=["xdotool"];held=set();used=set()
+    for action in sources[0].get("actions",[]):
+        kind=action.get("type");key=mapping.get(action.get("value"))
+        assert kind in ("keyDown","keyUp") and key is not None, "unsupported native key"
+        if kind=="keyDown":
+            assert key not in held, "duplicate keyDown"
+            held.add(key)
+        else:
+            assert key in held, "unpaired keyUp"
+            held.remove(key)
+        used.add(key);command.extend(["keydown" if kind=="keyDown" else "keyup",key])
+    assert len(command)>1 and not held, "native key sequence must be balanced"
+    try: subprocess.run(command,check=True)
+    except Exception:
+        subprocess.run(["xdotool","keyup",*sorted(used)],check=False)
+        raise
+
 def cmd(method, path, payload=None):
-    replayable = method=="POST" and path=="/actions" and payload and all(
-        action.get("type")=="key" and action.get("id","").endswith(("-completion","-source"))
-        for action in payload.get("actions",[])
-    )
+    if method=="POST" and path=="/actions":
+        return native_keys(payload)
+    if method=="DELETE" and path=="/actions":
+        subprocess.run(["xdotool","keyup","Control_L","Shift_L","Alt_L","Super_L"],check=True)
+        return
     read_only = method == "GET" or (method == "POST" and (path in ("/element", "/elements") or path.endswith("/elements")))
     try: return request(method, f"/session/{session}" + path, payload)
     except http.client.RemoteDisconnected:
-        if read_only:
-            with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
-                log.write(f"Retrying one read-only WebKit transport reset: {method} {path}\n")
-            time.sleep(.3)
-            return request(method, f"/session/{session}" + path, payload)
-        if not replayable: raise
-        # These sequences begin at Home/End and only request read-only language
-        # information. Never replay debugger steps, text entry or online actions.
+        if not read_only: raise
         with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
-            log.write("Recovered one WebKit transport reset in absolute-position language shortcut\n")
-        request("DELETE",f"/session/{session}/actions")
+            log.write(f"Retrying one read-only WebKit transport reset: {method} {path}\n")
         time.sleep(.3)
         return request(method, f"/session/{session}" + path, payload)
 def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
