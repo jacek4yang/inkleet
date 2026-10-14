@@ -727,8 +727,9 @@ try {
   await lspEditor.press("F2");
   const renameForm = lspPage.getByRole("form", { name: "重命名符号", exact: true });
   await renameForm.getByRole("textbox", { name: "新名称", exact: true }).fill("values");
-  await renameForm.getByRole("button", { name: "重命名", exact: true }).click();
+  await renameForm.getByRole("textbox", { name: "新名称", exact: true }).press("Enter");
   await lspPage.waitForFunction(() => document.querySelector('[aria-label="代码编辑器"]').innerText === "values = []\nvalues.append(1)");
+  assert.equal(await lspEditor.evaluate(el=>el===document.activeElement),true,"fast Enter rename preserves source keyboard focus");
   await lspEditor.press("Control+z");
   assert.equal(await lspEditor.innerText(), "items = []\nitems.append(1)", "rename must be one undoable transaction");
   // Optional preview must apply precisely the reviewed response, never re-request.
@@ -748,6 +749,7 @@ try {
   await renamePreview.getByRole("button",{name:"应用",exact:true}).click();
   assert.equal(await lspEditor.innerText(),"previewed = []\npreviewed.append(1)");
   assert.equal(await renameRequests(),previewBefore+1,"Apply uses stored edits without a second server request");
+  assert.equal(await lspEditor.evaluate(el=>el===document.activeElement),true,"rename returns keyboard focus to source");
   await lspEditor.press("Control+z");
   assert.equal(await lspEditor.innerText(),"items = []\nitems.append(1)","preview apply is one undo step");
 
@@ -1515,6 +1517,59 @@ try {
   } finally {await formatPage.close();}
   await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; raw save before format, Unicode, isolated undo/redo, no loop, disabled preference/manual format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
 
+
+
+  const renamePage=await browser.newPage();
+  await renamePage.route("**/rename-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><input id='outside' aria-label='outside'><div id='editor'></div></body></html>"}));
+  await renamePage.goto("http://127.0.0.1:5173/rename-test");
+  await renamePage.evaluate(async()=>{
+    const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
+    const {EditorState}=await import("/node_modules/.vite/deps/@codemirror_state.js");
+    const {basicSetup}=await import("/node_modules/.vite/deps/codemirror.js");
+    const {renameSymbol}=await import("/src/rename.ts");
+    const {formatOnSave}=await import("/src/format-on-save.ts");
+    const state=window.__renameTest={formats:0,defer:false,reply:null};
+    const rename=renameSymbol(async(_pos,_doc,name)=>{
+      const result=[{range:{start:{line:0,character:0},end:{line:0,character:5}},newText:name}];
+      if(state.defer)return new Promise(resolve=>{state.reply=()=>resolve(result);});
+      return result;
+    },()=>{});
+    const view=new EditorView({state:EditorState.create({doc:"items = []",extensions:[basicSetup,rename.extensions,formatOnSave({enabled:()=>true,saved:async()=>true,request:async text=>{state.formats++;return text;},report:()=>{}})]}),parent:document.querySelector("#editor")});
+    state.view=view;state.rename=rename;view.focus();view.dispatch({selection:{anchor:1}});
+  });
+  await renamePage.keyboard.press("F2");
+  await renamePage.getByRole("textbox",{name:"新名称",exact:true}).fill("values");
+  await renamePage.keyboard.press("Enter");
+  await renamePage.waitForFunction(()=>window.__renameTest.view.state.doc.toString()==="values = []");
+  await renamePage.waitForTimeout(1500);
+  assert.equal(await renamePage.evaluate(()=>window.__renameTest.formats),0,"rename does not create a delayed automatic-format undo step");
+  assert.equal(await renamePage.evaluate(()=>window.__renameTest.view.contentDOM===document.activeElement),true,"fast rename retains focus without test-driven refocus");
+  await renamePage.keyboard.press("Control+z");
+  assert.equal(await renamePage.evaluate(()=>window.__renameTest.view.state.doc.toString()),"items = []");
+  await renamePage.evaluate(()=>{window.__renameTest.defer=true;window.__renameTest.view.dispatch({selection:{anchor:1}});});
+  await renamePage.keyboard.press("F2");
+  await renamePage.getByRole("textbox",{name:"新名称",exact:true}).fill("previewed");
+  await renamePage.keyboard.press("Shift+Enter");
+  await renamePage.waitForFunction(()=>typeof window.__renameTest.reply==="function");
+  await renamePage.getByRole("textbox",{name:"outside",exact:true}).focus();
+  await renamePage.evaluate(()=>window.__renameTest.reply());
+  await renamePage.locator(".lsp-rename-preview").waitFor({state:"visible"});
+  assert.equal(await renamePage.getByRole("textbox",{name:"outside",exact:true}).evaluate(el=>el===document.activeElement),true,"late preview must not steal outside focus");
+  await renamePage.locator(".lsp-rename-summary").focus();
+  await renamePage.locator(".lsp-rename-summary").dispatchEvent("keydown",{key:"Enter",repeat:true,bubbles:true,cancelable:true});
+  assert.equal(await renamePage.evaluate(()=>window.__renameTest.view.state.doc.toString()),"items = []","held Enter does not accept preview");
+  await renamePage.keyboard.press("Tab");
+  assert.equal(await renamePage.getByRole("button",{name:"应用",exact:true}).evaluate(el=>el===document.activeElement),true);
+  await renamePage.keyboard.press("Enter");
+  assert.equal(await renamePage.evaluate(()=>window.__renameTest.view.state.doc.toString()),"previewed = []");
+  assert.equal(await renamePage.evaluate(()=>window.__renameTest.view.contentDOM===document.activeElement),true);
+  await renamePage.keyboard.press("Control+z");
+  assert.equal(await renamePage.evaluate(()=>window.__renameTest.view.state.doc.toString()),"items = []");
+  await renamePage.keyboard.type("x");
+  await renamePage.waitForFunction(()=>window.__renameTest.formats===1);
+  await renamePage.evaluate(()=>{window.__renameTest.rename.destroy();window.__renameTest.view.destroy();});
+  await renamePage.close();
+  await writeFile("evidence/RENAME_PREVIEW_UI_RESULT.txt","PASS: real keyboard fast/preview routes, exact stored edits, undo, IME, stale document invalidation, outside focus and default-on formatter exclusion. Browser fixture, native Pyright checked separately.\\n");
 
   const semanticPage=await browser.newPage();
   await semanticPage.route("**/semantic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));

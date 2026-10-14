@@ -34,10 +34,11 @@ export function renameSymbol(
 ) {
   const effect = StateEffect.define<Tooltip | null>();
   let generation = 0, destroyed = false;
+  let invalidated = () => {};
   const field = StateField.define<Tooltip | null>({
     create: () => null,
     update(value, transaction) {
-      if (transaction.docChanged) { ++generation; value = null; }
+      if (transaction.docChanged) { if(value)invalidated(); ++generation; value = null; }
       for (const e of transaction.effects) if (e.is(effect)) value = e.value;
       return value;
     },
@@ -48,9 +49,11 @@ export function renameSymbol(
     const doc = view.state.doc, pos = view.state.selection.main.head, line = doc.lineAt(pos);
     const symbol = [...line.text.matchAll(/[\p{L}\p{N}_$]+/gu)].find(m => pos >= line.from + m.index! && pos <= line.from + m.index! + m[0].length);
     if (!symbol) { status("请将光标放在要重命名的符号上"); return true; }
+    const originalName=symbol[0];
     const token = ++generation, sessionCurrent=captureValidity();
     const current=()=>!destroyed&&token===generation&&view.state.doc===doc&&sessionCurrent();
     let owned:HTMLElement|null=null;
+    invalidated=()=>{if(owned?.contains(document.activeElement))queueMicrotask(()=>{if(!destroyed&&!view.state.field(field)&&document.activeElement===document.body)view.focus();});};
     function dismiss() {
       const restore=!!owned?.contains(document.activeElement);
       ++generation;
@@ -60,7 +63,7 @@ export function renameSymbol(
       const dom = document.createElement("form"); owned=dom; dom.className = "lsp-rename"; dom.setAttribute("aria-label", "重命名符号");
       const editing=document.createElement("div");
       const label = document.createElement("label"); label.textContent = "新名称";
-      const input = document.createElement("input"); input.value = symbol[0]; input.maxLength = 128; input.setAttribute("aria-label", "新名称"); input.autocomplete = "off"; input.spellcheck = false; label.append(input);
+      const input = document.createElement("input"); input.value = originalName; input.maxLength = 128; input.setAttribute("aria-label", "新名称"); input.autocomplete = "off"; input.spellcheck = false; label.append(input);
       const apply = document.createElement("button"); apply.type = "submit"; apply.textContent = "重命名";
       const preview = document.createElement("button"); preview.type="button"; preview.textContent="预览"; preview.title="Shift+Enter";
       editing.append(label,apply,preview);
@@ -88,20 +91,22 @@ export function renameSymbol(
         rows.replaceChildren();
         for(const change of changes){
           const row=document.createElement("div");row.className="lsp-rename-change";
-          const location=document.createElement("span");location.textContent=String(doc.lineAt(change.from).number);
+          const location=document.createElement("span");const sourceLine=doc.lineAt(change.from);location.textContent=sourceLine.number+":"+(change.from-sourceLine.from+1);
           const before=document.createElement("pre");before.className="lsp-rename-before";before.setAttribute("aria-label","原文本");before.textContent=doc.sliceString(change.from,change.to);
           const after=document.createElement("pre");after.className="lsp-rename-after";after.setAttribute("aria-label","新文本");after.textContent=change.insert;
           row.append(location,before,after);rows.append(row);
         }
+        const restore=dom.contains(document.activeElement);
         proposed=changes;heading.textContent="本题源码 · "+changes.length+" 处修改";
-        editing.hidden=true;review.hidden=false;heading.focus();
+        editing.hidden=true;review.hidden=false;if(restore)heading.focus();
       }
       async function submit(previewOnly:boolean){
         if(pending||composing||view.composing||!current()||!review.hidden)return;
         const name=input.value.trim();
         if(!name||new TextEncoder().encode(name).length>128||!/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(name)){error.textContent="请输入有效的标识符（最多 128 字节）";return;}
-        if(name===symbol[0]){dismiss();return;}
-        pending=true;apply.disabled=true;preview.disabled=true;input.disabled=true;error.textContent="";
+        if(name===originalName){dismiss();return;}
+        if(dom.contains(document.activeElement))input.focus();
+        pending=true;apply.disabled=true;preview.disabled=true;input.readOnly=true;error.textContent="";
         try{
           const response=await request(pos,doc,name);
           if(!current())return;
@@ -110,7 +115,7 @@ export function renameSymbol(
         }catch(e){if(current())error.textContent=String(e).slice(0,500);}
         finally{
           if(current()&&dom.isConnected){
-            pending=false;apply.disabled=false;preview.disabled=false;input.disabled=false;
+            pending=false;apply.disabled=false;preview.disabled=false;input.readOnly=false;
             if(review.hidden&&dom.contains(document.activeElement))input.focus();
           }
         }
