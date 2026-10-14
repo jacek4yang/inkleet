@@ -1,3 +1,4 @@
+import { decodeSemanticSpans, semanticField, semanticTheme, setSemanticTokens } from "./semantic-tokens";
 // Bound pending formatter work across destroyed/recreated EditorViews.
 let formatQueue:Promise<unknown>=Promise.resolve();let queuedFormats=0;
 import { DocumentSyncQueue } from "./document-sync-queue";
@@ -11,7 +12,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string };
+type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean };
 export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" | "c" | "cpp" };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -42,6 +43,39 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     },
     provide: field => showTooltip.from(field),
   });
+  let semanticGeneration=0, semanticBusy=false, semanticPending=false, semanticRevision=0, semanticRetries=0;
+  let semanticTimer:ReturnType<typeof setTimeout>|undefined;
+  function scheduleSemantic(){
+    ++semanticGeneration;semanticRetries=0;semanticPending=true;clearTimeout(semanticTimer);
+    semanticTimer=setTimeout(()=>{void semantic();},300);
+  }
+  async function semantic(){
+    if(semanticBusy||closed||!view||!session?.semanticTokens)return;
+    if(view.composing){semanticTimer=setTimeout(()=>{void semantic();},300);return;}
+    semanticBusy=true;semanticPending=false;
+    const target=view,doc=target.state.doc,generation=semanticGeneration,id=session.id;
+    try{
+      await flush();
+      if(closed||view!==target||session?.id!==id||target.state.doc!==doc||generation!==semanticGeneration)return;
+      const askedVersion=version;
+      const result=await invoke<{version:number;tokens:unknown}>("language_semantic_tokens",{id,version:askedVersion});
+      if(closed||view!==target||session?.id!==id||version!==askedVersion||result.version!==askedVersion||target.state.doc!==doc||generation!==semanticGeneration||target.composing)return;
+      const spans=decodeSemanticSpans(doc,result.tokens);
+      target.dispatch({effects:setSemanticTokens.of(spans)});
+      if(!spans.length)retrySemantic();
+    }catch{
+      // At most two readiness retries per snapshot, never restart the server.
+      retrySemantic();
+    }finally{
+      semanticBusy=false;
+      if(!closed&&semanticPending){clearTimeout(semanticTimer);semanticTimer=setTimeout(()=>{void semantic();},300);}
+    }
+  }
+  function retrySemantic(){
+    if(closed||semanticPending||semanticRetries>=2)return;
+    clearTimeout(semanticTimer);
+    semanticTimer=setTimeout(()=>{void semantic();},1000*++semanticRetries);
+  }
   let signatureGeneration = 0;
   let signatureTimer: ReturnType<typeof setTimeout> | undefined;
   let view: EditorView | null = null, session: Started | null = null, closed = false;
@@ -185,8 +219,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     try {
       await flush();
       const id = session.id, askedVersion = version, doc = view.state.doc;
-      const result = await invoke<{ version: number; diagnostics: unknown[] }>("language_diagnostics", { id });
+      const result = await invoke<{ version: number; diagnostics: unknown[]; semanticRevision?:number }>("language_diagnostics", { id });
       if (!closed && session?.id === id && askedVersion === version && result.version === version && view.state.doc === doc) {
+        if(Number.isSafeInteger(result.semanticRevision)&&result.semanticRevision!==semanticRevision){semanticRevision=result.semanticRevision!;scheduleSemantic();}
         const diagnostics: Diagnostic[] = [];
         for (const item of (Array.isArray(result.diagnostics) ? result.diagnostics : []).slice(0, 200)) {
           if (!object(item) || typeof item.message !== "string") continue;
@@ -204,6 +239,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     ...references.extensions,
     ...rename.extensions,
     signatureField,
+    semanticField, semanticTheme,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([{ key: "Ctrl-Shift-Space", run() { void signatureHelp(); return true; } }, { key: "Escape", run(target) { ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }, { key: "F12", run(target) { void definition(target.state.selection.main.head); return true; } }]),
@@ -217,6 +253,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if (update.docChanged || update.selectionSet) { ++signatureGeneration; clearTimeout(signatureTimer); }
       if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
       if (update.docChanged && !closed) {
+        scheduleSemantic();
         clearTimeout(changeTimer);
         changeTimer = setTimeout(() => { void flush().catch(e => { if (!closed) status(String(e)); }); }, 150);
       }
@@ -246,6 +283,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     },
     async connect(target: EditorView) {
       view = target;
+      target.dispatch({effects:setSemanticTokens.of([])});
       if (!isTauri()) { status("浏览器预览 · 语言服务需原生客户端"); return; }
       status(`正在连接 ${{ python3: "Python", java: "Java", golang: "Go", rust: "Rust", c: "C", cpp: "C++" }[language]} 语言服务…`);
       const initial = target.state.doc;
@@ -257,11 +295,11 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         if (closed) { await invoke("stop_language_service", { id: started.id }); return; }
         session = started; version = started.version; sent = initial;
         await flush();
-        if (!closed) { status(`${serverName} 已连接 · F12 / Ctrl+单击查看定义`); void poll(); }
+        if (!closed) { status(`${serverName} 已连接 · F12 / Ctrl+单击查看定义`); void poll(); scheduleSemantic(); }
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      references.destroy(); rename.destroy(); closed = true; ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      references.destroy(); rename.destroy(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },

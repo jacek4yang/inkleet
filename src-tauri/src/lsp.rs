@@ -8,11 +8,11 @@ pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, a
 struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
     id:u64, client:Client, uri:String, language:String, context:inkleet_managed_env::lsp_scaffold::Context, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
-    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, formatting:AtomicBool, _workspace:tempfile::TempDir,
+    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct Started { id:u64, version:u32, server:String, uri:String }
+pub struct Started { id:u64, version:u32, server:String, uri:String, semantic_tokens:bool }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Source { text:String, name:String, declaration:bool, language:String }
@@ -82,6 +82,20 @@ impl Services {
         }
         Ok(response)
     }
+    pub fn semantic_tokens(&self,id:u64,version:u32)->Result<Value>{
+        let session=self.session(id)?;
+        let Some(legend)=&session.semantic_legend else{return Ok(json!({"version":version,"tokens":[]}))};
+        let (text,prefix)={
+            let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+            if document.version!=version{return Err("语义分析快照已过期".into())}
+            (document.text.clone(),document.prefix)
+        };
+        let response=session.client.request("textDocument/semanticTokens/full",json!({"textDocument":{"uri":session.uri}}),Duration::from_secs(5))?;
+        if session.document.lock().map_err(|_|"文档状态不可用")?.version!=version{return Err("忽略旧版本语义分析".into())}
+        self.session(id)?;
+        let tokens=crate::semantic_tokens::normalize(&text,prefix,legend,&response)?;
+        Ok(json!({"version":version,"tokens":tokens}))
+    }
     pub fn format(&self,id:u64,version:u32,language:&str,text:&str)->Result<String>{
         let session=self.session(id)?;
         if !matches!(language,"c"|"cpp"|"java")||session.language!=language{return Err("格式化语言会话不匹配".into());}
@@ -111,8 +125,8 @@ impl Services {
         let document=session.document.lock().map_err(|_|"文档状态不可用")?;
         let diagnostics=session.diagnostics.lock().map_err(|_|"诊断状态不可用")?;
         // Only versioned diagnostics are displayed; stale/unknown versions cannot paint current text.
-        if diagnostics.get("version").and_then(Value::as_u64)==Some(document.version as u64){let mut current=diagnostics.clone();crate::lsp_document::diagnostics(&mut current,document.prefix);Ok(current)}
-        else{Ok(json!({"version":document.version,"diagnostics":[]}))}
+        if diagnostics.get("version").and_then(Value::as_u64)==Some(document.version as u64){let mut current=diagnostics.clone();crate::lsp_document::diagnostics(&mut current,document.prefix);current["semanticRevision"]=json!(session.semantic_revision.load(Ordering::Relaxed));Ok(current)}
+        else{Ok(json!({"version":document.version,"diagnostics":[],"semanticRevision":session.semantic_revision.load(Ordering::Relaxed)}))}
     }
     pub fn read_source(&self,id:u64,uri:&str)->Result<Source>{
         let session=self.session(id)?;
@@ -153,7 +167,9 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         let uri=reqwest::Url::from_file_path(workspace_root.join(launch.filename)).map_err(|_|"无法生成文档地址")?.to_string();
         let root_uri=reqwest::Url::from_directory_path(&workspace_root).map_err(|_|"无法生成工作区地址")?.to_string();
         let diagnostics=Arc::new(Mutex::new(Value::Null));let event_diagnostics=diagnostics.clone();let event_uri=uri.clone();
+        let semantic_revision=Arc::new(AtomicU64::new(0));let event_semantic=semantic_revision.clone();
         let client=Client::spawn(launch.command,launch.settings.clone(),Arc::new(move|event|{
+            if event.get("method").and_then(Value::as_str)==Some("workspace/semanticTokens/refresh"){event_semantic.fetch_add(1,Ordering::Relaxed);}
             if event.get("method").and_then(Value::as_str)==Some("textDocument/publishDiagnostics"){
                 if let Some(params)=event.get("params"){
                     if params.get("uri").and_then(Value::as_str)==Some(event_uri.as_str()){
@@ -166,11 +182,14 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             "processId":null,"rootUri":root_uri,"initializationOptions":launch.initialization,
             "capabilities":{
                 "general":{"positionEncodings":["utf-16"]},
-                "textDocument":{"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}},"publishDiagnostics":{"versionSupport":true}},
-                "workspace":{"configuration":true,"workspaceFolders":true}
+                "textDocument":{"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}},"publishDiagnostics":{"versionSupport":true}},
+                "workspace":{"configuration":true,"workspaceFolders":true,"semanticTokens":{"refreshSupport":true}}
             },
             "workspaceFolders":[{"uri":root_uri,"name":"InkLeet"}]
         }),Duration::from_secs(if language=="java"{90}else{30}))?;
+        if initialized["capabilities"].get("positionEncoding").is_some_and(|v|v.as_str()!=Some("utf-16")){return Err("语言服务返回不支持的位置编码".into())}
+        let semantic_legend=crate::semantic_tokens::provider(&initialized["capabilities"]);
+        let semantic_tokens=semantic_legend.is_some();
         let range_provider=&initialized["capabilities"]["documentRangeFormattingProvider"];
         let range_formatting=range_provider==&Value::Bool(true)||range_provider.is_object();
         client.notify("initialized",json!({}))?;
@@ -178,14 +197,14 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let roots=launch.roots;
         let started_uri=uri.clone();
-        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,formatting:AtomicBool::new(false),_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
             active.replace(session)
         };
         if let Some(previous)=previous{previous.client.stop();}
-        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri})
+        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens})
     }).await.map_err(|_|"语言服务启动任务中断".to_owned())?
 }
 

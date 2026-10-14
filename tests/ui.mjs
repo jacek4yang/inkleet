@@ -1468,5 +1468,64 @@ try {
   } finally {await formatPage.close();}
   await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; raw save before format, Unicode, isolated undo/redo, no loop, disabled preference/manual format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
 
+
+  const semanticPage=await browser.newPage();
+  await semanticPage.route("**/semantic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
+  await semanticPage.goto("http://127.0.0.1:5173/semantic-test");
+  await semanticPage.evaluate(async()=>{
+    const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
+    const {EditorState}=await import("/node_modules/.vite/deps/@codemirror_state.js");
+    const {languageIntelligence}=await import("/src/intelligence.ts");
+    const {rust}=await import("/node_modules/.vite/deps/@codemirror_lang-rust.js");
+    const {basicSetup}=await import("/node_modules/.vite/deps/codemirror.js");
+    const state=window.__semanticTest={version:1,requests:0,active:0,maxActive:0,defer:true,reply:null,revision:0,fail:true};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:91,version:1,server:"fixture",uri:"file:///solution.rs",semanticTokens:true};
+      if(command==="stop_language_service")return;
+      if(command==="update_language_document"){state.version=args.version;return;}
+      if(command==="language_diagnostics")return {version:state.version,diagnostics:[],semanticRevision:state.revision};
+      if(command==="language_semantic_tokens"){
+        state.requests++;state.active++;state.maxActive=Math.max(state.active,state.maxActive);
+        try{
+          if(state.fail){state.fail=false;throw Error("Indexing fixture");}
+          const result={version:args.version,tokens:[{line:0,start:3,end:6,kind:"function",modifiers:[]}]};
+          if(state.defer)return await new Promise(resolve=>{state.reply=()=>resolve(result);});
+          return result;
+        }finally{state.active--;}
+      }
+      throw Error("Unexpected semantic IPC "+command);
+    }};
+    const client=languageIntelligence("rust",()=>{},()=>{});
+    const view=new EditorView({state:EditorState.create({doc:"fn foo() {}",extensions:[basicSetup,rust(),client.extensions]}),parent:document.querySelector("#editor")});
+    window.__semanticTest.client=client;window.__semanticTest.view=view;
+    await client.connect(view);
+  });
+  await semanticPage.waitForFunction(()=>typeof window.__semanticTest.reply==="function");
+  assert.equal(await semanticPage.locator(".cm-line span").filter({hasText:/^foo$/}).first().evaluate(el=>getComputedStyle(el).color),"rgb(0, 0, 255)","production basicSetup lexical highlight exists before semantic reply");
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=false;s.reply();s.reply=null;});
+  await semanticPage.locator(".cm-semantic-function").waitFor();
+  assert.equal(await semanticPage.locator(".cm-semantic-function").evaluate(el=>{while(el.lastElementChild)el=el.lastElementChild;return getComputedStyle(el).color;}),"rgb(76, 114, 140)","semantic mark overrides actual Lezer lexical highlighting");
+  assert.equal(await semanticPage.evaluate(()=>window.__semanticTest.requests),2,"bounded readiness retry recovers without edits");
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=true;s.view.dispatch({changes:{from:3,to:6,insert:"bar"}});});
+  assert.equal(await semanticPage.locator(".cm-semantic").count(),0,"edit clears semantic classification immediately");
+  await semanticPage.waitForFunction(()=>typeof window.__semanticTest.reply==="function");
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;for(const text of ["baz","qux","end"])s.view.dispatch({changes:{from:3,to:6,insert:text}});});
+  await semanticPage.waitForTimeout(400);
+  assert.equal(await semanticPage.evaluate(()=>window.__semanticTest.maxActive),1);
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=false;s.reply();s.reply=null;});
+  await semanticPage.locator(".cm-semantic-function").waitFor();
+  assert.equal(await semanticPage.locator(".cm-semantic-function").innerText(),"end","only latest coalesced document receives colors");
+  const beforeRefresh=await semanticPage.evaluate(()=>window.__semanticTest.requests);
+  await semanticPage.evaluate(()=>window.__semanticTest.revision++);
+  await semanticPage.waitForFunction(count=>window.__semanticTest.requests>count,beforeRefresh);
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=true;s.view.dispatch({changes:{from:3,to:6,insert:"new"}});});
+  await semanticPage.waitForFunction(()=>typeof window.__semanticTest.reply==="function");
+  await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.client.destroy();s.reply();s.view.destroy();});
+  await semanticPage.waitForTimeout(500);
+  assert.equal(await semanticPage.locator(".cm-editor").count(),0);
+  await semanticPage.close();
+  await writeFile("evidence/SEMANTIC_UI_RESULT.txt","PASS: real CodeMirror with mocked LSP IPC; bounded readiness retry, semantic color, edit clearing, single-flight coalescing, refresh and destroy. Native servers separately unverified.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

@@ -132,6 +132,10 @@ impl Client {
                             }).collect();
                             json!({"jsonrpc":"2.0","id":id,"result":result})
                         },
+                        "workspace/semanticTokens/refresh"=>{
+                            event(json!({"method":"workspace/semanticTokens/refresh"}));
+                            json!({"jsonrpc":"2.0","id":id,"result":null})
+                        },
                         "workspace/applyEdit"=>json!({"jsonrpc":"2.0","id":id,"result":{"applied":false,"failureReason":"Server-initiated edits require explicit client support"}}),
                         "client/registerCapability"|"client/unregisterCapability"|"window/workDoneProgress/create"=>json!({"jsonrpc":"2.0","id":id,"result":null}),
                         _=>json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Unsupported client method"}}),

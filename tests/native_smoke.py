@@ -748,6 +748,17 @@ try:
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
                 if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
+                if group=="golang":
+                    wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function"}),"real gopls semantic function classification",seconds=45)
+                    assert "solve" in text(".code-pane .cm-semantic-function"),"gopls resolves source function"
+                    semantic_node=element(".code-pane .cm-semantic-function")
+                    leaves=cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function span:last-child"})
+                    painted=leaves[-1][EID] if leaves else semantic_node
+                    semantic_color=cmd("GET",f"/element/{painted}/css/color")
+                    (evidence/"semantic-paint.json").write_text(json.dumps({"color":semantic_color,"outerHTML":cmd("GET",f"/element/{semantic_node}/property/outerHTML")},ensure_ascii=False))
+                    assert semantic_color in ("rgb(76, 114, 140)","rgba(76, 114, 140, 1)"),"semantic color must win over lexical paint: "+str(semantic_color)
+                    screenshot("golang-semantic-native.png")
+                    (evidence/"SEMANTIC_NATIVE_RESULT.txt").write_text("PASS: real private gopls semantic function highlighting in native CodeMirror. Other language semantic capabilities unverified.\\n")
                 if not cmd("POST","/elements",{"using":"css selector","value":".local-runner:not([hidden])"}):
                     click(".pane-heading .actions button")
                 click('[data-local-tab="run"]')
