@@ -1,13 +1,13 @@
-name: Linux polished preview
+name: Linux completion checkpoint preview
 on:
   push:
-    branches: [feat/real-use-hardening]
+    branches: [build/completion-preview]
     paths: ['src/**', 'src-tauri/**', 'crates/**', 'public/**', 'package*.json', '.github/workflows/linux-preview.yml', 'scripts/package-linux-portable.sh', 'tests/native_smoke.py']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: linux-real-use-preview
+  group: linux-completion-checkpoint-preview
   cancel-in-progress: false
 jobs:
   linux-preview:
@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          ref: 524e1c840199359ee0ce852444bf1d07e49085f9
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
@@ -33,6 +34,7 @@ jobs:
       - name: Prepare frontend and icon
         shell: bash
         run: |
+          test "$(git rev-parse HEAD)" = 524e1c840199359ee0ce852444bf1d07e49085f9
           npm ci --ignore-scripts
           npm run tauri -- icon icon.svg
           npm run build
@@ -69,7 +71,7 @@ jobs:
         run: |
           mapfile -d '' packages < <(find src-tauri/target/release/bundle/deb -name '*.deb' -print0)
           test "${#packages[@]}" -eq 1
-          bash scripts/package-linux-portable.sh "${packages[0]}" "$GITHUB_SHA" src-tauri/target/release/bundle/portable
+          bash scripts/package-linux-portable.sh "${packages[0]}" "$(git rev-parse HEAD)" src-tauri/target/release/bundle/portable
           mkdir -p evidence/tar
           unpacked="$(mktemp -d)"
           tar -xzf src-tauri/target/release/bundle/portable/*.tar.gz -C "$unpacked"
