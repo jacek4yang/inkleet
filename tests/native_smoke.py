@@ -278,6 +278,7 @@ try:
         wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-references"}),"reference navigation closes panel")
         assert text(code)=="def solve(values): return sum(values)"
         (evidence/"REFERENCES_GUI_RESULT.txt").write_text("PASS: actual native Shift+F12 real private Pyright declaration/reference lookup, two original source locations and navigation without modifying the draft.\n")
+        fill(code, "def solve(values):\n    return sum(values)")
         click(".actions button:first-child")
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
@@ -287,8 +288,8 @@ try:
         (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
         click('[data-local-tab="debug"]')
         click(code)
-        cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-keys","actions":[{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
-        wait_for(lambda: "断点：1。" in text(".debug-panel"), "F9 breakpoint in source")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
+        wait_for(lambda: "断点：2。" in text(".debug-panel"), "F9 breakpoint on function body, not module definition")
         click(".debug-panel .local-actions button:first-of-type")
         wait_for(lambda: "已暂停" in text(".debug-panel"), "real debugger breakpoint", seconds=45)
         wait_for(lambda: element(".debug-inspector > div:first-child > button"), "real call stack loaded")
@@ -297,13 +298,22 @@ try:
         wait_for(lambda: element(".cm-debug-stopped"), "paused source line highlighted")
         expression_input=element('[aria-label="调试表达式输入"]')
         cmd("POST",f"/element/{expression_input}/value",{"text":"len(values)","value":list("len(values)")})
+        wait_for(lambda:cmd("GET",f"/element/{element('.debug-evaluate button[type=\"submit\"]')}/enabled"),"expression button enabled after native text input")
+        screenshot("python-before-evaluate-native.png")
         click('.debug-evaluate button[type="submit"]')
-        wait_for(lambda:text(".debug-evaluation-result pre")=="3","real debugpy evaluates current frame expression once")
+        def evaluation_result():
+            errors=cmd("POST","/elements",{"using":"css selector","value":".debug-panel [role=alert]"})
+            if errors:
+                message=cmd("GET",f"/element/{errors[0][EID]}/text")
+                (evidence/"evaluation-error.txt").write_text(message)
+            results=cmd("POST","/elements",{"using":"css selector","value":".debug-evaluation-result pre"})
+            return bool(results) and cmd("GET",f"/element/{results[0][EID]}/text")=="3"
+        wait_for(evaluation_result,"real debugpy evaluates current frame expression once")
         (evidence/"EVALUATE_GUI_RESULT.txt").write_text("PASS: actual native Python paused-frame expression len(values) evaluated through private debugpy and displayed exact result 3. Other language expression adapters are not covered by this assertion.\n")
         screenshot("python-debug-native.png")
         (evidence/"DEBUG_GUI_RESULT.txt").write_text("PASS: real Linux GUI private debugpy, F9 breakpoint and paused call stack inspector. Stepping verified separately by protocol probe.\n")
         click(code)
-        cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-update-keys","actions":[{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-update-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
         apply_points=cmd("POST","/element",{"using":"xpath","value":"//button[text()='应用断点']"})[EID]
         cmd("POST",f"/element/{apply_points}/click",{})
         wait_for(lambda: "断点已更新" in text(".debug-panel"), "live debugger accepts cleared breakpoints")

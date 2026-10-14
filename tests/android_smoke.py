@@ -47,8 +47,13 @@ def launch():
     output=adb("shell","monkey","-p",APP,"-c","android.intent.category.LAUNCHER","1")
     assert "Events injected: 1" in output,output
     wait(lambda:nodes_named("笔记"),"native app renders workspace",120)
+def booted():
+    pid=int(os.environ["INKLEET_EMULATOR_PID"])
+    try: os.kill(pid,0)
+    except ProcessLookupError: raise SystemExit("Emulator exited before boot:\n"+(OUT/"emulator.log").read_text(errors="replace")[-4000:])
+    return adb("shell","getprop","sys.boot_completed",timeout=10)=="1"
 try:
-    wait(lambda:adb("shell","getprop","sys.boot_completed",timeout=10)=="1","Android boots",900)
+    wait(booted,"Android boots",900)
     (OUT/"device.txt").write_text(adb("shell","getprop","ro.build.fingerprint")+"\n"+adb("shell","getprop","ro.product.cpu.abi"))
     adb("shell","input","keyevent","KEYCODE_WAKEUP")
     adb("shell","input","keyevent","KEYCODE_MENU")

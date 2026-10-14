@@ -35,13 +35,19 @@ jobs:
       - name: Boot isolated emulator and verify real APK
         run: |
           mkdir -p evidence/android
-          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name InkLeetSmoke --package "system-images;android-35;google_apis;x86_64"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/inkleet-android-user"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name InkLeetSmoke --path "$ANDROID_AVD_HOME/InkLeetSmoke.avd" --package "system-images;android-35;google_apis;x86_64"
+          "$ANDROID_HOME/emulator/emulator" -list-avds | tee evidence/android/avd-list.txt
+          grep -Fx InkLeetSmoke evidence/android/avd-list.txt
           acceleration=off
           if test -r /dev/kvm && test -w /dev/kvm; then acceleration=on; fi
           printf 'acceleration=%s; no host permission or security settings changed\n' "$acceleration" > evidence/android/emulator-mode.txt
           export ANDROID_I_WANT_MY_TCG=yes
           "$ANDROID_HOME/emulator/emulator" @InkLeetSmoke -port 5554 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -accel "$acceleration" > evidence/android/emulator.log 2>&1 &
           emulator_pid=$!
+          export INKLEET_EMULATOR_PID="$emulator_pid"
           trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
           python3 tests/android_smoke.py
       - name: Preserve build identity
