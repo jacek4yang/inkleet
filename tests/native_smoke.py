@@ -150,6 +150,32 @@ try:
     cache_path.parent.mkdir(parents=True,exist_ok=True)
     cache_path.write_text(pathlib.Path("tests/fixtures/public-questions.json").read_text())
     start()
+    # Persist a download-only endpoint through the real Settings UI, never use it
+    # for login or configure the runner's system network.
+    click('[data-action="open-settings"]')
+    downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='下载']"})[EID]
+    cmd("POST",f"/element/{downloads_tab}/click",{})
+    wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-mode')}/enabled"),"download settings read")
+    click('#download-proxy-mode option[value="custom"]')
+    fill("#download-proxy-url","http://127.0.0.1:7890")
+    save_proxy=cmd("POST","/element",{"using":"xpath","value":"//button[text()='保存下载设置']"})[EID]
+    cmd("POST",f"/element/{save_proxy}/click",{})
+    wait_for(lambda:"已保存，下次下载生效" in text(".download-settings"),"native proxy setting saved")
+    config=pathlib.Path(os.environ["XDG_CONFIG_HOME"])/"top.jacek.inkleet/download-settings.json"
+    wait_for(lambda:config.exists() and json.loads(config.read_text())["proxy"]["mode"]=="custom","download proxy persisted only in app config")
+    screenshot("download-proxy-native.png")
+    click('[aria-label="关闭设置"]')
+    stop();start()
+    click('[data-action="open-settings"]')
+    downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='下载']"})[EID]
+    cmd("POST",f"/element/{downloads_tab}/click",{})
+    wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-url')}/property/value")=="http://127.0.0.1:7890/","restart restores validated proxy")
+    click('#download-proxy-mode option[value="system"]')
+    save_proxy=cmd("POST","/element",{"using":"xpath","value":"//button[text()='保存下载设置']"})[EID]
+    cmd("POST",f"/element/{save_proxy}/click",{})
+    wait_for(lambda:json.loads(config.read_text())["proxy"]["mode"]=="system","restore original download route before real installs")
+    click('[aria-label="关闭设置"]')
+    (evidence/"DOWNLOAD_SETTINGS_GUI_RESULT.txt").write_text("PASS: native Settings save, app-only config persistence, restart restore, explicit reset before real downloads; no system proxy change. Proxy CONNECT routing covered by isolated Rust test.\n")
     code = '[aria-label="代码编辑器"]'
     marker = "// native restart persistence"
     fill(code, marker)

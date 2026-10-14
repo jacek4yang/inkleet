@@ -21,6 +21,7 @@ pub(crate) fn build(manager:&Manager,p:&Package,stage:&Path,cancel:Arc<AtomicBoo
             .env("GOPROXY","https://proxy.golang.org").env("GOSUMDB","sum.golang.org")
             .env("HOME",&home).env("USERPROFILE",&home).env("TMP",&home).env("TEMP",&home);
         if let Some(system)=std::env::var_os("SystemRoot"){cmd.env("SystemRoot",system);}
+        manager.download_proxy.apply_install_command(&mut cmd)?;
         Ok(cmd)
     };
     report(Progress{phase:"building",downloaded:p.size,total:p.size});

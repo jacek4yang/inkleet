@@ -2,6 +2,8 @@
 //! Only compiled-in, hash-pinned packages can be installed; callers never pass URLs.
 mod archive;
 mod go_build;
+pub mod download_proxy;
+pub use download_proxy::DownloadProxy;
 pub mod protocol;
 pub mod rpc;
 pub mod process;
@@ -24,7 +26,7 @@ pub struct Package {
 pub struct Progress { pub phase: &'static str, pub downloaded: u64, pub total: u64 }
 pub type Report = Arc<dyn Fn(Progress) + Send + Sync>;
 #[derive(Clone)]
-pub struct Manager { root: PathBuf }
+pub struct Manager { root: PathBuf, download_proxy: DownloadProxy }
 #[derive(Serialize, Deserialize)]
 struct Receipt { package_hash: String, entry_hash: String }
 pub fn platform() -> &'static str {
@@ -73,7 +75,8 @@ fn host_allowed(url: &reqwest::Url) -> bool {
         && matches!(url.host_str(), Some("github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com" | "nodejs.org" | "static.rust-lang.org" | "ziglang.org" | "files.pythonhosted.org" | "go.dev" | "dl.google.com" | "download.eclipse.org" | "proxy.golang.org" | "storage.googleapis.com" | "marketplace.visualstudio.com"))
 }
 impl Manager {
-    pub fn new(root: PathBuf) -> Self { Self { root } }
+    pub fn new(root: PathBuf) -> Self { Self { root, download_proxy: DownloadProxy::default() } }
+    pub fn with_download_proxy(mut self, setting: DownloadProxy) -> Result<Self> { self.download_proxy = setting.validated()?; Ok(self) }
     pub fn root(&self) -> &Path { &self.root }
     fn destination(&self, p: &Package) -> PathBuf { self.root.join("packages").join(format!("{}-{}", p.id, p.sha256)) }
     pub fn installed(&self, id: &str) -> Result<Option<PathBuf>> {
@@ -102,7 +105,7 @@ impl Manager {
         canceled(&cancel)?;
         let downloads = self.root.join("downloads"); directory(&downloads)?;
         let partial = downloads.join(format!("{}.part", p.sha256));
-        download(&p, &partial, &cancel, &report).await?;
+        download(&p, &partial, &cancel, &report, &self.download_proxy).await?;
         canceled(&cancel)?;
         let manager = self.clone();
         let verified_cancel = cancel.clone();
@@ -158,9 +161,9 @@ fn transient_download_error(message:&str)->bool{
     matches!(message,"下载连接失败，已保留断点，可重试"|"下载中断，已保留断点，可重试"|"下载不完整，已保留断点，可重试")
         || [408,500,502,503,504].iter().any(|code|message==format!("工具下载失败（HTTP {code}），可重试"))
 }
-async fn download(p: &Package, path: &Path, cancel: &AtomicBool, report: &Report) -> Result<()> {
+async fn download(p: &Package, path: &Path, cancel: &AtomicBool, report: &Report, proxy: &DownloadProxy) -> Result<()> {
     for attempt in 0..3u64{
-        match download_once(p,path,cancel,report).await{
+        match download_once(p,path,cancel,report,proxy).await{
             Ok(())=>return Ok(()),
             Err(error)=>{
                 canceled(cancel)?;
@@ -177,18 +180,19 @@ async fn download(p: &Package, path: &Path, cancel: &AtomicBool, report: &Report
     }
     Err("下载重试预算已用尽".into())
 }
-async fn download_once(p: &Package, path: &Path, cancel: &AtomicBool, report: &Report) -> Result<()> {
+async fn download_once(p: &Package, path: &Path, cancel: &AtomicBool, report: &Report, proxy: &DownloadProxy) -> Result<()> {
     if path.exists() { regular(path)?; }
     let mut offset = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     if offset > p.size { io(OpenOptions::new().write(true).truncate(true).open(path))?; offset = 0; }
     if offset == p.size { return Ok(()); }
-    let client = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10)).read_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(900))
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             if attempt.previous().len() > 5 || !host_allowed(attempt.url()) { attempt.error("untrusted tool download redirect") }
             else { attempt.follow() }
-        })).build().map_err(|_| "无法创建工具下载连接")?;
+        }));
+    let client = proxy.apply(builder)?.build().map_err(|_| "无法创建工具下载连接")?;
     let url = reqwest::Url::parse(&p.url).map_err(|_| "工具清单地址错误")?;
     if !host_allowed(&url) { return Err("工具下载来源不受信任".into()); }
     canceled(cancel)?;

@@ -2,6 +2,7 @@ mod storage;
 mod recovery;
 mod external;
 mod managed;
+mod download_settings;
 mod lsp;
 mod lsp_document;
 mod lsp_launch;
@@ -274,6 +275,16 @@ async fn evaluate_debug(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,
     tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().evaluate(id,epoch,frame,&expression)).await.map_err(|_|"表达式求值任务中断".to_owned())?
 }
 
+#[tauri::command]
+async fn get_download_settings(window:tauri::WebviewWindow,app:tauri::AppHandle)->Result<download_settings::Snapshot,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<download_settings::DownloadSettings>().get()).await.map_err(|_|"下载配置读取任务中断".to_owned())?
+}
+#[tauri::command]
+async fn save_download_settings(window:tauri::WebviewWindow,app:tauri::AppHandle,proxy:inkleet_managed_env::DownloadProxy,expected:Option<String>)->Result<download_settings::Snapshot,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<download_settings::DownloadSettings>().save(proxy,expected)).await.map_err(|_|"下载配置保存任务中断".to_owned())?
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(result)=compiled_runtime::linker_entry(){
@@ -285,6 +296,7 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             app.manage(Store { root, gate: Mutex::new(()) });
             app.manage(auth::Auth::default());
+            app.manage(download_settings::DownloadSettings::new(app.path().app_config_dir()?));
             app.manage(debugger::Debugger::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("debug-sessions")));
             app.manage(local_run::Runner::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("local-runs")));
             app.manage(lsp::Services::new(std::fs::canonicalize(app.path().app_data_dir()?)?.join("language-workspaces")));
@@ -294,7 +306,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {

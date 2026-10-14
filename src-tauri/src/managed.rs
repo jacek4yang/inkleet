@@ -85,7 +85,7 @@ pub async fn start(app:tauri::AppHandle,id:String)->Result<(),String>{
     let prepare_app=app.clone();let prepare_id=id.clone();
     let (manager,cancel)=tauri::async_runtime::spawn_blocking(move || {
         let state=prepare_app.state::<Environments>();
-        Ok::<_,String>((state.manager.clone(),state.prepare(&prepare_id)?))
+        Ok::<_,String>((state.manager.clone().with_download_proxy(prepare_app.state::<crate::download_settings::DownloadSettings>().get()?.settings.proxy)?,state.prepare(&prepare_id)?))
     }).await.map_err(|_|"安装准备任务中断")??;
     let report_app=app.clone();let report_id=id.clone();
     let report:Report=Arc::new(move|p|report_app.state::<Environments>().progress(&report_id,p));
@@ -110,7 +110,7 @@ pub async fn start_group(app:tauri::AppHandle,group:String)->Result<(),String>{
     let prepare_app=app.clone();
     let (manager,selected)=tauri::async_runtime::spawn_blocking(move||{
         let state=prepare_app.state::<Environments>();
-        Ok::<_,String>((state.manager.clone(),state.prepare_group(&group)?))
+        Ok::<_,String>((state.manager.clone().with_download_proxy(prepare_app.state::<crate::download_settings::DownloadSettings>().get()?.settings.proxy)?,state.prepare_group(&group)?))
     }).await.map_err(|_|"语言环境准备任务中断")??;
     // Queue ownership belongs to the backend. Closing or reopening the dialog
     // cannot lose a pending gopls build or launch a duplicate dependency task.
