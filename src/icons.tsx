@@ -1,3 +1,4 @@
+import {codicons} from "./codicons";
 import React from "react";
 const paths = {
   inkleet: "m8 5-5 7 5 7m8-14 5 7-5 7",
@@ -38,6 +39,8 @@ const paths = {
 } as const;
 export type IconName = keyof typeof paths;
 export function Icon({ name }: { name: IconName }) {
+  const asset=codicons[name];
+  if(asset)return <svg viewBox={asset.viewBox} width="16" height="16" fill="currentColor" aria-hidden="true" focusable="false" data-icon={name}>{asset.paths.map((path,index)=><path key={index} {...path}/>)}</svg>;
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={paths[name]} fill={name === "leetcode" ? "currentColor" : "none"} stroke={name === "leetcode" ? "none" : "currentColor"} />{name === "inkleet" && <path d="m14 7-4 10" stroke="var(--accent, #a56543)" strokeWidth="1.8" />}</svg>;
 }
 export function IconButton({ icon, label, shortcut, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon: IconName; label: string; shortcut?: string }) {

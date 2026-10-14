@@ -1,3 +1,4 @@
+import {IconCredits} from "./icon-credits";
 import { FormatSettings } from "./format-settings-panel";
 import type { EditorSettings,EditorSettingsSnapshot } from "./format-settings";
 import { UserManual } from "./user-manual";
@@ -8,7 +9,7 @@ export type SettingsSection = "editor" | "environment" | "files" | "notes" | "de
 export type SettingsAction = { id: string; label: string; section: SettingsSection; icon: IconName; run: () => void; disabled?: boolean; dataAction?: string };
 const sections: [SettingsSection,string][] = [["editor","编辑器"],["environment","语言与环境"],["downloads","下载"],["files","源码"],["notes","笔记"],["debug","运行与调试"]];
 export function SettingsHub({ onClose, actions, initial = "editor", languageStatus, editorSettings, editorSettingsError, onReloadEditorSettings, onSaveEditorSettings }: { onClose: () => void; actions: SettingsAction[]; initial?: SettingsSection; languageStatus: string; editorSettings:EditorSettingsSnapshot|null; editorSettingsError:string; onReloadEditorSettings:()=>void; onSaveEditorSettings:(settings:EditorSettings)=>Promise<void> }) {
-  const [manual,setManual] = useState(false);
+  const [manual,setManual] = useState(false),[credits,setCredits]=useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const opener = useRef(document.activeElement as HTMLElement | null);
   const [section,setSection] = useState(initial), [query,setQuery] = useState("");
@@ -22,7 +23,7 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
   const showDownloads = normalized ? "下载 代理 proxy http https".includes(normalized) : section === "downloads";
   const visible = actions.filter(action => normalized ? action.label.toLocaleLowerCase().includes(normalized) : action.section === section);
   return <dialog ref={dialog} className="settings-hub" aria-labelledby="settings-title" onCancel={event => { event.preventDefault(); onClose(); }}>
-    <header><h2 id="settings-title">设置</h2><IconButton icon="info" label="使用手册" onClick={()=>setManual(true)} /><IconButton icon="close" label="关闭设置" onClick={onClose} /></header>
+    <header><h2 id="settings-title">设置</h2><IconButton icon="file" label="第三方许可" onClick={()=>setCredits(true)} /><IconButton icon="info" label="使用手册" onClick={()=>setManual(true)} /><IconButton icon="close" label="关闭设置" onClick={onClose} /></header>
     <div className="settings-body">
       <nav aria-label="设置分类">{sections.map(([id,label]) => <button key={id} aria-current={section === id ? "page" : undefined} onClick={() => { setSection(id); setQuery(""); }}>{label}</button>)}</nav>
       <section><input autoFocus aria-label="搜索设置" placeholder="搜索设置" value={query} onChange={event => setQuery(event.target.value)} />
@@ -34,6 +35,7 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
 
       </section>
     </div>
+    {credits&&<IconCredits onClose={()=>setCredits(false)}/>}
     {manual && <UserManual onClose={()=>setManual(false)} />}
   </dialog>;
 }
