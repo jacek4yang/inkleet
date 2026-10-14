@@ -339,7 +339,9 @@ try:
             {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}
         ]}]})
         typed="return len(values)"
-        cmd("POST",f"/element/{element(code)}/value",{"text":typed,"value":list(typed)})
+        # Send once through the OS keyboard; WebKit element/value may reset its transport.
+        # Never replay an uncertain mutation. Enter and exact source assertions remain below.
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","5",typed],check=True)
         (evidence/"indent-input-observation.json").write_text(json.dumps({"rendered":text(code),"lines":source_text(code)},ensure_ascii=False))
         wait_for(lambda:source_text(code)=="def solve(values):\n    return len(values)","native Python Enter produces four-space indentation")
         python_saved=source.with_name("solution.py")
@@ -356,7 +358,7 @@ try:
             {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"},
             {"type":"keyDown","value":"\ue003"},{"type":"keyUp","value":"\ue003"}
         ]}]})
-        cmd("POST",f"/element/{element(code)}/value",{"text":"pass","value":list("pass")})
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","5","pass"],check=True)
         wait_for(lambda:source_text(code)=="def solve(values):\npass","native Backspace removes the whole indentation unit")
         (evidence/"EDITOR_KEYS_RESULT.txt").write_text("PASS: actual native WebKitGTK keyboard input; Python Enter uses four spaces, Shift+Tab dedents, Tab restores indentation and Backspace removes the full indentation unit. Completion popup click tested separately.\n")
         fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
