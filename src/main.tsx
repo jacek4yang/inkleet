@@ -37,6 +37,9 @@ function download(name: string, content: string) {
 function App() {
   const [conflict, setConflict] = useState<FileConflict | null>(null);
   const [reload, reloadEditors] = useState(0);
+  const [noteRevision, reloadNotes] = useState(0);
+  const [externalEditors, setExternalEditors] = useState(false);
+  const refreshingNotes = useRef(false), openingNotes = useRef(false);
   const conflictSequence = useRef(0);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [fontInfo, setFontInfo] = useState(false);
@@ -184,6 +187,57 @@ function App() {
     ++conflictSequence.current; setConflict(null); reloadEditors(n => n + 1); refresh(n => n + 1);
     if (selected.current === current.key) setStatus("已处理冲突 · 两份内容已保留");
   }
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let alive = true;
+    invoke<boolean>("external_editor_supported").then(value => { if (alive) setExternalEditors(value); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  async function refreshExternalNotes() {
+    if (!isTauri() || editorLoading || conflict || refreshingNotes.current) return;
+    refreshingNotes.current = true;
+    const key = activeKey, target = problemId, saveKey = target + "/notes";
+    try {
+      await queue.current.idle;
+      if (selected.current !== key) return;
+      const generation = sequence.current, baseline = persisted.current.get(saveKey) ?? null;
+      const local = notes.current.get(target) ?? "";
+      const loaded = await invoke<{ code: string | null; notes: string | null }>("load_document", { problem: target, language });
+      if (selected.current !== key || sequence.current !== generation || notes.current.get(target) !== local) return;
+      if (loaded.notes === baseline) return;
+      if (local === (baseline ?? "") && !queue.current.failed(saveKey) && loaded.notes !== null) {
+        notes.current.set(target, loaded.notes); persisted.current.set(saveKey, loaded.notes);
+        for (const [entryKey, value] of documents.current) if (JSON.parse(entryKey)[1] === target) documents.current.set(entryKey, { ...value, notes: loaded.notes });
+        reloadNotes(n => n + 1); refresh(n => n + 1); setStatus("已重新读取外部笔记");
+      } else {
+        queue.current.block(saveKey); refresh(n => n + 1);
+        setStatus("外部笔记已变化 · 请对比两份内容后处理");
+      }
+    } catch (e) { if (selected.current === key) setStatus("外部笔记读取失败：" + String(e)); }
+    finally { refreshingNotes.current = false; }
+  }
+  useEffect(() => {
+    if (!externalEditors || editorLoading || conflict) return;
+    const onFocus = () => { void refreshExternalNotes(); };
+    const onVisible = () => { if (document.visibilityState === "visible") onFocus(); };
+    window.addEventListener("focus", onFocus); document.addEventListener("visibilitychange", onVisible);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVisible); };
+  }, [externalEditors, editorLoading, conflict, activeKey]);
+  async function openExternalNotes(editor: "default" | "typora") {
+    if (openingNotes.current) return;
+    openingNotes.current = true;
+    const key = activeKey, target = problemId;
+    try {
+      await queue.current.idle;
+      if (queue.current.failed(target + "/notes")) throw new Error("请先处理笔记保存失败或文件冲突");
+      await invoke("open_note_external", { problem: target, editor });
+      // Opening a new empty notes.md establishes an empty persisted baseline.
+      if (persisted.current.get(target + "/notes") === null && (notes.current.get(target) ?? "") === "") persisted.current.set(target + "/notes", "");
+      if (selected.current === key) setStatus("已请求外部编辑器打开笔记 · 返回时自动检查更新");
+    } catch (e) { if (selected.current === key) setStatus(String(e)); }
+    finally { openingNotes.current = false; }
+  }
   function chooseQuestion(question: RemoteQuestion, warning?: string | null, fromCache = false) {
     const entry: WorkbenchProblem = { id: "lc-" + question.questionId, number: question.questionFrontendId, title: question.translatedTitle || question.title, detail: "", input: "", output: "", official: question, cached: fromCache };
     setCacheWarning(warning ?? "");
@@ -205,7 +259,7 @@ function App() {
     </aside>
     <nav className="tabs" aria-label="工作区">{[["problem","题目"],["code","代码"],["notes","笔记"]].map(([id,label]) => <button key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>)}</nav>
     <section className={"reading " + (tab === "code" ? "mobile-hidden" : "")}>
-      {tab === "notes" ? <Notes key={problemId + ":" + reload} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
+      {tab === "notes" ? <Notes key={problemId + ":" + reload + ":" + noteRevision} externalEditors={externalEditors} onExternal={editor => void openExternalNotes(editor)} onReload={() => void refreshExternalNotes()} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
       <article>{problem.official ? <>{problem.cached && <p className="cache-warning">已缓存题面 · 可离线编辑；重新搜索可更新题面。</p>}<QuestionStatement question={problem.official} /></> : <><p className="eyebrow">练习 {problem.number} <span className="badge">自编样例</span></p><h1>{problem.title}</h1><p className="description">{problem.detail}</p><h3>示例</h3><pre>输入：{problem.input}{"\n"}输出：{problem.output}</pre><h3>写下你的第一种思路</h3><p className="muted">先想清楚边界，再开始写代码。笔记和每种语言的草稿相互独立。</p></>}</article>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>

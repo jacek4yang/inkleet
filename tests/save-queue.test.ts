@@ -37,3 +37,9 @@ test("cannot discard a write already in flight", async () => {
   await Promise.resolve(); assert.throws(() => queue.discard("a"), /正在写入/);
   gate.resolve(); await queue.idle; queue.discard("a");
 });
+
+test("externally detected dirty drafts keep close protection until resolved", () => {
+  const queue = new SaveQueue(); queue.block("notes");
+  assert.equal(queue.busy, true); assert.equal(queue.failed("notes"), true);
+  queue.discard("notes"); assert.equal(queue.busy, false);
+});

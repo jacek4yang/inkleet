@@ -9,12 +9,13 @@ export class SaveQueue {
   private settled: Promise<void> = Promise.resolve();
   private settle: (() => void) | undefined;
   get idle() { return this.settled; }
-  get busy() { return this.running || this.pending.size > 0; }
+  get busy() { return this.running || this.pending.size > 0 || this.blocked.size > 0; }
   failed(key: string) { return this.blocked.has(key); }
   enqueue(job: SaveJob) {
     this.pending.set(job.key, job);
     this.schedule();
   }
+  block(key: string) { this.blocked.add(key); }
   discard(key: string) {
     if (this.active === key) throw new Error("不能丢弃正在写入的快照");
     this.pending.delete(key); this.blocked.delete(key);

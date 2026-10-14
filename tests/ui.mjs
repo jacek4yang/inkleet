@@ -695,5 +695,54 @@ try {
   await conflictPage.close();
   await writeFile("evidence/CONFLICT_UI_RESULT.txt", "PASS: mocked IPC conflict comparison, stale external refusal, explicit resolution with both-version backup, deleted-file choice, editor reload and resumed saving. Native storage checked separately.\n");
 
+
+  const externalPage = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  await externalPage.addInitScript(() => {
+    window.isTauri = true; window.__externalTest = { notes: "# Before", opened: [], fail: false };
+    window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+      const state = window.__externalTest;
+      if (command === "external_editor_supported") return true;
+      if (command === "load_recent_questions") return [];
+      if (command === "load_document") return { code: "original code", notes: state.notes };
+      if (command === "login_status") return null;
+      if (command === "start_language_service") throw Error("No LSP in external editor fixture");
+      if (command === "stop_language_service") return;
+      if (command === "save_text") {
+        if (args.kind === "notes") {
+          if (state.fail || args.expected !== state.notes) throw Error("保存测试失败");
+          state.notes = args.text;
+        } return;
+      }
+      if (command === "open_note_external") { state.opened.push({ editor: args.editor, saved: state.notes }); return; }
+      throw Error("Unexpected external editor command: " + command);
+    }};
+  });
+  await externalPage.goto("http://127.0.0.1:5173");
+  await externalPage.getByText("已读取本机文件", { exact: true }).waitFor();
+  await externalPage.getByRole("button", { name: "笔记", exact: true }).click();
+  const externalNote = externalPage.getByRole("textbox", { name: "Markdown 笔记", exact: true });
+  await externalNote.fill("# Saved");
+  await externalPage.getByRole("button", { name: "Typora 编辑", exact: true }).click();
+  await externalPage.waitForFunction(() => window.__externalTest.opened.length === 1);
+  assert.deepEqual(await externalPage.evaluate(() => window.__externalTest.opened), [{ editor: "typora", saved: "# Saved" }]);
+  await externalPage.evaluate(() => { window.__externalTest.notes = "# From Typora"; });
+  await externalPage.getByRole("button", { name: "刷新文件", exact: true }).click();
+  await externalPage.waitForFunction(() => document.querySelector('[aria-label="Markdown 笔记"]').innerText === "# From Typora");
+  assert.equal(await externalPage.getByRole("textbox", { name: "代码编辑器", exact: true }).innerText(), "original code");
+  await externalPage.evaluate(() => { window.__externalTest.notes = "# Focus refresh"; window.dispatchEvent(new Event("focus")); });
+  await externalPage.waitForFunction(() => document.querySelector('[aria-label="Markdown 笔记"]').innerText === "# Focus refresh");
+  await externalPage.evaluate(() => { window.__externalTest.fail = true; });
+  await externalNote.fill("# Unsaved");
+  await externalPage.locator('[data-action="review-notes-conflict"]').waitFor();
+  await externalPage.evaluate(() => { window.__externalTest.notes = "# Concurrent external"; });
+  await externalPage.getByRole("button", { name: "刷新文件", exact: true }).click();
+  await externalPage.locator(".statusbar").filter({ hasText: "外部笔记已变化 · 请对比两份内容后处理" }).waitFor();
+  assert.equal(await externalNote.innerText(), "# Unsaved");
+  await externalPage.getByRole("button", { name: "Typora 编辑", exact: true }).click();
+  await externalPage.locator(".statusbar").filter({ hasText: "请先处理笔记保存失败或文件冲突" }).waitFor();
+  assert.equal(await externalPage.evaluate(() => window.__externalTest.opened.length), 1);
+  await externalPage.close();
+  await writeFile("evidence/EXTERNAL_EDITOR_UI_RESULT.txt", "PASS: mocked IPC save-before-open, explicit Typora selection, focused/manual note refresh, source preservation and dirty-conflict refusal. Real Typora launching is not verified by this fixture.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

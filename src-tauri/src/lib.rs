@@ -1,4 +1,5 @@
 mod storage;
+mod external;
 mod managed;
 mod lsp;
 mod lsp_document;
@@ -60,6 +61,24 @@ async fn resolve_file_conflict(window:tauri::WebviewWindow,app:tauri::AppHandle,
         let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"保存队列不可用")?;
         storage::resolve_conflict(&path,expected.as_deref(),&local,&choice)
     }).await.map_err(|_|"冲突处理任务中断".to_owned())?
+}
+
+#[tauri::command]
+fn external_editor_supported(window:tauri::WebviewWindow)->Result<bool,String>{check_origin(&window)?;Ok(external::supported())}
+#[tauri::command]
+async fn open_note_external(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,editor:String)->Result<(),String>{
+    check_origin(&window)?;
+    if !external::supported()||!matches!(editor.as_str(),"default"|"typora"){return Err("此平台或编辑器不支持外部笔记编辑".into());}
+    tauri::async_runtime::spawn_blocking(move||{
+        let state=app.state::<Store>();let path=storage::file_path(&state.root,&problem,"rust","notes")?;
+        {
+            let _lock=state.gate.lock().map_err(|_|"保存队列不可用")?;
+            if storage::read(&path)?.is_none(){storage::save(&path,None,"")?;}
+        }
+        let path=std::fs::canonicalize(path).map_err(|_|"无法定位已保存笔记")?;
+        if !path.starts_with(std::fs::canonicalize(&state.root).map_err(|_|"工作区目录不可用")?){return Err("笔记不在本机工作区".into());}
+        external::open_note(&path,&editor)
+    }).await.map_err(|_|"外部编辑器任务中断".to_owned())?
 }
 
 #[tauri::command]
@@ -233,7 +252,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {

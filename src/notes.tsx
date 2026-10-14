@@ -48,15 +48,17 @@ function MarkdownPreview({ text }: { text: string }) {
       : <p className="muted">还没有笔记。返回编辑，写下你的思路。</p>}
   </div>;
 }
-export function Notes({ documentKey, value, loading, onChange, onExport }: {
+export function Notes({ documentKey, value, loading, onChange, onExport, externalEditors, onExternal, onReload }: {
   documentKey: string; value: string; loading: boolean;
   onChange: (value: string) => void; onExport: () => void;
+  externalEditors?: boolean; onExternal?: (editor: "default" | "typora") => void; onReload?: () => void;
 }) {
   const [preview, setPreview] = useState(false);
   return <>
     <div className="pane-heading notes-heading"><strong>解题笔记</strong><div>
       <button disabled={loading} aria-pressed={preview} onClick={() => setPreview(v => !v)}>{preview ? "返回编辑" : "预览笔记"}</button>
       <button disabled={loading} onClick={onExport}>导出 Markdown</button>
+      {externalEditors && <><button disabled={loading} onClick={() => onExternal?.("typora")}>Typora 编辑</button><button disabled={loading} onClick={() => onExternal?.("default")}>系统编辑器</button><button disabled={loading} onClick={onReload}>刷新文件</button></>}
     </div></div>
     {loading ? <p className="loading">正在读取笔记…</p> : preview
       ? <MarkdownPreview text={value} />
