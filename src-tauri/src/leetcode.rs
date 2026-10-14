@@ -135,10 +135,13 @@ impl Leetcode {
         }), session).await?;
         let mut list: QuestionList = serde_json::from_value(data.get("problemsetQuestionList").cloned().unwrap_or(Value::Null))
             .map_err(|_| "题目列表格式变化，请更新应用".to_owned())?;
-        if list.questions.len() > 25 || list.total > 1_000_000 || list.questions.iter().any(|q| validate_slug(&q.title_slug).is_err() || q.frontend_question_id.len() > 40 || q.title.len() > 1024 || q.title_cn.as_ref().is_some_and(|s| s.len() > 1024) || !matches!(q.difficulty.as_str(), "Easy" | "Medium" | "Hard")) {
-            return Err("题目列表字段超出支持范围".into());
+        if list.questions.len() > 25 || list.total > 1_000_000 {
+            return Err(format!("题目列表数量超出支持范围（{} / {}）",list.questions.len(),list.total));
         }
         for q in &mut list.questions {
+            validate_slug(&q.title_slug).map_err(|_|"题目列表含无效题目标识")?;
+            if q.frontend_question_id.len()>40 || q.title.len()>1024 || q.title_cn.as_ref().is_some_and(|s|s.len()>1024) {return Err("题目列表文本超出长度限制".into());}
+            q.difficulty=normalize_difficulty(&q.difficulty)?.into();
             if session.is_none() { q.status = None; }
             else if q.status.as_deref().is_some_and(|s| !matches!(s, "AC" | "TRIED")) { return Err("完成状态格式变化，请更新应用".into()); }
         }
@@ -147,12 +150,13 @@ impl Leetcode {
     pub async fn question(&self, slug: &str) -> Result<Question, String> {
         validate_slug(slug)?;
         let data = self.query(QUESTION_QUERY, json!({"titleSlug":slug})).await?;
-        let question: Question = serde_json::from_value(data.get("question").cloned().unwrap_or(Value::Null))
+        let mut question: Question = serde_json::from_value(data.get("question").cloned().unwrap_or(Value::Null))
             .map_err(|_| "题目不存在、需要权限或接口格式已变化".to_string())?;
         if question.title_slug != slug || question.question_id.is_empty() || question.question_id.len() > 20
             || !question.question_id.bytes().all(|b| b.is_ascii_digit()) {
             return Err("返回题目标识与请求不一致或格式已变化，未创建本机文件".into());
         }
+        question.difficulty=normalize_difficulty(&question.difficulty)?.into();
         Ok(question)
     }
 }
@@ -201,4 +205,20 @@ mod tests {
         });
     }
 
+}
+
+fn normalize_difficulty(value:&str)->Result<&'static str,String>{
+    match value {
+        "EASY"|"Easy"=>Ok("Easy"), "MEDIUM"|"Medium"=>Ok("Medium"), "HARD"|"Hard"=>Ok("Hard"),
+        _=>Err(format!("题目难度格式变化（{}）",value.chars().take(30).collect::<String>()))
+    }
+}
+#[cfg(test)]mod difficulty_tests {
+    use super::*;
+    #[test]fn list_and_detail_difficulty_casing_normalizes_without_loosening_unknown_values(){
+        for (input,expected) in [("EASY","Easy"),("Easy","Easy"),("MEDIUM","Medium"),("Medium","Medium"),("HARD","Hard"),("Hard","Hard")] {
+            assert_eq!(normalize_difficulty(input).unwrap(),expected);
+        }
+        for input in ["", "unknown", "0", " easy ", "Easy<script>"] { assert!(normalize_difficulty(input).is_err()); }
+    }
 }

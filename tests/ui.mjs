@@ -992,5 +992,55 @@ try {
   await externalPage.close();
   await writeFile("evidence/EXTERNAL_EDITOR_UI_RESULT.txt", "PASS: mocked IPC save-before-open, explicit Typora selection, focused/manual note refresh, source preservation and dirty-conflict refusal. Real Typora launching is not verified by this fixture.\n");
 
+  const proxyPage=await testPage({viewport:{width:1100,height:800}});
+  await proxyPage.addInitScript(()=>{
+    window.isTauri=true;
+    window.__proxyTest={settings:{version:1,proxy:{mode:"system",url:""}},revision:null,writes:[],fail:false};
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      const state=window.__proxyTest;
+      if(command==="load_recent_questions")return [];
+      if(command==="search_questions")return {questions:[],total:0,hasMore:false};
+      if(command==="external_editor_supported")return false;
+      if(command==="get_download_settings")return JSON.parse(JSON.stringify({settings:state.settings,revision:state.revision}));
+      if(command==="save_download_settings"){
+        state.writes.push(args);
+        if(state.fail)throw Error("测试：磁盘写入失败");
+        if(args.expected!==state.revision)throw Error("配置已变化");
+        state.settings={version:1,proxy:{mode:args.proxy.mode,url:args.proxy.mode==="custom"?args.proxy.url:""}};
+        state.revision=JSON.stringify(state.settings);
+        return JSON.parse(JSON.stringify({settings:state.settings,revision:state.revision}));
+      }
+      throw Error("Unexpected proxy test IPC: "+command);
+    }};
+  });
+  await proxyPage.goto("http://127.0.0.1:5173");
+  await openSettings(proxyPage,"下载");
+  const proxyMode=proxyPage.getByLabel("连接方式",{exact:true});
+  await proxyMode.selectOption("custom");
+  const proxyUrl=proxyPage.getByLabel("HTTP / HTTPS 地址",{exact:true});
+  await proxyUrl.fill("http://127.0.0.1:7890");
+  await proxyPage.screenshot({path:"evidence/download-proxy-settings.png",fullPage:true});
+  await proxyPage.getByRole("button",{name:"保存下载设置",exact:true}).evaluate(button=>{button.click();button.click();});
+  await proxyPage.getByText("已保存，下次下载生效",{exact:true}).waitFor();
+  assert.equal(await proxyPage.evaluate(()=>window.__proxyTest.writes.length),1,"duplicate save guarded");
+  await proxyPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+  await openSettings(proxyPage,"下载");
+  assert.equal(await proxyUrl.inputValue(),"http://127.0.0.1:7890");
+  await proxyPage.evaluate(()=>{window.__proxyTest.fail=true;});
+  await proxyUrl.fill("http://127.0.0.1:7891");
+  await proxyPage.getByRole("button",{name:"保存下载设置",exact:true}).click();
+  await proxyPage.getByRole("alert").filter({hasText:"磁盘写入失败"}).waitFor();
+  assert.equal(await proxyUrl.inputValue(),"http://127.0.0.1:7891","failed save retains typed input");
+  assert.equal(await proxyPage.evaluate(()=>window.__proxyTest.settings.proxy.url),"http://127.0.0.1:7890","failed save keeps prior settings");
+  await proxyPage.evaluate(()=>{window.__proxyTest.fail=false;});
+  await proxyPage.getByRole("button",{name:"重新读取",exact:true}).click();
+  await proxyPage.waitForFunction(()=>document.querySelector("#download-proxy-url").value==="http://127.0.0.1:7890");
+  await proxyMode.selectOption("direct");
+  await proxyPage.getByRole("button",{name:"保存下载设置",exact:true}).click();
+  await proxyPage.getByText("已保存，下次下载生效",{exact:true}).waitFor();
+  assert.deepEqual(await proxyPage.evaluate(()=>window.__proxyTest.settings.proxy),{mode:"direct",url:""});
+  await proxyPage.close();
+  await writeFile("evidence/DOWNLOAD_SETTINGS_UI_RESULT.txt","PASS: mocked IPC; save/reopen, duplicate-save guard, visible failure retaining prior settings and draft, reload and direct mode. Native proxy routing/persistence tested separately.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }
