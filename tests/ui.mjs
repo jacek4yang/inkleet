@@ -42,6 +42,16 @@ try {
     try { if ((await fetch("http://127.0.0.1:5173")).ok) break; } catch {}
     await new Promise(r => setTimeout(r, 500));
   }
+  const autocompletePackage=JSON.parse(await readFile(new URL("../node_modules/@codemirror/autocomplete/package.json",import.meta.url),"utf8"));
+  assert.equal(autocompletePackage.version,"6.20.3");
+  const snippetPage=await browser.newPage();
+  try{
+    await snippetPage.goto("http://127.0.0.1:5173/tests/snippet-contract.html");
+    await snippetPage.waitForFunction(()=>typeof window.runSnippetContract==="function");
+    const result=await snippetPage.evaluate(()=>window.runSnippetContract());
+    assert.equal(result.expectedVersion,autocompletePackage.version);
+    await writeFile("evidence/SNIPPET_CONTRACT_RESULT.json",JSON.stringify({...result,installedVersion:autocompletePackage.version},null,2));
+  }finally{await snippetPage.close();}
   // Preserve the original approval sheet as history; only owner-approved C is adopted.
   const iconReview = await browser.newPage({viewport:{width:900,height:380}});
   await iconReview.setContent(await readFile("docs/design/inkleet-icon-candidates.svg","utf8"));
