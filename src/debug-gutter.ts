@@ -11,6 +11,7 @@ function arrowSvg(inline=false){
   svg.setAttribute("viewBox",inline?"0 0 10 10":"0 0 14 14");svg.setAttribute("width",inline?"8":"14");svg.setAttribute("height",inline?"8":"14");svg.setAttribute("aria-hidden","true");
   const path=document.createElementNS(svg.namespaceURI,"path");path.setAttribute("d",inline?"M1 2h8L5 8Z":"M1.5 4.5h5V1.5l6 5.5-6 5.5V9.5h-5Z");path.setAttribute("fill","currentColor");path.setAttribute("stroke","var(--surface-editor,white)");path.setAttribute("stroke-width","1");path.setAttribute("stroke-linejoin","round");svg.append(path);return svg;
 }
+class ExecutionSpacer extends GutterMarker{toDOM(){const node=document.createElement("span");node.style.width="14px";node.style.display="inline-block";return node;}}
 class ExecutionMarker extends GutterMarker{
   constructor(readonly execution:boolean){super();}
   eq(other:ExecutionMarker){return other.execution===this.execution;}
@@ -73,7 +74,7 @@ export function debugGutter(initial: number[], onChange: (lines: number[]) => vo
   return {
     extensions: [
       points, line, pointer,
-      gutter({class:"cm-execution-gutter",markers:view=>view.state.field(pointer),initialSpacer:()=>new ExecutionMarker(true)}),
+      gutter({class:"cm-execution-gutter",markers:view=>view.state.field(pointer),initialSpacer:()=>new ExecutionSpacer()}),
       gutter({ class: "cm-debug-gutter", markers: view => view.state.field(points), initialSpacer: () => dot,
         domEventHandlers: { mousedown(view, line) { toggleLine(view, line.from); return true; } } }),
       keymap.of([{ key: "F9", run(view) { toggleLine(view, view.state.doc.lineAt(view.state.selection.main.head).from); return true; } }]),
