@@ -1505,7 +1505,7 @@ try {
   assert.equal(await semanticPage.locator(".cm-line span").filter({hasText:/^foo$/}).first().evaluate(el=>getComputedStyle(el).color),"rgb(0, 0, 255)","production basicSetup lexical highlight exists before semantic reply");
   await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=false;s.reply();s.reply=null;});
   await semanticPage.locator(".cm-semantic-function").waitFor();
-  assert.equal(await semanticPage.locator(".cm-semantic-function").evaluate(el=>getComputedStyle(el).color),"rgb(76, 114, 140)","semantic mark overrides actual Lezer lexical highlighting");
+  assert.equal(await semanticPage.locator(".cm-semantic-function").evaluate(el=>{while(el.lastElementChild)el=el.lastElementChild;return getComputedStyle(el).color;}),"rgb(76, 114, 140)","semantic mark overrides actual Lezer lexical highlighting");
   assert.equal(await semanticPage.evaluate(()=>window.__semanticTest.requests),2,"bounded readiness retry recovers without edits");
   await semanticPage.evaluate(()=>{const s=window.__semanticTest;s.defer=true;s.view.dispatch({changes:{from:3,to:6,insert:"bar"}});});
   assert.equal(await semanticPage.locator(".cm-semantic").count(),0,"edit clears semantic classification immediately");

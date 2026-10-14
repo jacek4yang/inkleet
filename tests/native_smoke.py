@@ -753,8 +753,9 @@ try:
                     assert "solve" in text(".code-pane .cm-semantic-function"),"gopls resolves source function"
                     semantic_node=element(".code-pane .cm-semantic-function")
                     leaves=cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function span:last-child"})
-                    painted=leaves[0][EID] if leaves else semantic_node
+                    painted=leaves[-1][EID] if leaves else semantic_node
                     semantic_color=cmd("GET",f"/element/{painted}/css/color")
+                    (evidence/"semantic-paint.json").write_text(json.dumps({"color":semantic_color,"outerHTML":cmd("GET",f"/element/{semantic_node}/property/outerHTML")},ensure_ascii=False))
                     assert semantic_color in ("rgb(76, 114, 140)","rgba(76, 114, 140, 1)"),"semantic color must win over lexical paint: "+str(semantic_color)
                     screenshot("golang-semantic-native.png")
                     (evidence/"SEMANTIC_NATIVE_RESULT.txt").write_text("PASS: real private gopls semantic function highlighting in native CodeMirror. Other language semantic capabilities unverified.\\n")
