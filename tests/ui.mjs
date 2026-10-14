@@ -1577,7 +1577,7 @@ try {
     window.__gutterView=view;window.__gutterDebug=debug;
   });
   const lane=gutterPage.locator(".cm-debug-gutter");
-  assert.equal(await gutterPage.locator(".cm-execution-gutter").count(),0,"one shared glyph lane");
+  assert.equal(await gutterPage.locator(".cm-execution-gutter").count(),1,"execution has its own reserved lane");
   assert.equal(await gutterPage.locator(".cm-gutters>.cm-gutter").first().getAttribute("class").then(x=>x.includes("cm-debug-gutter")),true,"glyph lane precedes line numbers");
   const boxes=await gutterPage.evaluate(()=>{
     const view=window.__gutterView,lane=document.querySelector(".cm-debug-gutter").getBoundingClientRect();
@@ -1597,7 +1597,16 @@ try {
   await gutterPage.keyboard.down("Control");await gutterPage.mouse.click(boxes[2].x,boxes[2].y);await gutterPage.keyboard.up("Control");
   assert.equal(await gutterPage.evaluate(()=>window.__gutterChanges.length),changes,"modified click does not toggle breakpoints");
   await gutterPage.evaluate(()=>window.__gutterDebug.stopped(window.__gutterView,{line:2,column:2,execution:true}));
-  assert.equal(await gutterPage.locator(".cm-breakpoint-glyph.cm-pointer-glyph").count(),1,"same row preserves breakpoint and paused pointer");
+  const breakpointBox=await gutterPage.locator(".cm-debug-gutter").boundingBox(),pointerBox=await gutterPage.locator(".cm-execution-gutter").boundingBox();
+  assert.ok(breakpointBox.x+breakpointBox.width<=pointerBox.x,"breakpoint and pointer occupy disjoint reserved lanes");
+  const stopped=gutterPage.locator(".cm-debug-stopped");
+  const pausedColor=await stopped.evaluate(node=>getComputedStyle(node).backgroundColor);
+  await stopped.click();
+  assert.equal(await stopped.evaluate(node=>getComputedStyle(node).backgroundColor),pausedColor,"active line cannot override paused line paint");
+  await gutterPage.keyboard.down("Shift");await gutterPage.keyboard.press("ArrowRight");await gutterPage.keyboard.up("Shift");
+  assert.equal(await stopped.evaluate(node=>getComputedStyle(node).backgroundColor),pausedColor,"text selection preserves paused background");
+  await gutterPage.locator(".cm-line").last().click();
+  assert.equal(await stopped.evaluate(node=>getComputedStyle(node).backgroundColor),pausedColor,"moving cursor leaves paused row intact");
   await gutterPage.screenshot({path:"evidence/compact-gutter-interaction.png"});
   await gutterPage.mouse.click(boxes[1].x,boxes[1].y);
   assert.deepEqual(await gutterPage.evaluate(()=>window.__gutterChanges.at(-1)),[]);
@@ -1608,7 +1617,7 @@ try {
   assert.deepEqual(await gutterPage.evaluate(()=>window.__gutterChanges.at(-1)),[],"padding cannot toggle first or last line");
   await gutterPage.evaluate(()=>window.__gutterView.destroy());
   await gutterPage.close();
-  await writeFile("evidence/GUTTER_UI_RESULT.txt","PASS: actual mouse events, shared leading glyph lane, empty-row hover, primary/secondary click isolation, paused+breakpoint composite, row shading and padding exclusion. Native/zoom/wrapping remain separately verified.\n");
+  await writeFile("evidence/GUTTER_UI_RESULT.txt","PASS: actual mouse events, separate leading breakpoint and execution lanes, empty-row hover, primary/secondary click isolation, paused+breakpoint composite, row shading and padding exclusion. Native/zoom/wrapping remain separately verified.\n");
 
   const semanticPage=await browser.newPage();
   await semanticPage.route("**/semantic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
