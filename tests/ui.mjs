@@ -1585,7 +1585,7 @@ try {
       if(command==="update_language_document"){s.version=args.version;return;}
       if(command==="stop_language_service")return;
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
-      if(command==="language_request"){if(args.kind==="completion"){s.calls.push(args.completionContext);return {isIncomplete:true,items:[{label:"itemName"}]};}return null;}
+      if(command==="language_request"){if(args.kind==="completion"){s.calls.push(args.completionContext);const result={isIncomplete:true,items:[{label:"itemName"}]};if(s.defer)return new Promise(resolve=>{s.reply=()=>resolve(result);});return result;}return null;}
       throw Error(command);
     }};
     s.client=languageIntelligence("cpp",()=>{},()=>{});
@@ -1604,6 +1604,15 @@ try {
   await providerPage.keyboard.press("Escape");
   await providerPage.keyboard.press("Control+Space");
   await providerPage.waitForFunction(()=>window.__providerTest.calls.at(-1)?.triggerKind===1);
+  await providerPage.keyboard.press("Escape");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.calls=[];s.defer=true;s.reply=null;s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:"item"},selection:{anchor:4}});s.view.focus();});
+  await providerPage.keyboard.press("Control+Space");
+  await providerPage.waitForFunction(()=>typeof window.__providerTest.reply==="function");
+  await providerPage.keyboard.press("Escape");
+  await providerPage.evaluate(()=>{const s=window.__providerTest;s.defer=false;s.reply();});
+  await providerPage.keyboard.type("N");
+  await providerPage.waitForFunction(()=>window.__providerTest.calls.length>=2);
+  assert.equal(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1).triggerKind),1,"late response after Escape cannot restore incomplete context");
   await providerPage.evaluate(()=>{window.__providerTest.client.destroy();window.__providerTest.view.destroy();});
   await providerPage.close();
   await writeFile("evidence/COMPLETION_CONTEXT_UI_RESULT.txt","PASS: actual CodeMirror keyboard manual context1, adjacent incomplete context3, provider-specific > context2 and manual override. Mocked IPC; native adapters separately verified.\\n");
