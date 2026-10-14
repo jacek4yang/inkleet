@@ -564,7 +564,7 @@ try:
         click('.pane-heading .actions button[aria-label="本地"]')
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
-        wait_for(lambda: '"value": 10' in text(".local-result"), "real private Python harness result", seconds=30)
+        wait_for(lambda: text(".local-result").strip()=="10", "real private Python harness result", seconds=30)
         assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.exit-code')}/attribute/title")
         click('[aria-label="运行与调试设置"]')
         click('[aria-label="使用手册"]')
@@ -755,7 +755,7 @@ try:
         click('[data-local-tab="run"]')
         fill('[aria-label="本地测试输入"]',"[3,-1,8]")
         click('[data-action="local-execute"]')
-        wait_for(lambda: '"value":10' in text(".local-result").replace(" ",""),"Java private compilation and exact typed result",seconds=150)
+        wait_for(lambda: text(".local-result").strip()=="10","Java private compilation and exact typed result",seconds=150)
         screenshot("java-local-run-native.png")
         java_saved=data/"top.jacek.inkleet/notebook/lc-900000001/solution.java"
         wait_for(lambda: java_saved.exists() and java_saved.read_text()==java_solution,"Java run preserves original saved source")

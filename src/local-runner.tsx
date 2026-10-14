@@ -1,18 +1,37 @@
+import {parameterNames,seedCases,validateCases,inputParts,displayResult,compactCaseValue,type LocalCase} from "./test-cases";
 import { useResizablePanel } from "./resizable-panel";
 import type { DebugPosition } from "./debug-position";
-import { IconButton } from "./icons";
+import { Icon, IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { DebugPanel } from "./debug-panel";
 import type { Language } from "./domain";
-type Snapshot = { documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
+type Snapshot = { caseId?:string;caseName?:string;documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "compiling", "running", "canceling"].includes(r.phase);
-export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
-  onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
+export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
+  onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
 }) {
   const resize=useResizablePanel("local",!hidden);
-  const [input, setInput] = useState(sampleInput);
+  const names=parameterNames(metadata),storageKey="inkleet.test-cases.v1:"+(documentKey??title+":"+language);
+  const [initial]=useState(()=>{
+    const fallback=seedCases(sampleInput,exampleInputs,names);
+    try{const raw=localStorage.getItem(storageKey);return {...(raw?validateCases(JSON.parse(raw)):{cases:fallback,selected:fallback[0].id}),error:"",blocked:false};}
+    catch{return {cases:fallback,selected:fallback[0].id,error:"用例记录不可读，原记录已保留；当前修改仅保留在内存",blocked:true};}
+  });
+  const [cases,setCases]=useState<LocalCase[]>(initial.cases),[selected,setSelected]=useState(initial.selected);
+  const [caseError,setCaseError]=useState(initial.error),[rename,setRename]=useState<string|null>(null);
+  const currentCase=cases.find(item=>item.id===selected)??cases[0],input=currentCase.input;
+  function updateCases(next:LocalCase[],id=selected){
+    if(next.length>64||next.reduce((n,c)=>n+c.input.length,0)>2*1024*1024){setCaseError("用例超过大小限制");return;}
+    setCases(next);setSelected(id);
+    if(!initial.blocked)try{localStorage.setItem(storageKey,JSON.stringify({version:1,cases:next,selected:id}));setCaseError("");}catch{setCaseError("用例未保存，当前修改仍保留在内存");}
+  }
+  function setInput(value:string){updateCases(cases.map(item=>item.id===selected?{...item,input:value}:item));}
+  function chooseCase(id:string){setRename(null);updateCases(cases,id);}
+  function addCase(){const next={id:crypto.randomUUID(),name:"用例 "+(cases.length+1),input:currentCase.input};updateCases([...cases,next],next.id);}
+  function removeCase(){if(cases.length===1)return;const next=cases.filter(item=>item.id!==selected);updateCases(next,next[0].id);}
+  const parts=inputParts(input,names);
   const [pane, setPane] = useState<"run" | "debug">("run");
   const [result, setResult] = useState<Result | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -42,7 +61,7 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
       const id = await invoke<number>("start_local_run", { snapshot: next });
       if (alive.current) {
         ++sequence.current;
-        setSnapshot(next);
+        setSnapshot({...next,caseId:currentCase.id,caseName:currentCase.name});
         setResult({ id, phase: "queued", title, stdout: "", stderr: "", results: [], exitCode: null, timedOut: false, canceled: false, truncated: false, elapsedMs: 0, error: "" });
       }
     } catch (e) { if (alive.current) setError(String(e)); }
@@ -55,23 +74,35 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     catch (e) { if (alive.current) setError(String(e)); }
     finally { guard.current = false; }
   }
-  const stale = snapshot && (snapshot.documentKey !== documentKey || snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
+  const stale = snapshot && (snapshot.caseId!==selected||snapshot.documentKey !== documentKey || snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
   return <section ref={resize.panel} style={resize.style} hidden={hidden} className="local-runner resizable-panel" aria-label="本地运行">
     {resize.handle}
     <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><div className="local-actions"><IconButton icon="settings" label="运行与调试设置" onClick={onSettings} /><IconButton icon="collapse" label="收起" onClick={onClose} /></div></header>
 
+    <div className="case-toolbar">
+      <div role="tablist" aria-label="测试用例">{cases.map(item=><button key={item.id} role="tab" aria-selected={item.id===selected} tabIndex={item.id===selected?0:-1} onClick={()=>chooseCase(item.id)} onKeyDown={event=>{if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;event.preventDefault();const i=cases.findIndex(c=>c.id===selected),next=cases[(i+(event.key==="ArrowRight"?1:-1)+cases.length)%cases.length];chooseCase(next.id);(event.currentTarget.parentElement?.children[cases.indexOf(next)] as HTMLElement)?.focus();}}>{item.name}</button>)}</div>
+      <IconButton icon="add" label="添加用例" disabled={cases.length>=64} onClick={addCase}/>
+      <details className="case-menu"><summary aria-label="用例操作">···</summary><div><button onClick={()=>setRename(currentCase.name)}>重命名</button><button disabled={cases.length===1} onClick={removeCase}>删除用例</button></div></details>
+      {rename!==null&&<form className="case-rename" onSubmit={event=>{event.preventDefault();const name=rename.trim();if(name&&name.length<=80){updateCases(cases.map(c=>c.id===selected?{...c,name}:c));setRename(null);}}}><input autoFocus aria-label="用例名称" maxLength={80} value={rename} onChange={e=>setRename(e.target.value)} onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setRename(null);}}}/><button type="submit">确定</button></form>}
+      {caseError&&<span role="alert">{caseError}</span>}
+    </div>
     <div data-runner-pane="run" hidden={pane !== "run"}>
-    <label>测试输入<textarea aria-label="本地测试输入" value={input} onChange={e => setInput(e.target.value)} spellCheck={false} placeholder="" /></label>
+    <div className="case-inputs">
+    {parts?parts.map((value,index)=><label key={index}><span>{names[index]}</span><textarea rows={2} aria-label={parts.length===1?"本地测试输入":"参数 "+names[index]} value={value} onChange={e=>{const next=[...parts];next[index]=compactCaseValue(e.target.value);setInput(next.join("\n"));}} spellCheck={false}/></label>):<label><span>输入</span><textarea aria-label="本地测试输入" value={input} onChange={e=>setInput(e.target.value)} spellCheck={false}/></label>}
+    </div>
     <div className="local-actions"><IconButton icon="play" label="本地执行" title="本地执行 · 仅运行可信代码，非安全沙箱" data-action="local-execute" onClick={run} disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || pending || busy(result)} />{busy(result) && <IconButton icon="stop" label="停止" onClick={cancel} disabled={result?.phase === "canceling"} />}<span role="status" hidden={!result}>{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : result.phase === "compiling" ? "编译中…" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过时限，已终止" : result.phase === "error" || result.error ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
-    {stale && <p className="cache-warning">当前代码或用例已改变，下面是上一次快照的结果。</p>}
-    {!snapshot && result && <p className="muted">以下为先前运行的结果，不能视为当前草稿的结果。</p>}
+    {stale && <p className="cache-warning">结果已过期</p>}
+    {!snapshot && result && <p className="muted">上次运行</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
     {result?.truncated && <p role="alert">输出达到上限，已截断并终止进程。</p>}
-    {result?.results.map((value, index) => <pre key={index} className="local-result">{value}</pre>)}
+    {result?.results.map((raw,index)=>{
+      const value=displayResult(raw,index);
+      return <section key={index} className="case-result" title="本地结果不代表通过力扣判题"><header><span>{snapshot?.caseName??"用例 "+value.caseNumber}{snapshot?.caseName&&result.results.length>1?" · "+value.caseNumber:""}</span><span>{value.error?"执行失败":value.raw?"输出":"返回值"}</span></header>{value.error?<pre role="alert" className="error">{value.error}</pre>:<pre className="local-result">{value.value}</pre>}<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details></section>;
+    })}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
 
-    {result && !busy(result) && <small className="exit-code" title="本地结果不代表通过力扣判题">退出码 {result.exitCode ?? "无"}</small>}
+    {result && !busy(result) && result.exitCode!==null&&result.exitCode!==0 && <small className="exit-code">退出码 {result.exitCode}</small>}
     </div>
     <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel onReveal={()=>{setPane("debug");onReveal?.();}} snapshot={{ documentKey, code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
   </section>;
