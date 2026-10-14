@@ -17,7 +17,7 @@ def inspected(url, digest, prefix, entry, archive):
         with zipfile.ZipFile(io.BytesIO(raw)) as z: names = z.namelist()
     else:
         with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as z: names = z.getnames()
-    assert prefix + "/" + entry in names, (url, prefix, entry)
+    assert ((prefix + "/") if prefix else "") + entry in names, (url, prefix, entry)
     return len(raw)
 channel = tomllib.loads(get(f"https://static.rust-lang.org/dist/channel-rust-{RUST}.toml").decode())
 release = json.loads(get(f"https://api.github.com/repos/astral-sh/ruff/releases/tags/{RUFF}"))
@@ -39,6 +39,7 @@ for platform, triple in [("linux-x64","x86_64-unknown-linux-gnu"),("windows-x64"
     assert len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)
     assert asset.get("digest") in (None, "sha256:" + digest)
     entry = "ruff.exe" if platform == "windows-x64" else "ruff"
+    if platform == "windows-x64": prefix = ""
     size = inspected(asset["browser_download_url"],digest,prefix,entry,archive)
     assert size == asset["size"]
     pins.append(dict(id="ruff",platform=platform,version=RUFF,url=asset["browser_download_url"],sha256=digest,size=size,archive=archive,prefix=prefix,entry=entry,license="MIT"))
