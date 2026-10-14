@@ -483,3 +483,15 @@ button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(
 
 
 .vim-switch{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:34px;font-size:12px}.vim-switch input{width:15px;height:15px;accent-color:var(--accent)}
+
+.judge-result-kind{font-size:11px;color:var(--muted);padding:6px 0}
+.judge-readable>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0 12px}
+.verdict{font-size:15px;font-weight:600;color:var(--ink)}.verdict.accepted{color:#53754c}
+.judge-metrics{display:flex;gap:12px;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.judge-comparison{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.judge-field{min-width:0}.judge-field h4{font-size:11px;font-weight:500;color:var(--muted);margin:0 0 5px}
+.judge-field pre{margin:0;padding:9px 11px;border:1px solid var(--line);background:var(--surface);font-size:12px;min-height:34px;max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.judge-error{grid-column:1/-1}.judge-error pre{color:#a4493d}
+.judge-raw{margin-top:12px;color:var(--muted);font-size:11px}.judge-raw pre{max-height:280px;overflow:auto}
+.judge-blocker{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line);font-size:11px}
+@media(max-width:760px){.judge-comparison{grid-template-columns:1fr}}
