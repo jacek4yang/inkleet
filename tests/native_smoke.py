@@ -437,26 +437,33 @@ try:
         wait_for(lambda: "inner" in stack_names(),"real stepIn enters inner function")
         click('[aria-label="单步跳过"]')
         def inner_total():
-            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='inner_total']]/code"})[EID]
+            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='inner_total']]/code"})[EID]
             return cmd("GET",f"/element/{node}/text")
         wait_for(lambda:inner_total()=="10","stepOver computes inner-frame local")
         click('.debug-variable button[aria-label="values"]')
         wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".debug-tree-children .debug-variable"}))>=3,"real nested array tree children")
         assert cmd("POST","/elements",{"using":"css selector","value":".debug-variable button[aria-label='values']"}),"parent lost while expanding"
+        def child_values():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-tree-children .debug-variable > code"})
+            return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
+        wait_for(lambda:all(value in child_values() for value in ["3","-1","8"]),"expanded array children preserve exact values")
+
         fill('[aria-label="调试表达式输入"]',"inner_total")
         click('[aria-label="添加监视表达式"]')
         click('[aria-label="刷新监视 inner_total"]')
-        wait_for(lambda:"10" in text(".debug-watch"),"real current-frame watch")
+        def watch_result():
+            return cmd("GET",f"/element/{element('.debug-watch > span')}/property/textContent")
+        wait_for(lambda:watch_result()=="10","real current-frame watch")
         screenshot("python-nested-debugger-native.png")
         caller=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'solve')]"})[EID]
         cmd("POST",f"/element/{caller}/click",{})
-        wait_for(lambda:"—" in text(".debug-watch"),"watch result invalidated on caller selection")
+        wait_for(lambda:watch_result()=="—","watch result invalidated on caller selection")
         inner=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'inner')]"})[EID]
         cmd("POST",f"/element/{inner}/click",{})
         wait_for(lambda:inner_total()=="10","selecting inner frame restores its own variables")
         click('[aria-label="单步跳出"]')
         wait_for(lambda:"inner" not in stack_names() and "solve" in stack_names(),"real stepOut returns to caller")
-        wait_for(lambda:"—" in text(".debug-watch"),"watch result invalidated on new pause")
+        wait_for(lambda:watch_result()=="—","watch result invalidated on new pause")
         click('[aria-label="停止调试"]')
         wait_for(lambda:"调试结束" in text(".debug-panel"),"nested debugger stopped")
         click(code)
@@ -514,7 +521,7 @@ try:
         wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
         wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
         def java_total():
-            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='total']]/code"})[EID]
+            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='total']]/code"})[EID]
             return cmd("GET",f"/element/{node}/text")
         wait_for(lambda: java_total()=="0","Java initial total")
         wait_for(lambda: "部分断点尚未验证" not in text(".debug-panel"),"Java asynchronous breakpoint verification reaches the UI")
@@ -602,7 +609,7 @@ try:
                 wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
                 wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
                 def local_total():
-                    node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='total']]/code"})[EID]
+                    node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='total']]/code"})[EID]
                     return cmd("GET",f"/element/{node}/text")
                 wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
                 screenshot(group+"-debug-native.png")
