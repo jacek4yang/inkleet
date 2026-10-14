@@ -33,7 +33,7 @@ export function Login({ onIdentity }: { onIdentity: (value: Identity | null) => 
       title={isTauri() ? "官方登录；当前原型仅保留本次运行会话" : "请在原生客户端登录"}>
       {identity ? identity.username + " · 退出" : "登录力扣"}
     </button>
-    {(open || message || identity) && <div className="login-panel" role="status">
+    {(open || message) && <div className="login-panel" role="status">
       <p>{identity ? "已通过中国站登录状态校验 · 仅本次运行有效" : "请在独立窗口完成力扣官方登录，再回到这里校验。当前原型不保存密码或持久化会话。第三方弹窗登录尚未支持。"}</p>
       {message && <p className="error">{message}</p>}
       {open && <div><button disabled={busy} onClick={verify}>{busy ? "正在校验…" : "已完成登录，校验会话"}</button><button onClick={cancel}>取消登录</button></div>}

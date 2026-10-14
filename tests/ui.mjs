@@ -4,6 +4,13 @@ import os from "node:os";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
+async function openSettings(page, category) {
+  await page.locator('[data-action="open-settings"]').click();
+  const dialog = page.getByRole("dialog", { name: "设置", exact: true });
+  await dialog.getByRole("navigation", { name: "设置分类" }).getByRole("button", { name: category, exact: true }).click();
+  return dialog;
+}
+
 const server = spawn("npm", ["run", "dev", "--", "--port", "5173"], { stdio: "inherit" });
 const browser = await chromium.launch();
 await mkdir("evidence", { recursive: true });
@@ -21,9 +28,22 @@ try {
   const fontLoaded = await page.evaluate(() => document.fonts.check('14px "Intel One Mono"'));
   assert.equal(fontLoaded, true, "必须实际加载内置 Intel One Mono");
   assert.ok((await editor.evaluate(el => getComputedStyle(el).fontFamily)).includes("Intel One Mono"));
+  await openSettings(page, "编辑器");
   await page.getByRole("button", { name: "Intel One Mono", exact: true }).click();
   await page.getByRole("heading", { name: "Intel One Mono", exact: true }).waitFor();
   await page.getByRole("button", { name: "关闭字体说明", exact: true }).click();
+  assert.equal(await page.locator(".editor-foot").count(), 0, "low-frequency actions are not permanently shown below the editor");
+  const beforeSettings = await editor.innerText();
+  const settingsDialog = await openSettings(page, "语言与环境");
+  await settingsDialog.getByRole("textbox", { name: "搜索设置" }).fill("导出");
+  assert.equal(await settingsDialog.getByRole("button", { name: "导出源码", exact: true }).count(), 1);
+  assert.equal(await settingsDialog.getByRole("button", { name: "导出 Markdown", exact: true }).count(), 1);
+  await page.screenshot({ path: "evidence/settings-search.png", fullPage: true });
+  await page.keyboard.press("Escape");
+  await settingsDialog.waitFor({ state: "hidden" });
+  assert.equal(await page.locator('[data-action="open-settings"]').evaluate(el => el === document.activeElement), true, "closing settings restores its invoking focus");
+  assert.equal(await editor.innerText(), beforeSettings, "settings navigation never recreates or replaces the draft");
+  assert.equal(await page.locator('[data-action="open-settings"] svg[aria-hidden="true"]').count(), 1);
   await editor.fill("// Rust 独立草稿");
   await page.getByRole("combobox", { name: "编程语言" }).selectOption("python3");
   await editor.fill("def solve(values):");
@@ -99,6 +119,7 @@ try {
   await page.getByRole("button", { name: "返回编辑", exact: true }).click();
   assert.equal(await readNotes(), hostileNotes);
   const notesDownloadPromise = page.waitForEvent("download");
+  await openSettings(page, "笔记");
   await page.getByRole("button", { name: "导出 Markdown", exact: true }).click();
   const notesDownload = await notesDownloadPromise;
   assert.equal(await readFile(await notesDownload.path(), "utf8"), hostileNotes);
@@ -117,6 +138,7 @@ try {
   await page.getByText("笔记过长，已暂停预览；原文仍可编辑和导出。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "返回编辑", exact: true }).click();
   const longDownloadPromise = page.waitForEvent("download");
+  await openSettings(page, "笔记");
   await page.getByRole("button", { name: "导出 Markdown", exact: true }).click();
   const longDownload = await longDownloadPromise;
   assert.equal(await readFile(await longDownload.path(), "utf8"), longNotes, "检查完整导出，不把 CodeMirror 可见视口当作完整长文档");
@@ -166,6 +188,7 @@ try {
     longestTaskMs: Math.max(0, ...measured.tasks),
   };
   const downloadPromise = page.waitForEvent("download");
+  await openSettings(page, "源码");
   await page.getByRole("button", { name: "导出源码", exact: true }).click();
   const exported = await downloadPromise;
   const exportedText = await readFile(await exported.path(), "utf8");
@@ -402,6 +425,7 @@ try {
   });
   await envPage.goto("http://127.0.0.1:5173");
   await envPage.getByRole("button", { name: "代码", exact: true }).click();
+  await openSettings(envPage, "语言与环境");
   await envPage.getByRole("button", { name: "开发环境", exact: true }).click();
   const envDialog = envPage.getByRole("dialog", { name: "开发环境", exact: true });
   await envDialog.getByText("未安装", { exact: true }).waitFor();
@@ -410,6 +434,7 @@ try {
   await envPage.evaluate(() => window.__envTest.pending[0]());
   await envDialog.getByText("下载中", { exact: true }).waitFor();
   await envDialog.getByRole("button", { name: "关闭", exact: true }).click();
+  await openSettings(envPage, "语言与环境");
   await envPage.getByRole("button", { name: "开发环境", exact: true }).click();
   await envDialog.getByText("下载中", { exact: true }).waitFor();
   await envDialog.getByRole("button", { name: "取消", exact: true }).click();
@@ -428,6 +453,7 @@ try {
     window.__envTest.tools.find(t=>t.id==="go").phase="ready";
     window.__envTest.tools.find(t=>t.id==="gopls").phase="building";
   });
+  await openSettings(envPage, "语言与环境");
   await envPage.getByRole("button",{name:"开发环境",exact:true}).click();
   await envDialog.getByRole("combobox",{name:"开发环境语言"}).selectOption("golang");
   await envDialog.getByText("编译工具中",{exact:true}).waitFor();
@@ -477,7 +503,7 @@ try {
   });
   await lspPage.goto("http://127.0.0.1:5173");
   await lspPage.getByRole("combobox", { name: "编程语言", exact: true }).selectOption("python3");
-  await lspPage.getByText("Pyright 已连接 · F12 / Ctrl+单击查看定义", { exact: true }).waitFor();
+  await lspPage.locator('.lsp-status[data-status="Pyright 已连接 · F12 / Ctrl+单击查看定义"]').waitFor();
   const lspEditor = lspPage.getByRole("textbox", { name: "代码编辑器", exact: true });
   await lspEditor.fill("items.");
   await lspEditor.press("Control+Space");
@@ -639,7 +665,12 @@ try {
   await runPanel.getByText(/断点：1。/).waitFor();
   await runPanel.getByRole("button", { name: "开始调试", exact: true }).evaluate(button => { button.click(); button.click(); });
   await runPage.waitForFunction(() => window.__runTest.debugStarts === 1);
-  await runPanel.getByText("已暂停 · breakpoint", { exact: true }).waitFor();
+  await runPanel.getByText("已暂停", { exact: true }).waitFor();
+  assert.equal(await runPanel.getByText("已暂停", { exact: true }).getAttribute("title"), "breakpoint");
+  for (const label of ["开始调试", "继续", "单步跳过", "单步进入", "单步跳出", "应用断点", "停止调试"]) {
+    assert.equal(await runPanel.getByRole("button", { name: label, exact: true }).locator("svg[aria-hidden=true]").count(), 1, label + " has an accessible SVG control");
+  }
+  await runPage.screenshot({ path: "evidence/debug-svg-toolbar.png", fullPage: true });
   await runPanel.getByRole("button", { name: "values", exact: true }).waitFor();
   await runPage.locator(".cm-debug-stopped").waitFor();
   await runPanel.getByRole("textbox", { name: "调试表达式输入", exact: true }).fill("len(values)");
@@ -783,6 +814,7 @@ try {
   assert.equal(await conflictPage.evaluate(() => window.__conflictTest.file), null);
   await conflictEditor.fill("after recovery");
   await conflictPage.waitForFunction(() => window.__conflictTest.file === "after recovery");
+  await openSettings(conflictPage, "源码");
   await conflictPage.locator('[data-action="code-recovery"]').click();
   const recoveryDialog = conflictPage.getByRole("dialog", { name: "源码恢复副本", exact: true });
   await recoveryDialog.locator('[data-recovery-id="conflict-0.json"]').click();
@@ -834,6 +866,7 @@ try {
   await externalPage.waitForFunction(() => window.__externalTest.opened.length === 1);
   assert.deepEqual(await externalPage.evaluate(() => window.__externalTest.opened), [{ editor: "typora", saved: "# Saved" }]);
   await externalPage.evaluate(() => { window.__externalTest.notes = "# From Typora"; });
+  await openSettings(externalPage, "笔记");
   await externalPage.getByRole("button", { name: "刷新文件", exact: true }).click();
   await externalPage.waitForFunction(() => document.querySelector('[aria-label="Markdown 笔记"]').innerText === "# From Typora");
   assert.equal(await externalPage.getByRole("textbox", { name: "代码编辑器", exact: true }).innerText(), "original code");
@@ -843,6 +876,7 @@ try {
   await externalNote.fill("# Unsaved");
   await externalPage.locator('[data-action="review-notes-conflict"]').waitFor();
   await externalPage.evaluate(() => { window.__externalTest.notes = "# Concurrent external"; });
+  await openSettings(externalPage, "笔记");
   await externalPage.getByRole("button", { name: "刷新文件", exact: true }).click();
   await externalPage.locator(".statusbar").filter({ hasText: "外部笔记已变化 · 请对比两份内容后处理" }).waitFor();
   assert.equal(await externalNote.innerText(), "# Unsaved");

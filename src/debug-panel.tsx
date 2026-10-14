@@ -1,3 +1,4 @@
+import { Icon, IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { Language } from "./domain";
@@ -112,24 +113,23 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   const paused = state?.phase === "paused";
   return <div className="debug-panel" aria-label="本地断点调试">
     <div className="local-actions">
-      <button disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")}>{pending && !active(state) ? "启动调试…" : "开始调试"}</button>
-      {active(state) && <><button disabled={pending || evaluating || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action(paused ? "continue" : "pause")}>{paused ? "继续" : "暂停"}</button>
-        {(["next", "stepIn", "stepOut"] as const).map((kind, index) => <button key={kind} disabled={!paused || pending || evaluating} onClick={() => action(kind)}>{["单步跳过", "单步进入", "单步跳出"][index]}</button>)}
-        <button disabled={pending || evaluating || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")}>应用断点</button><button disabled={pending} onClick={() => action("stop")}>停止调试</button></>}
+      <IconButton icon="play" label="开始调试" shortcut="F5" disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(snapshot.language) || !!active(state) || pending || running} onClick={() => action("start")} />
+      {active(state) && <><IconButton icon={paused ? "play" : "pause"} label={paused ? "继续" : "暂停"} shortcut={paused ? "F5" : undefined} disabled={pending || evaluating || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action(paused ? "continue" : "pause")} />
+        {(["next", "stepIn", "stepOut"] as const).map((kind, index) => <IconButton key={kind} icon={(["next","into","out"] as const)[index]} label={["单步跳过", "单步进入", "单步跳出"][index]} shortcut={["F10","F11","Shift+F11"][index]} disabled={!paused || pending || evaluating} onClick={() => action(kind)} />)}
+        <IconButton icon="breakpoint" label="应用断点" disabled={pending || evaluating || stale || !original || !["paused", "running"].includes(state?.phase ?? "")} onClick={() => action("breakpoints")} /><IconButton icon="stop" label="停止调试" shortcut="Shift+F5" disabled={pending} onClick={() => action("stop")} /></>}
     </div>
-    <div className="debug-body"><details className="debug-help"><summary>断点：{breakpoints.join(", ") || "未设置"}。 · 快捷键与限制</summary><p className="muted">F9 切换断点；运行中用“应用断点”更新。F5 开始 / 继续，F10 跳过，F11 进入，Shift+F11 跳出，Shift+F5 停止。连续执行限时 30 秒，会话最多 30 分钟。</p></details>
-    <p role="status">{state ? state.phase === "paused" ? "已暂停 · " + state.reason : state.phase === "finished" ? "调试结束 · " + state.reason : state.phase === "compiling" ? "正在编译调试快照…" : state.phase === "starting" ? "正在连接调试器…" : "调试运行中" : "尚未调试"}</p>
+    <div className="debug-body"><div className="debug-meta"><span className="breakpoint-summary">断点：{breakpoints.join(", ") || "未设置"}。</span></div>
+    <p role="status" hidden={!state} title={state?.reason}>{state ? state.phase === "paused" ? "已暂停" : state.phase === "finished" ? "调试结束 · " + state.reason : state.phase === "compiling" ? "正在编译调试快照…" : state.phase === "starting" ? "正在连接调试器…" : "调试运行中" : "尚未调试"}</p>
     {notice && <p role="status">{notice}</p>}
     {stale && <p className="cache-warning">代码或用例已改变，调试仍使用启动时快照；当前编辑器不显示旧快照停靠行。</p>}
     {(error || state?.error) && <p className="error" role="alert">{error || state?.error}</p>}
     {state?.breakpoints.some(b => !b.verified) && <p className="cache-warning">部分断点尚未验证，可能不是可执行行。</p>}
     {paused && <div className="debug-inspector"><div><h4>调用栈</h4>{frames.map(frame => <button key={frame.id} aria-pressed={frame.id === selectedFrame} onClick={() => showFrame(frame)}>{frame.name.slice(0, 200)} · {frame.line}</button>)}</div>
       <div><h4>变量</h4><div className="local-actions">{scopes.map(scope => <button key={scope.variablesReference} onClick={() => showVariables(scope.variablesReference)}>{scope.name.slice(0,100)}</button>)}</div>
-        {variables.map((variable,index) => <div className="debug-variable" key={index}><button disabled={!variable.variablesReference} onClick={() => showVariables(variable.variablesReference)}>{variable.variablesReference ? "▸ " : ""}{variable.name.slice(0,200)}</button><code>{variable.value.slice(0,4000)}</code></div>)}</div></div>}
+        {variables.map((variable,index) => <div className="debug-variable" key={index}><button disabled={!variable.variablesReference} onClick={() => showVariables(variable.variablesReference)}>{variable.variablesReference ? <Icon name="chevron" /> : null}{variable.name.slice(0,200)}</button><code>{variable.value.slice(0,4000)}</code></div>)}</div></div>}
     {paused && <form className="debug-evaluate" aria-label="调试表达式" onSubmit={event => { event.preventDefault(); void evaluate(); }}>
       <label>表达式<input aria-label="调试表达式输入" value={expression} maxLength={1024} disabled={evaluating || snapshot.language === "java"} onChange={event => { ++evaluationVersion.current; setExpression(event.target.value); setEvaluation(null); }} placeholder="例如 len(values) 或 total + 1" /></label>
-      <button type="submit" disabled={pending || evaluating || stale || selectedFrame === null || !expression.trim() || snapshot.language === "java"}>{evaluating ? "求值中…" : "求值一次"}</button>
-      <p className="muted">{snapshot.language === "java" ? "当前 Java 调试核心暂不支持表达式求值。" : "仅显式点击时求值，不会自动重复。表达式可能调用函数或改变程序状态；超时将停止本次调试。"}</p>
+      <IconButton icon="play" label="求值一次" title={snapshot.language === "java" ? "Java 暂不支持表达式求值" : "求值一次 · 可能改变程序状态；超时停止当前调试"} type="submit" disabled={pending || evaluating || stale || selectedFrame === null || !expression.trim() || snapshot.language === "java"} />
       {evaluation && <div className="debug-evaluation-result"><pre>{evaluation.result}</pre>{evaluation.type && <span>{evaluation.type}</span>}{evaluation.truncated && <p>结果过长，已截断显示。</p>}{evaluation.variablesReference > 0 && <button type="button" onClick={() => showVariables(evaluation.variablesReference)}>展开求值结果</button>}</div>}
     </form>}
     {state?.output && <pre>{state.output}</pre>}

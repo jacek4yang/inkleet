@@ -1,3 +1,4 @@
+import { IconButton } from "./icons";
 import React, { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 import { CodeEditor } from "./editor";
@@ -41,26 +42,23 @@ function MarkdownPreview({ text }: { text: string }) {
   }, [text]);
   const current = result?.source === text ? result : null;
   return <div className="notes-preview" aria-label="Markdown 预览">
-    <p className="notes-preview-hint">离线预览 · 链接仅显示文字，图片与嵌入内容不加载；原始 Markdown 完整保留。</p>
     {!current ? <p aria-live="polite">正在生成预览…</p> : current.error
       ? <p className="error" aria-live="polite">{current.error}</p>
       : text.trim() ? <div className="notes-rendered" dangerouslySetInnerHTML={{ __html: current.html ?? "" }} />
-      : <p className="muted">还没有笔记。返回编辑，写下你的思路。</p>}
+      : <p className="muted">暂无笔记</p>}
   </div>;
 }
-export function Notes({ documentKey, value, loading, onChange, onExport, externalEditors, onExternal, onReload, onRecovery }: {
+export function Notes({ documentKey, value, loading, onChange, onSettings }: {
   documentKey: string; value: string; loading: boolean;
   onChange: (value: string) => void; onExport: () => void;
-  onRecovery?: () => void;
+  onSettings?: () => void; onRecovery?: () => void;
   externalEditors?: boolean; onExternal?: (editor: "default" | "typora") => void; onReload?: () => void;
 }) {
   const [preview, setPreview] = useState(false);
   return <>
-    <div className="pane-heading notes-heading"><strong>解题笔记</strong><div>
-      <button disabled={loading} aria-pressed={preview} onClick={() => setPreview(v => !v)}>{preview ? "返回编辑" : "预览笔记"}</button>
-      <button disabled={loading} onClick={onExport}>导出 Markdown</button>
-      {onRecovery && <button data-action="notes-recovery" disabled={loading} onClick={onRecovery}>恢复副本</button>}
-      {externalEditors && <><button disabled={loading} onClick={() => onExternal?.("typora")}>Typora 编辑</button><button disabled={loading} onClick={() => onExternal?.("default")}>系统编辑器</button><button disabled={loading} onClick={onReload}>刷新文件</button></>}
+    <div className="pane-heading notes-heading"><div>
+      <IconButton icon={preview ? "edit" : "eye"} label={preview ? "返回编辑" : "预览笔记"} disabled={loading} aria-pressed={preview} onClick={() => setPreview(v => !v)} />
+      <IconButton icon="settings" label="笔记设置" onClick={onSettings} />
     </div></div>
     {loading ? <p className="loading">正在读取笔记…</p> : preview
       ? <MarkdownPreview text={value} />
