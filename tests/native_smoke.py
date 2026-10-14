@@ -188,6 +188,7 @@ try:
 
     click('[data-action="notes-recovery"]')
     wait_for(lambda:element(".file-recovery"),"native recovery history")
+    wait_for(lambda:element(".recovery-list button:first-child"),"native recovery records loaded")
     click(".recovery-list button:first-child")
     wait_for(lambda:element('textarea[aria-label="恢复编辑器副本"]'),"recovery record preview")
     preview_node=element('textarea[aria-label="恢复编辑器副本"]')
