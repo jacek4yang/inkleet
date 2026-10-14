@@ -17,8 +17,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: baseline
-            source: d48e2becc5c512b391eebba4b78a9a0d8ae5fab3
           - label: memoized
             source: b0f39e684b586c3399930fdb5842fe284d335459
     steps:

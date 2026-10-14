@@ -54,9 +54,9 @@ def run_performance(g):
     report={"source":os.environ.get("INKLEET_BINARY_SOURCE"),"harnessSource":os.environ.get("INKLEET_HARNESS_SOURCE"),
         "binary":binary,"buildMode":os.environ.get("INKLEET_BUILD_MODE","unknown"),
         "kernel":platform.platform(),"cpu":next((line.split(":",1)[1].strip() for line in pathlib.Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")),"unknown"),
-        "logicalCpus":os.cpu_count(),"environment":"Linux WebKitGTK on GitHub Actions Xvfb; real X11 input, private Pyright and durable draft IPC",
+        "logicalCpus":os.cpu_count(),"compositingDisabled":os.environ.get("WEBKIT_DISABLE_COMPOSITING_MODE"),"environment":"Linux WebKitGTK on GitHub Actions Xvfb; real X11 input, private Pyright and durable draft IPC",
         "limitations":["input-to-rAF is not OS-key-to-screen or completed paint","RSS sums double-count shared pages and are not peak/private memory",
-            "two /proc snapshots exclude CPU of descendants that start and exit between samples","fixed phase order; no hardware-independent speed claim"],
+            "two /proc snapshots exclude CPU of descendants that start and exit between samples","fixed phase order; no hardware-independent speed claim","IPC timings include bridge/backend scheduling; syncMs is invoke call time, not pure serialization","IPC records without endAt are censored at capture; no source or response content is logged","CPU snapshots approximately bracket, but do not exactly match, the wall interval"],
         "samples":[]}
     output=evidence/"NATIVE_PERFORMANCE.json"
     stop();start()
@@ -82,16 +82,35 @@ def run_performance(g):
                 paste(source)
                 for burst in range(3):
                     js("""
-                        const sample={frames:[],gaps:[],tasks:[],longTaskSupported:!!(window.PerformanceObserver&&PerformanceObserver.supportedEntryTypes?.includes('longtask'))};
+                        const sample={frames:[],gaps:[],tasks:[],inputIntervals:[],frameIntervals:[],ipc:[],startedAt:performance.now(),longTaskSupported:!!(window.PerformanceObserver&&PerformanceObserver.supportedEntryTypes?.includes('longtask'))};
                         let last=performance.now(),active=true,frame;
-                        function tick(now){sample.gaps.push(now-last);last=now;if(active)frame=requestAnimationFrame(tick);}
+                        function tick(now){sample.gaps.push(now-last);sample.frameIntervals.push({startAt:last,endAt:now});last=now;if(active)frame=requestAnimationFrame(tick);}
                         frame=requestAnimationFrame(tick);
                         const input=event=>{if(event.inputType!=='insertText'||!event.target.closest('[aria-label="代码编辑器"]'))return;
-                            const at=performance.now();requestAnimationFrame(()=>sample.frames.push(performance.now()-at));};
+                            const at=performance.now();requestAnimationFrame(()=>{const endAt=performance.now();sample.frames.push(endAt-at);sample.inputIntervals.push({startAt:at,endAt});});};
                         document.addEventListener('beforeinput',input,true);
                         let observer;
                         if(sample.longTaskSupported){observer=new PerformanceObserver(list=>{for(const e of list.getEntries())sample.tasks.push(e.duration);});observer.observe({type:'longtask'});}
-                        window.__nativePerf={sample,stop(){active=false;cancelAnimationFrame(frame);document.removeEventListener('beforeinput',input,true);observer?.disconnect();}};
+                        const internals=window.__TAURI_INTERNALS__,original=internals.invoke;
+                        const tracked=new Set(['checkpoint_draft','update_language_document','language_request','language_diagnostics']);
+                        function timedInvoke(...args){
+                            if(!tracked.has(args[0]))return Reflect.apply(original,this,args);
+                            const value=args[1]??{},entry={command:args[0],kind:typeof value.kind==='string'?value.kind:null,
+                                textCodeUnits:typeof value.text==='string'?value.text.length:null,
+                                baselineCodeUnits:typeof value.baseline==='string'?value.baseline.length:null,startAt:performance.now()};
+                            sample.ipc.push(entry);
+                            try{
+                                const result=Reflect.apply(original,this,args);
+                                entry.syncMs=performance.now()-entry.startAt;
+                                Promise.resolve(result).then(()=>{entry.endAt=performance.now();entry.ok=true;},()=>{entry.endAt=performance.now();entry.ok=false;});
+                                return result;
+                            }catch(error){entry.syncMs=performance.now()-entry.startAt;entry.endAt=performance.now();entry.ok=false;throw error;}
+                        }
+                        internals.invoke=timedInvoke;
+                        if(internals.invoke!==timedInvoke)throw Error('test IPC instrumentation unavailable');
+                        window.__nativePerf={sample,stop(){if(!active)return;active=false;sample.stoppedAt=performance.now();
+                            cancelAnimationFrame(frame);document.removeEventListener('beforeinput',input,true);observer?.disconnect();
+                            if(internals.invoke===timedInvoke)internals.invoke=original;}};
                     """)
                     before=processes(binary);begin=time.monotonic()
                     typed="0123456789"*4
@@ -99,7 +118,7 @@ def run_performance(g):
                         subprocess.run(["xdotool","type","--clearmodifiers","--delay","20",typed],check=True)
                         wait_for(lambda:js("return window.__nativePerf.sample.frames.length;")==len(typed),"all native input-to-rAF samples")
                         elapsed=time.monotonic()-begin;after=processes(binary)
-                        sample=js("window.__nativePerf.stop();return window.__nativePerf.sample;")
+                        sample=js("window.__nativePerf.stop();window.__nativePerf.sample.capturedAt=performance.now();return window.__nativePerf.sample;")
                     finally:
                         js("window.__nativePerf?.stop();")
                     source+=typed
