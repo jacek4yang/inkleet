@@ -74,6 +74,15 @@ if test -d public/fonts; then
   mkdir -p "$work/$name/font-licenses"
   find public/fonts -type f \( -iname '*license*' -o -iname '*OFL*' \) -exec cp {} "$work/$name/font-licenses/" \;
 fi
+# Preserve dependency notices, including the Vim adapter/core MIT licenses.
+if test -d node_modules; then
+  while IFS= read -r -d '' license; do
+    relative="${license#node_modules/}"
+    target="$work/$name/dependency-licenses/$relative"
+    mkdir -p "$(dirname "$target")"
+    cp "$license" "$target"
+  done < <(find node_modules -type f \( -iname 'license*' -o -iname 'copying*' -o -iname 'notice*' \) -print0)
+fi
 tar -C "$work" -czf "$out/$name.tar.gz" "$name"
 (cd "$out" && sha256sum "$name.tar.gz" > "$name.sha256")
 cp "$work/$name/README.txt" "$out/README-linux.txt"
