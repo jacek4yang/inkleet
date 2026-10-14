@@ -565,7 +565,7 @@ try:
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
         wait_for(lambda: text(".local-result").strip()=="10", "real private Python harness result", seconds=30)
-        assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.exit-code')}/attribute/title")
+        assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.case-result')}/attribute/title")
         click('[aria-label="运行与调试设置"]')
         click('[aria-label="使用手册"]')
         wait_for(lambda:"本地输出不代表力扣判题结论" in cmd("GET",f"/element/{element('.user-manual')}/property/textContent"),"local judge distinction is available in the manual")
