@@ -872,7 +872,7 @@ try:
         click('[data-action="open-catalogue"]')
         search = '[aria-label="搜索中国站题目"]'
         wait_for(lambda: element(search), "catalogue opened")
-        cmd("POST", f"/element/{element(search)}/value", {"text": "two sum", "value": list("two sum")})
+        fill(search, "two sum")
         click('dialog form button[type="submit"]')
         def live_search_outcome():
             results=cmd("POST","/elements",{"using":"css selector","value":'dialog button[data-slug="two-sum"]'})
@@ -903,7 +903,7 @@ try:
         link_input = '[aria-label="力扣题目链接"]'
         wait_for(lambda: element(link_input), "link input opened")
         linked = "https://leetcode.cn/problems/two-sum/solutions/123/?envType=study-plan-v2#example"
-        cmd("POST", f"/element/{element(link_input)}/value", {"text": linked, "value": list(linked)})
+        fill(link_input, linked)
         screenshot("question-link-native.png")
         click('dialog form button[type="submit"]')
         wait_for(lambda: len(cmd("POST", "/elements", {"using": "css selector", "value": "dialog.catalogue"})) == 0, "link dialog closed after success", seconds=30)
@@ -949,13 +949,13 @@ try:
         screenshot("real-cn-offline-native.png")
         click('[data-action="open-catalogue"]')
         wait_for(lambda: element(search), "offline catalogue opened")
-        cmd("POST", f"/element/{element(search)}/value", {"text": "two sum", "value": list("two sum")})
+        fill(search, "two sum")
         click('dialog form button[type="submit"]')
         wait_for(lambda: "无法连接中国站" in text('dialog [role="alert"]'), "network unavailable is explicit", seconds=30)
         click(".catalogue-heading button")
         click('[data-action="open-link"]')
         wait_for(lambda: element(link_input), "offline link input opened")
-        cmd("POST", f"/element/{element(link_input)}/value", {"text": linked, "value": list(linked)})
+        fill(link_input, linked)
         click('dialog form button[type="submit"]')
         wait_for(lambda: len(cmd("POST", "/elements", {"using": "css selector", "value": "dialog.catalogue"})) == 0, "offline cached link opened", seconds=30)
         wait_for(lambda: "已缓存题面" in text("article"), "offline fallback explicitly marked as cached")
