@@ -1,4 +1,5 @@
 mod storage;
+mod solutions;
 mod recovery;
 mod external;
 mod managed;
@@ -34,9 +35,9 @@ fn check_origin(window: &tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn load_document(window: tauri::WebviewWindow, state: tauri::State<'_, Store>, problem: String, language: String) -> Result<Document, String> {
+async fn load_document(window: tauri::WebviewWindow, state: tauri::State<'_, Store>, problem: String, language: String, solution: Option<String>) -> Result<Document, String> {
     check_origin(&window)?;
-    let code = storage::file_path(&state.root, &problem, &language, "code")?;
+    let code = solutions::file_path(&state.root, &problem, &language, "code", solution.as_deref())?;
     let notes = storage::file_path(&state.root, &problem, &language, "notes")?;
     tauri::async_runtime::spawn_blocking(move || Ok(Document {
         code: storage::read(&code)?, notes: storage::read(&notes)?,
@@ -44,49 +45,51 @@ async fn load_document(window: tauri::WebviewWindow, state: tauri::State<'_, Sto
 }
 
 #[tauri::command]
-async fn save_text(window: tauri::WebviewWindow, app: tauri::AppHandle, state: tauri::State<'_, Store>, problem: String, language: String, kind: String, text: String, expected: Option<String>) -> Result<(), String> {
+async fn save_text(window: tauri::WebviewWindow, app: tauri::AppHandle, state: tauri::State<'_, Store>, problem: String, language: String, kind: String, text: String, expected: Option<String>, solution: Option<String>) -> Result<(), String> {
     check_origin(&window)?;
-    let path = storage::file_path(&state.root, &problem, &language, &kind)?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Store>();
         let _lock = state.gate.lock().map_err(|_| "保存队列不可用")?;
+        let path = solutions::file_path(&state.root, &problem, &language, &kind, solution.as_deref())?;
         storage::save(&path, expected.as_deref(), &text)
     }).await.map_err(|_| "保存任务中断".to_string())?
 }
 
 
 #[tauri::command]
-async fn resolve_file_conflict(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String,expected:Option<String>,local:String,choice:String)->Result<storage::ResolvedConflict,String>{
+async fn resolve_file_conflict(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String,expected:Option<String>,local:String,choice:String,solution:Option<String>)->Result<storage::ResolvedConflict,String>{
     check_origin(&window)?;
-    let path=storage::file_path(&app.state::<Store>().root,&problem,&language,&kind)?;
+    let path=solutions::file_path(&app.state::<Store>().root,&problem,&language,&kind,solution.as_deref())?;
     tauri::async_runtime::spawn_blocking(move||{
         let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"保存队列不可用")?;
+        let path=solutions::file_path(&state.root,&problem,&language,&kind,solution.as_deref())?;
         storage::resolve_conflict(&path,expected.as_deref(),&local,&choice)
     }).await.map_err(|_|"冲突处理任务中断".to_owned())?
 }
 
 
 #[tauri::command]
-async fn list_recovery(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String)->Result<recovery::Listing,String>{
+async fn list_recovery(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String,solution:Option<String>)->Result<recovery::Listing,String>{
     check_origin(&window)?;
-    let path=storage::file_path(&app.state::<Store>().root,&problem,&language,&kind)?;
+    let path=solutions::file_path(&app.state::<Store>().root,&problem,&language,&kind,solution.as_deref())?;
     tauri::async_runtime::spawn_blocking(move||{
         let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;
         recovery::list(&path)
     }).await.map_err(|_|"恢复列表任务中断".to_owned())?
 }
 #[tauri::command]
-async fn read_recovery(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String,id:String)->Result<recovery::Record,String>{
+async fn read_recovery(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String,id:String,solution:Option<String>)->Result<recovery::Record,String>{
     check_origin(&window)?;
-    let path=storage::file_path(&app.state::<Store>().root,&problem,&language,&kind)?;
+    let path=solutions::file_path(&app.state::<Store>().root,&problem,&language,&kind,solution.as_deref())?;
     tauri::async_runtime::spawn_blocking(move||recovery::read(&path,&id)).await.map_err(|_|"恢复预览任务中断".to_owned())?
 }
 #[tauri::command]
-async fn restore_recovery(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String,id:String,side:String,reviewed:Option<String>,expected:Option<String>,local:String)->Result<storage::ResolvedConflict,String>{
+async fn restore_recovery(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,kind:String,id:String,side:String,reviewed:Option<String>,expected:Option<String>,local:String,solution:Option<String>)->Result<storage::ResolvedConflict,String>{
     check_origin(&window)?;
-    let path=storage::file_path(&app.state::<Store>().root,&problem,&language,&kind)?;
+    let path=solutions::file_path(&app.state::<Store>().root,&problem,&language,&kind,solution.as_deref())?;
     tauri::async_runtime::spawn_blocking(move||{
         let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;
+        let path=solutions::file_path(&state.root,&problem,&language,&kind,solution.as_deref())?;
         recovery::restore(&path,&id,&side,reviewed.as_deref(),expected.as_deref(),&local)
     }).await.map_err(|_|"恢复任务中断".to_owned())?
 }
@@ -285,6 +288,20 @@ async fn save_download_settings(window:tauri::WebviewWindow,app:tauri::AppHandle
     check_origin(&window)?;
     tauri::async_runtime::spawn_blocking(move||app.state::<download_settings::DownloadSettings>().save(proxy,expected)).await.map_err(|_|"下载配置保存任务中断".to_owned())?
 }
+
+#[tauri::command]
+async fn list_solutions(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String)->Result<solutions::Listing,String>{
+ check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||{let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;solutions::list(&state.root,&problem,&language)}).await.map_err(|_|"解答列表任务中断".to_owned())?
+}
+#[tauri::command]
+async fn create_solution(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,id:String,name:String,code:String)->Result<solutions::Entry,String>{
+ check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||{let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;solutions::create(&state.root,&problem,&language,&id,&name,&code)}).await.map_err(|_|"创建解答任务中断".to_owned())?
+}
+#[tauri::command]
+async fn rename_solution(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,id:String,name:String,expected:String)->Result<solutions::Entry,String>{
+ check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||{let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;solutions::rename(&state.root,&problem,&language,&id,&expected,&name)}).await.map_err(|_|"重命名解答任务中断".to_owned())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(result)=compiled_runtime::linker_entry(){
@@ -306,7 +323,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_diagnostics, read_language_source, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {
