@@ -1483,6 +1483,10 @@ try {
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),0,"idle never formats");
   assert.deepEqual(await formatPage.evaluate(()=>window.__formatTest.saves),[],"idle never writes canonical");
   await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  const dirtyGeometry=await formatPage.getByLabel("源码未保存",{exact:true}).evaluate(el=>{const dot=el.getBoundingClientRect(),parent=el.closest(".document-selectors").getBoundingClientRect();return {width:dot.width,height:dot.height,delta:Math.abs(dot.y+dot.height/2-parent.y-parent.height/2),insideActions:!!el.closest(".actions")};});
+  assert.equal(dirtyGeometry.width,6);assert.equal(dirtyGeometry.height,6);assert.ok(dirtyGeometry.delta<1,"dirty mark vertically centered beside document identity");assert.equal(dirtyGeometry.insideActions,false);
+  assert.equal(await formatPage.locator(".code-pane>.lsp-status").count(),0,"LSP has no duplicate toolbar indicator");
+
   await formattedCode.press("Control+s");
   await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文 = "值"\n');
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1);
