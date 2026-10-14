@@ -129,3 +129,35 @@ pub fn rename(root:&Path,problem:&str,language:&str,id:&str,expected:&str,value:
   assert!(create(r.path(),"lc-1","rust",ID,"name","body").is_err());assert!(list(r.path(),"lc-1","rust").is_err());
  }
 }
+
+#[cfg(test)]mod recovery_identity_tests{
+ use super::*;
+ const A:&str="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+ const B:&str="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+ #[test]fn recovery_and_conflict_copies_cannot_cross_solutions(){
+  let root=tempfile::tempdir().unwrap();
+  create(root.path(),"lc-1","rust",A,"A","original A").unwrap();
+  create(root.path(),"lc-1","rust",B,"B","original B").unwrap();
+  let a=file_path(root.path(),"lc-1","rust","code",Some(A)).unwrap();
+  let b=file_path(root.path(),"lc-1","rust","code",Some(B)).unwrap();
+  fs::write(&a,"external A").unwrap();
+  assert!(storage::save(&a,Some("original A"),"local A").is_err());
+  let resolved=storage::resolve_conflict(&a,Some("external A"),"local A","external").unwrap();
+  assert_eq!(storage::read(&a).unwrap().as_deref(),Some("external A"));
+  assert_eq!(storage::read(&b).unwrap().as_deref(),Some("original B"));
+  assert!(crate::recovery::read(&b,&resolved.backup).is_err());
+  let restored=crate::recovery::restore(&a,&resolved.backup,"local",Some("local A"),Some("external A"),"external A").unwrap();
+  assert_eq!(restored.text.as_deref(),Some("local A"));
+  assert_eq!(storage::read(&b).unwrap().as_deref(),Some("original B"));
+ }
+ #[test]fn same_id_across_six_languages_is_isolated_but_notes_are_shared(){
+  let root=tempfile::tempdir().unwrap();let mut sources=std::collections::HashSet::new();let mut notes=std::collections::HashSet::new();
+  for language in ["python3","rust","golang","c","cpp","java"]{
+   create(root.path(),"lc-1",language,A,"同名解答",language).unwrap();
+   let source=file_path(root.path(),"lc-1",language,"code",Some(A)).unwrap();
+   assert_eq!(storage::read(&source).unwrap().as_deref(),Some(language));sources.insert(source);
+   notes.insert(file_path(root.path(),"lc-1",language,"notes",Some(A)).unwrap());
+  }
+  assert_eq!(sources.len(),6);assert_eq!(notes.len(),1);
+ }
+}
