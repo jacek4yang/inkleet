@@ -168,7 +168,7 @@ fn launch(session:&Arc<Session>,manager:&inkleet_managed_env::Manager,root:&std:
         *slot=Some(client.clone());
     }
     let capabilities=client.request("initialize",json!({"clientID":"inkleet","adapterID":launch.adapter,"pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true,"supportsVariableType":true,"supportsVariablePaging":true,"supportsRunInTerminalRequest":false}),Duration::from_secs(20))?;
-    if let Ok(mut view)=session.view.lock(){view.capabilities=capability_flags(&capabilities);}
+    if let Ok(mut view)=session.view.lock(){view.capabilities=capability_flags(&capabilities);if snapshot.language=="java"{view.capabilities["supportsStepInTargetsRequest"]=json!(false);}}
     let launching=client.clone();
     let launch_thread=std::thread::spawn(move||launching.request("launch",launch.arguments,Duration::from_secs(45)));
     initialized_rx.recv_timeout(Duration::from_secs(20)).map_err(|_|"调试器初始化超时")?;

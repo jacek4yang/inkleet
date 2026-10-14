@@ -428,9 +428,13 @@ try:
         wait_for(lambda: "断点：5。" in text(".debug-panel"),"nested call breakpoint")
         click('[aria-label="开始调试"]')
         wait_for(lambda: "已暂停" in text(".debug-panel"),"pause before nested function",seconds=45)
-        wait_for(lambda: "solve" in text(".debug-frames"),"caller stack initially selected")
+        def stack_names():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-frames > button"})
+            return "\n".join(cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes)
+        (evidence/"nested-stack-observation.json").write_text(json.dumps({"webdriverText":text(".debug-frames"),"buttonText":stack_names()},ensure_ascii=False))
+        wait_for(lambda: "solve" in stack_names(),"caller stack initially selected")
         click('[aria-label="单步进入"]')
-        wait_for(lambda: "inner" in text(".debug-frames"),"real stepIn enters inner function")
+        wait_for(lambda: "inner" in stack_names(),"real stepIn enters inner function")
         click('[aria-label="单步跳过"]')
         def inner_total():
             node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='inner_total']]/code"})[EID]
@@ -451,7 +455,7 @@ try:
         cmd("POST",f"/element/{inner}/click",{})
         wait_for(lambda:inner_total()=="10","selecting inner frame restores its own variables")
         click('[aria-label="单步跳出"]')
-        wait_for(lambda:"inner" not in text(".debug-frames") and "solve" in text(".debug-frames"),"real stepOut returns to caller")
+        wait_for(lambda:"inner" not in stack_names() and "solve" in stack_names(),"real stepOut returns to caller")
         wait_for(lambda:"—" in text(".debug-watch"),"watch result invalidated on new pause")
         click('[aria-label="停止调试"]')
         wait_for(lambda:"调试结束" in text(".debug-panel"),"nested debugger stopped")
