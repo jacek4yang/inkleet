@@ -1477,8 +1477,7 @@ try {
     const {EditorState}=await import("/node_modules/.vite/deps/@codemirror_state.js");
     const {languageIntelligence}=await import("/src/intelligence.ts");
     const {rust}=await import("/node_modules/.vite/deps/@codemirror_lang-rust.js");
-    const {HighlightStyle,syntaxHighlighting}=await import("/node_modules/.vite/deps/@codemirror_language.js");
-    const {tags}=await import("/node_modules/@lezer/highlight/dist/index.js");
+    const {HighlightStyle,syntaxHighlighting,defaultHighlightStyle}=await import("/node_modules/.vite/deps/@codemirror_language.js");
     const state=window.__semanticTest={version:1,requests:0,active:0,maxActive:0,defer:false,reply:null,revision:0,fail:true};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
@@ -1498,10 +1497,12 @@ try {
       throw Error("Unexpected semantic IPC "+command);
     }};
     const client=languageIntelligence("rust",()=>{},()=>{});
-    const view=new EditorView({state:EditorState.create({doc:"foo()",extensions:[rust(),syntaxHighlighting(HighlightStyle.define([{tag:[tags.variableName,tags.function(tags.variableName)],color:"#ff0000"}])),client.extensions]}),parent:document.querySelector("#editor")});
+    const view=new EditorView({state:EditorState.create({doc:"foo()",extensions:[rust(),syntaxHighlighting(HighlightStyle.define(defaultHighlightStyle.specs.map(spec=>({...spec,color:"#ff0000"})))),client.extensions]}),parent:document.querySelector("#editor")});
     window.__semanticTest.client=client;window.__semanticTest.view=view;
     await client.connect(view);
   });
+  await semanticPage.waitForFunction(()=>window.__semanticTest.requests===1);
+  assert.equal(await semanticPage.locator(".cm-line span").first().evaluate(el=>getComputedStyle(el).color),"rgb(255, 0, 0)","real lexical highlight exists before semantic reply");
   await semanticPage.locator(".cm-semantic-function").waitFor();
   assert.equal(await semanticPage.locator(".cm-semantic-function").evaluate(el=>getComputedStyle(el).color),"rgb(76, 114, 140)","semantic mark overrides actual Lezer lexical highlighting");
   assert.equal(await semanticPage.evaluate(()=>window.__semanticTest.requests),2,"bounded readiness retry recovers without edits");
