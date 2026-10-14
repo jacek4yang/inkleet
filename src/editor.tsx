@@ -62,7 +62,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => { onStatus?.(lspStatus); }, [lspStatus,onStatus]);
   useLayoutEffect(() => {
-    const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata) : null;
+    const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata, true) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const commands:Command<EditorView>[]=[
       {id:"editor.undo",label:"撤销",run:undo},

@@ -28,7 +28,7 @@ function edits(doc: Text, value: unknown) {
 }
 
 /** F2 performs one undoable, version-checked edit of the current source only. */
-export function renameSymbol(request: Request, status: (text: string) => void) {
+export function renameSymbol(request: Request, status: (text: string) => void, keybindings=true) {
   const effect = StateEffect.define<Tooltip | null>();
   let generation = 0, destroyed = false;
   const field = StateField.define<Tooltip | null>({
@@ -81,6 +81,6 @@ export function renameSymbol(request: Request, status: (text: string) => void) {
     } }) });
     return true;
   }
-  const extensions: Extension[] = [field, keymap.of([{ key: "F2", run: open }])];
+  const extensions: Extension[] = [field, ...(keybindings?[keymap.of([{ key: "F2", run: open }])]:[])];
   return { extensions, open, destroy() { destroyed = true; ++generation; } };
 }

@@ -31,7 +31,7 @@ function content(value: unknown): string {
   if (Array.isArray(value)) return value.slice(0, 20).map(content).join("\n\n").slice(0, 32768);
   return object(value) && typeof value.value === "string" ? value.value.slice(0, 32768) : "";
 }
-export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source) => void, metadata?: string) {
+export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source) => void, metadata?: string, commandsOwned=false) {
   const serverName = { python3: "Pyright", java: "JDT LS", golang: "gopls", rust: "rust-analyzer", c: "clangd", cpp: "clangd" }[language];
   const signatureEffect = StateEffect.define<Tooltip | null>();
   const signatureField = StateField.define<Tooltip | null>({
@@ -233,8 +233,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     } catch (e) { if (!closed) status(String(e)); }
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
-  const references = findReferences((pos, doc) => request("references", pos, doc), status);
-  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status);
+  const references = findReferences((pos, doc) => request("references", pos, doc), status, !commandsOwned);
+  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned);
   const extensions: Extension[] = [
     ...references.extensions,
     ...rename.extensions,
@@ -242,7 +242,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     semanticField, semanticTheme,
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } }, { key: "Escape", run(target) { ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }, { key: "F12", run(target) { void definition(target.state.selection.main.head); return true; } }]),
+    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
     EditorView.domEventHandlers({ mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });

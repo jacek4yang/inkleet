@@ -1545,6 +1545,10 @@ try {
   await commandPage.goto("http://127.0.0.1:5173");
   const commandCode=commandPage.getByRole("textbox",{name:"代码编辑器",exact:true});
   await commandCode.fill("command palette draft");
+  await commandCode.press("F2");
+  assert.equal(await commandPage.locator(".lsp-rename").count(),0,"unavailable LSP command cannot fall through a legacy keymap");
+  await commandCode.press("Shift+F12");
+  assert.equal(await commandPage.locator(".lsp-references").count(),0,"unavailable references do not bypass registry");
   await commandCode.press("Control+Shift+p");
   const commandDialog=commandPage.getByRole("dialog",{name:"编辑器命令",exact:true});
   await commandDialog.waitFor();

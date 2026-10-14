@@ -10,7 +10,7 @@ function point(doc: Text, value: unknown): number | null {
   return line.from + c;
 }
 /** Semantic references of the editable solution only; no hidden filesystem reads. */
-export function findReferences(request: Request, status: (text: string) => void) {
+export function findReferences(request: Request, status: (text: string) => void, keybindings=true) {
   const effect = StateEffect.define<Tooltip | null>();
   let generation = 0, destroyed = false, pending = false;
   const field = StateField.define<Tooltip | null>({
@@ -78,7 +78,7 @@ export function findReferences(request: Request, status: (text: string) => void)
     } finally { if (token === generation) pending = false; }
   }
   const extensions: Extension[] = [field, Prec.highest(keymap.of([
-    { key: "Shift-F12", run(view) { void open(view); return true; } },
+    ...(keybindings?[{ key: "Shift-F12", run(view:EditorView) { void open(view); return true; } }]:[]),
     { key: "Escape", run: close },
   ]))];
   return { extensions, open, destroy() { destroyed = true; ++generation; pending = false; } };
