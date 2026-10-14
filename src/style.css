@@ -410,6 +410,8 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 
 .brand-mark{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;color:var(--ink)}.brand-mark>svg{width:22px;height:22px}
 
+.format-settings h3{font-size:12px;font-weight:500;margin:18px 0 12px}.format-switch,.format-language{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:34px;font-size:12px}.format-switch input{width:15px;height:15px;accent-color:var(--accent)}.format-language select{min-width:90px}.format-settings p{font-size:12px;line-height:1.6}.statusbar>.icon-button{width:22px;height:22px;padding:3px}
+
 /* A dock is an owned view. Hidden panels retain sessions, focus returns to code. */
 .resizable-panel[hidden]{display:none!important}
 .local-runner.resizable-panel{position:relative;display:grid;grid-template-rows:6px auto minmax(0,1fr);flex:none}

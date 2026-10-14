@@ -694,5 +694,101 @@
     "prefix": "",
     "entry": "extension/server/com.microsoft.java.debug.plugin-0.53.2.jar",
     "license": "EPL-1.0 (plugin); MIT (extension wrapper)"
+  },
+  {
+    "id": "rustfmt-preview",
+    "platform": "linux-x64",
+    "version": "1.99.0",
+    "url": "https://static.rust-lang.org/dist/2026-10-01/rustfmt-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
+    "sha256": "9fc3a87d3d4f6e5e2bd87e6fb8779b7a95831f533cb8cc8ae1304a797c648733",
+    "size": 3133022,
+    "archive": "tar-gz",
+    "prefix": "rustfmt-1.99.0-x86_64-unknown-linux-gnu",
+    "entry": "rustfmt-preview/bin/rustfmt",
+    "license": "MIT OR Apache-2.0"
+  },
+  {
+    "id": "ruff",
+    "platform": "linux-x64",
+    "version": "0.17.0",
+    "url": "https://github.com/astral-sh/ruff/releases/download/0.17.0/ruff-x86_64-unknown-linux-gnu.tar.gz",
+    "sha256": "c94fc1dc71f054d06d9f1149442dcb471516aa2b7d4b7e8124e05d082d4c91d3",
+    "size": 9998987,
+    "archive": "tar-gz",
+    "prefix": "ruff-x86_64-unknown-linux-gnu",
+    "entry": "ruff",
+    "license": "MIT"
+  },
+  {
+    "id": "rustfmt-preview",
+    "platform": "windows-x64",
+    "version": "1.99.0",
+    "url": "https://static.rust-lang.org/dist/2026-10-01/rustfmt-1.99.0-x86_64-pc-windows-msvc.tar.gz",
+    "sha256": "0a152a82f36aaefcf9380a7294126c0b70ab44c0342f792ba27006f47888e587",
+    "size": 4079932,
+    "archive": "tar-gz",
+    "prefix": "rustfmt-1.99.0-x86_64-pc-windows-msvc",
+    "entry": "rustfmt-preview/bin/rustfmt.exe",
+    "license": "MIT OR Apache-2.0"
+  },
+  {
+    "id": "ruff",
+    "platform": "windows-x64",
+    "version": "0.17.0",
+    "url": "https://github.com/astral-sh/ruff/releases/download/0.17.0/ruff-x86_64-pc-windows-msvc.zip",
+    "sha256": "bc831eaa01912323099d7bc185981bf6bb1960931350bd3ad6a82f7a59a46c3b",
+    "size": 10057009,
+    "archive": "zip",
+    "prefix": "",
+    "entry": "ruff.exe",
+    "license": "MIT"
+  },
+  {
+    "id": "rustfmt-preview",
+    "platform": "macos-x64",
+    "version": "1.99.0",
+    "url": "https://static.rust-lang.org/dist/2026-10-01/rustfmt-1.99.0-x86_64-apple-darwin.tar.gz",
+    "sha256": "54de2b0f84ac7d5fbc783af16e37a711099ef95ed2fc86076a8d4f8e2d5a7748",
+    "size": 2345750,
+    "archive": "tar-gz",
+    "prefix": "rustfmt-1.99.0-x86_64-apple-darwin",
+    "entry": "rustfmt-preview/bin/rustfmt",
+    "license": "MIT OR Apache-2.0"
+  },
+  {
+    "id": "ruff",
+    "platform": "macos-x64",
+    "version": "0.17.0",
+    "url": "https://github.com/astral-sh/ruff/releases/download/0.17.0/ruff-x86_64-apple-darwin.tar.gz",
+    "sha256": "1b6a10f57aa06f0de2d90666878dd875836e3e2d04f61868fa175a74149fb2ad",
+    "size": 10126273,
+    "archive": "tar-gz",
+    "prefix": "ruff-x86_64-apple-darwin",
+    "entry": "ruff",
+    "license": "MIT"
+  },
+  {
+    "id": "rustfmt-preview",
+    "platform": "macos-arm64",
+    "version": "1.99.0",
+    "url": "https://static.rust-lang.org/dist/2026-10-01/rustfmt-1.99.0-aarch64-apple-darwin.tar.gz",
+    "sha256": "c8d86490e38920ab7783483dc828695a9a678eff541c5fa793f165b374e87312",
+    "size": 2217541,
+    "archive": "tar-gz",
+    "prefix": "rustfmt-1.99.0-aarch64-apple-darwin",
+    "entry": "rustfmt-preview/bin/rustfmt",
+    "license": "MIT OR Apache-2.0"
+  },
+  {
+    "id": "ruff",
+    "platform": "macos-arm64",
+    "version": "0.17.0",
+    "url": "https://github.com/astral-sh/ruff/releases/download/0.17.0/ruff-aarch64-apple-darwin.tar.gz",
+    "sha256": "59afe64c227e5f9a39d85c4d6be6e2d8e9a85c55f0887baad9c9e2f775a1c119",
+    "size": 9191741,
+    "archive": "tar-gz",
+    "prefix": "ruff-aarch64-apple-darwin",
+    "entry": "ruff",
+    "license": "MIT"
   }
 ]

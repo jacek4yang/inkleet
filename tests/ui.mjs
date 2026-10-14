@@ -16,7 +16,21 @@ const browser = await chromium.launch();
 const fixtures = JSON.parse(await readFile(new URL("./fixtures/public-questions.json", import.meta.url), "utf8"));
 async function testPage(options) {
   const page = await browser.newPage(options);
-  await page.addInitScript(items => { window.__fixtureQuestions = items; }, fixtures);
+  await page.addInitScript(items => {
+    window.__fixtureQuestions = items;
+    // Unrelated fixtures explicitly disable formatting; its dedicated fixture below
+    // exercises the real default-on path, timer, worker, settings and failures.
+    let internals;
+    Object.defineProperty(window,"__TAURI_INTERNALS__",{
+      configurable:true,get:()=>internals,set:value=>{
+        const invoke=value.invoke;
+        internals={...value,invoke:(command,args)=>{
+          if(command==="get_editor_settings"&&!window.__formatTest)return Promise.resolve({settings:{version:1,formatOnSave:false,overrides:{}},revision:null});
+          return invoke(command,args);
+        }};
+      }
+    });
+  }, fixtures);
   return page;
 }
 await mkdir("evidence", { recursive: true });
@@ -897,8 +911,15 @@ try {
   await runPanel.getByRole("button", { name: "values", exact: true }).waitFor();
   await runPage.locator(".cm-debug-stopped").waitFor();
   await runPage.locator(".cm-debug-range").filter({hasText:"sum"}).waitFor();
+  await runPage.locator(".cm-execution-pointer svg").waitFor();
+  const firstPointerX=await runPage.locator(".cm-debug-column").evaluate(node=>node.getBoundingClientRect().x);
+  assert.equal(await runPage.locator(".cm-debug-column").getAttribute("data-debug-column"),"27");
+
   await runPage.evaluate(()=>{window.__runTest.column=11;window.__runTest.endColumn=17;window.__runTest.debug.epoch++;});
   await runPage.locator(".cm-debug-range").filter({hasText:"values"}).waitFor();
+  assert.equal(await runPage.locator(".cm-debug-column").getAttribute("data-debug-column"),"11");
+  assert.ok(await runPage.locator(".cm-debug-column").evaluate(node=>node.getBoundingClientRect().x)<firstPointerX,"inline pointer moves with real reported column");
+
   await runPage.evaluate(()=>{window.__runTest.column=27;window.__runTest.endColumn=30;window.__runTest.debug.epoch++;});
   await runPage.locator(".cm-debug-range").filter({hasText:"sum"}).waitFor();
   await runPanel.getByRole("button",{name:"选择函数步入",exact:true}).click();
@@ -934,6 +955,8 @@ try {
   await runPanel.getByRole("button", {name: "caller · 1", exact: true}).click();
   await runPanel.getByRole("button", {name: "caller_only", exact:true}).waitFor();
   await runPage.locator(".cm-debug-frame").waitFor();
+  await runPage.locator(".cm-inspection-pointer").waitFor();
+  assert.equal(await runPage.locator(".cm-execution-pointer").count(),0,"caller marker is not execution arrow");
   assert.equal(await runPage.locator(".cm-debug-stopped").count(),0,"inspected caller is not marked as execution PC");
   const scalar=runPanel.getByRole("button",{name:"caller_only",exact:true});
   assert.equal(await scalar.isDisabled(),true,"scalar has no expansion action");
@@ -1312,6 +1335,138 @@ try {
   assert.equal(await solutionCode.innerText(),"// named source","failed creation preserves selected draft");
   await solutionsPage.close();
   await writeFile("evidence/NAMED_SOLUTIONS_UI_RESULT.txt","PASS: mocked IPC copy snapshot, rename identity, independent source, language switching, duplicate-name rejection and disk failure preserving draft; native disk/restart tested separately.\n");
+
+
+  const formatPage=await testPage({viewport:{width:1440,height:900}});
+  const formatErrors=[];formatPage.on("pageerror",error=>formatErrors.push(error.message));
+  await formatPage.addInitScript(()=>{
+    window.isTauri=true;
+    const state=window.__formatTest={docs:{},saves:[],formats:[],settings:{version:1,formatOnSave:true,overrides:{}},revision:null,failFormat:false,failSave:false,failSettings:false,defer:false};
+    window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
+      if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="search_questions")return {questions:[],total:0,hasMore:false};
+      if(command==="external_editor_supported")return false;
+      if(command==="login_status")return null;
+      if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+      if(command==="load_document")return {code:state.docs[args.language]??null,notes:null};
+      if(command==="get_editor_settings")return JSON.parse(JSON.stringify({settings:state.settings,revision:state.revision}));
+      if(command==="save_editor_settings"){
+        if(state.failSettings)throw Error("测试：配置写入失败");
+        if(args.expected!==state.revision)throw Error("配置版本冲突");
+        state.settings=args.settings;state.revision=JSON.stringify(args.settings);
+        return JSON.parse(JSON.stringify({settings:state.settings,revision:state.revision}));
+      }
+      if(command==="start_language_service")throw Error("No LSP; CLI formatter remains available");
+      if(command==="stop_language_service")return;
+      if(command==="save_text"){
+        if(state.failSave)throw Error("测试：磁盘保存失败");
+        if(args.kind==="code"){
+          if((state.docs[args.language]??null)!==args.expected)throw Error("fixture CAS conflict");
+          state.docs[args.language]=args.text;state.saves.push(args.text);
+        }return;
+      }
+      if(command==="format_source"){
+        if(state.docs[args.language]!==args.text)throw Error("format called before exact save");
+        state.formats.push(args.text);
+        if(state.failFormat)throw Error("测试：格式化器失败");
+        const output=args.text.replace(/\s*=\s*/g," = ").trimEnd()+"\n";
+        if(state.defer)return new Promise(resolve=>{state.reply=()=>resolve(output);});
+        return output;
+      }
+      throw Error("Unexpected formatter IPC: "+command);
+    }};
+  });
+  try {
+  await formatPage.goto("http://127.0.0.1:5173");
+  await formatPage.getByRole("combobox",{name:"编程语言"}).selectOption("python3");
+  const formattedCode=formatPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await formattedCode.fill('中文="值"');
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文 = "值"\n');
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1);
+  assert.deepEqual(await formatPage.evaluate(()=>window.__formatTest.saves.slice(-2)),['中文="值"','中文 = "值"\n']);
+  await formattedCode.press("Control+z");
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文="值"');
+  await formatPage.waitForTimeout(1400);
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"undo never triggers format loop");
+  await formattedCode.press("Control+y");
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==='中文 = "值"\n');
+  await openSettings(formatPage,"编辑器");
+  await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
+  await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await formatPage.waitForFunction(()=>window.__formatTest.settings.formatOnSave===false);
+  await formatPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+  await formattedCode.fill("x=2");
+  await formatPage.waitForTimeout(1400);
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),1,"disabled automatic formatter stays idle");
+  await formattedCode.press("Control+s");
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==="x = 2\n");
+  await openSettings(formatPage,"编辑器");
+  await formatPage.evaluate(()=>{window.__formatTest.failSettings=true;});
+  await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).check();
+  await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await formatPage.getByRole("alert").filter({hasText:"配置写入失败"}).waitFor();
+  assert.equal(await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).isChecked(),true,"failed save preserves settings draft");
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.settings.formatOnSave),false);
+  await formatPage.evaluate(()=>{window.__formatTest.failSettings=false;});
+  await formatPage.getByRole("button",{name:"重新读取",exact:true}).click();
+  await formatPage.waitForFunction(()=>!document.querySelector(".format-switch input").checked);
+  await formatPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+  await formatPage.evaluate(()=>{window.__formatTest.defer=true;});
+  await formattedCode.fill("old=1");await formattedCode.press("Control+s");
+  await formatPage.waitForFunction(()=>typeof window.__formatTest.reply==="function");
+  await formattedCode.fill("new=2");
+  await formatPage.evaluate(()=>{window.__formatTest.reply();window.__formatTest.defer=false;});
+  await formatPage.waitForTimeout(200);
+  assert.equal(await formattedCode.innerText(),"new=2","late format cannot replace newer input");
+
+
+  await formatPage.evaluate(()=>{window.__formatTest.defer=true;window.__formatTest.reply=null;});
+  await formattedCode.fill("explicit=1");await formattedCode.press("Control+s");
+  await formatPage.waitForFunction(()=>typeof window.__formatTest.reply==="function");
+  await formattedCode.fill("explicit=2");await formattedCode.press("Control+s");
+  await formatPage.evaluate(()=>{window.__formatTest.defer=false;window.__formatTest.reply();});
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==="explicit = 2\n");
+  await openSettings(formatPage,"编辑器");
+  await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).check();
+  await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await formatPage.waitForFunction(()=>window.__formatTest.settings.formatOnSave===true);
+  await formatPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+  await formatPage.evaluate(()=>{window.__formatTest.defer=true;window.__formatTest.reply=null;});
+  await formattedCode.fill("queued=1");await formattedCode.press("Control+s");
+  await formatPage.waitForFunction(()=>typeof window.__formatTest.reply==="function");
+  await formatPage.waitForTimeout(750);
+  await formattedCode.fill("queued=2");
+  await formatPage.waitForTimeout(1400);
+  await formattedCode.press("Control+z");
+  assert.equal(await formattedCode.innerText(),"queued=1");
+  const beforeUndoReply=await formatPage.evaluate(()=>window.__formatTest.formats.length);
+  await formatPage.evaluate(()=>{window.__formatTest.reply();window.__formatTest.defer=false;});
+  await formatPage.waitForTimeout(1600);
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),beforeUndoReply,"undo clears a rerun queued while prior formatting was busy");
+  await openSettings(formatPage,"编辑器");
+  await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
+  await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await formatPage.waitForFunction(()=>window.__formatTest.settings.formatOnSave===false);
+  await formatPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+  await formattedCode.fill("new=2");
+  await formatPage.evaluate(()=>{window.__formatTest.failFormat=true;});
+  await formattedCode.press("Control+s");
+  await formatPage.getByRole("button",{name:"格式化状态",exact:true}).waitFor();
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"new=2","formatter failure preserves saved original");
+  await formatPage.evaluate(()=>{window.__formatTest.failSave=true;});
+  const formatCount=await formatPage.evaluate(()=>window.__formatTest.formats.length);
+  await formattedCode.fill("protected=3");await formattedCode.press("Control+s");
+  await formatPage.locator('[data-action="review-code-conflict"]').waitFor();
+  await formatPage.waitForTimeout(200);
+  assert.equal(await formatPage.evaluate(()=>window.__formatTest.formats.length),formatCount,"blocked save prevents formatter invocation");
+  assert.equal(await formattedCode.innerText(),"protected=3","failed write keeps live draft");
+  assert.deepEqual(formatErrors,[]);
+  } catch(error){
+    await formatPage.screenshot({path:"evidence/format-failure.png",fullPage:true});
+    await writeFile("evidence/format-failure.json",JSON.stringify(await formatPage.evaluate(()=>({state:window.__formatTest,body:document.body.innerText})),null,2));
+    throw error;
+  } finally {await formatPage.close();}
+  await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; raw save before format, Unicode, isolated undo/redo, no loop, disabled preference/manual format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
 
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }

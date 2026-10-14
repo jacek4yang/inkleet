@@ -1,3 +1,5 @@
+// Bound pending formatter work across destroyed/recreated EditorViews.
+let formatQueue:Promise<unknown>=Promise.resolve();let queuedFormats=0;
 import { DocumentSyncQueue } from "./document-sync-queue";
 import { findReferences } from "./references";
 import { renameSymbol } from "./rename";
@@ -222,6 +224,26 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   ];
   return {
     extensions,
+    async format(text:string):Promise<string>{
+      if(queuedFormats>=8)throw Error("格式化请求过多，请稍后保存");
+      ++queuedFormats;
+      const request=formatQueue.then(async()=>{
+      if(closed||!view||view.state.doc.toString()!==text)throw Error("格式化文档已切换");
+      const doc=view.state.doc;
+      if(["c","cpp","java"].includes(language)){
+        if(!session)throw Error("语言服务尚未连接");
+        await flush();
+        if(closed||!session||!view||view.state.doc!==doc)throw Error("格式化快照已过期");
+      }
+      const id=session?.id??null,askedVersion=version;
+      const result=await invoke<string>("format_source",{language,text,id,version:id===null?null:askedVersion});
+      if(closed||!view||view.state.doc!==doc||(["c","cpp","java"].includes(language)&&(session?.id!==id||version!==askedVersion)))throw Error("忽略过期格式化结果");
+      if(typeof result!=="string")throw Error("格式化器未返回正文");
+      return result;
+      }).finally(()=>{--queuedFormats;});
+      formatQueue=request.then(()=>undefined,()=>undefined);
+      return request;
+    },
     async connect(target: EditorView) {
       view = target;
       if (!isTauri()) { status("浏览器预览 · 语言服务需原生客户端"); return; }

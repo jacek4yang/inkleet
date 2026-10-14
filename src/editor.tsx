@@ -1,4 +1,5 @@
 import type { DebugPosition } from "./debug-position";
+import { formatOnSave } from "./format-on-save";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { EditorState, StateEffect, Prec } from "@codemirror/state";
 import { EditorView, keymap, tooltips } from "@codemirror/view";
@@ -45,9 +46,11 @@ function syntax(language: Language | "markdown") {
 type Props = {
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void; onStatus?: (status: string) => void; reconnectToken?: number; onSettings?: () => void;
+  formatting?: {enabled:boolean;saved:(text:string)=>Promise<boolean>;report:(message:string)=>void};
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
-export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings }: Props) {
+export function CodeEditor({ documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings, formatting }: Props) {
+  const formatOptions=useRef(formatting);formatOptions.current=formatting;
   const host = useRef<HTMLDivElement>(null);
   const [lspStatus, setLspStatus] = useState("");
   const connection = reconnectToken;
@@ -61,6 +64,7 @@ export function CodeEditor({ documentKey, language, value, label, onChange, meta
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const extensions = [
       basicSetup, syntax(language), theme,
+      ...(intelligence&&formatting?formatOnSave({enabled:()=>!!formatOptions.current?.enabled,saved:text=>formatOptions.current?.saved(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
       // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。

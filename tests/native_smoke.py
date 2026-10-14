@@ -117,11 +117,29 @@ def click_debug_action(css):
     y=int(window["y"]+rect["y"]+rect["height"]/2)
     subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","1"],check=True)
 
+
+def focus_code_editor():
+    # Prospectively choose one real OS focus click. Never replay a failed action.
+    rect=cmd("GET",f"/element/{element('.code-pane > .editor-host')}/rect")
+    window=cmd("GET","/window/rect")
+    assert rect["width"]>40 and rect["height"]>40,"code viewport is not visible"
+    x=int(window["x"]+rect["x"]+rect["width"]/2)
+    y=int(window["y"]+rect["y"]+min(32,rect["height"]/2))
+    subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","1"],check=True)
+    def focused():
+        active=cmd("GET","/element/active")[EID]
+        return cmd("GET",f"/element/{active}/attribute/aria-label")=="代码编辑器"
+    wait_for(focused,"actual code editor keyboard focus")
+
 def click(css):
+    # Only known visible transport-sensitive controls use one OS click.
+    # WebDriver retains auto-scroll for other controls and native options.
+    if css in (".pane-heading .actions button", '[data-action="local-execute"]'):
+        return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
         closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
-        selection=(css.startswith("select[") and " option[value=" in css) or css in ('[data-local-tab="run"]','[data-local-tab="debug"]')
+        selection=(" option[value=" in css) or css in ('[data-local-tab="run"]','[data-local-tab="debug"]')
         if not (closing or selection): raise
         with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
             log.write(f"Checking idempotent test UI operation after WebKit connection reset: {css}\n")
@@ -191,6 +209,11 @@ def stop():
     if session:
         cmd("DELETE","")
         session = None
+# Legacy interaction fixtures intentionally opt out; dedicated native formatter
+# cases below enable the real default-on setting through the Settings UI.
+editor_config=pathlib.Path(os.environ["XDG_CONFIG_HOME"])/"top.jacek.inkleet/editor-settings.json"
+editor_config.parent.mkdir(parents=True,exist_ok=True)
+editor_config.write_text(json.dumps({"version":1,"formatOnSave":False,"overrides":{}}))
 driver = subprocess.Popen(["tauri-driver"], stdout=open(evidence/"driver.log","w"), stderr=subprocess.STDOUT)
 try:
     wait_for(lambda: request("GET","/status"), "driver ready")
@@ -220,6 +243,7 @@ try:
     # Persist a download-only endpoint through the real Settings UI, never use it
     # for login or configure the runner's system network.
     click('[data-action="open-settings"]')
+    wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":"nav[aria-label='设置分类']"}),"settings categories mounted")
     downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='下载']"})[EID]
     cmd("POST",f"/element/{downloads_tab}/click",{})
     wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-mode')}/enabled"),"download settings read")
@@ -410,7 +434,7 @@ try:
             return True
         wait_for(choose_completion, "apply freshly located completion")
         wait_for(lambda: "items.popleft" in text(code), "completion applied to document")
-        click(code)
+        focus_code_editor()
         cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
             {"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}
@@ -431,7 +455,7 @@ try:
         wait_for(lambda: element(".cm-lintRange-error"), "real Pyright type diagnostic", seconds=30)
         screenshot("python-diagnostics-native.png")
         fill(code, "def solve(values): return sum(values)")
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
         keys += [{"type":"keyDown","value":"\ue032"},{"type":"keyUp","value":"\ue032"}]
@@ -442,11 +466,11 @@ try:
         click('.lsp-rename button[type="submit"]')
         wait_for(lambda: text(code)=="def solve(numbers): return sum(numbers)","real Pyright semantic rename updates declaration and reference")
         screenshot("python-rename-native.png")
-        click(code)
+        focus_code_editor()
         cmd("POST","/actions",{"actions":[{"type":"key","id":"rename-undo","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"z"},{"type":"keyUp","value":"z"},{"type":"keyUp","value":"\ue009"}]}]})
         wait_for(lambda: text(code)=="def solve(values): return sum(values)","single undo restores complete pre-rename source")
         (evidence/"RENAME_GUI_RESULT.txt").write_text("PASS: actual Linux GUI F2, real private Pyright rename, declaration/reference updates in original source and a single undo restores both.\n")
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
         keys += [{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"},{"type":"keyUp","value":"\ue008"}]
@@ -472,7 +496,7 @@ try:
         screenshot("python-local-run-native.png")
         (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
         click('[data-local-tab="debug"]')
-        click(code)
+        focus_code_editor()
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
         wait_for(lambda: "断点：2。" in text(".debug-panel"), "F9 breakpoint on function body, not module definition")
         click_debug_action('.debug-panel [aria-label="开始调试"]')
@@ -481,6 +505,7 @@ try:
         click(".debug-inspector > div:first-child > button")
         wait_for(lambda: element(".debug-variable"), "real variable values loaded")
         wait_for(lambda: element(".cm-debug-stopped"), "paused source line highlighted")
+        wait_for(lambda:element(".cm-execution-pointer svg"),"native SVG execution arrow")
         expression_input=element('[aria-label="调试表达式输入"]')
         cmd("POST",f"/element/{expression_input}/value",{"text":"len(values)","value":list("len(values)")})
         wait_for(lambda:cmd("GET",f"/element/{element('.debug-evaluate button[type=\"submit\"]')}/enabled"),"expression button enabled after native text input")
@@ -497,7 +522,7 @@ try:
         (evidence/"EVALUATE_GUI_RESULT.txt").write_text("PASS: actual native Python paused-frame expression len(values) evaluated through private debugpy and displayed exact result 3. Other language expression adapters are not covered by this assertion.\n")
         screenshot("python-debug-native.png")
         (evidence/"DEBUG_GUI_RESULT.txt").write_text("PASS: real Linux GUI private debugpy, F9 breakpoint and paused call stack inspector. Stepping verified separately by protocol probe.\n")
-        click(code)
+        focus_code_editor()
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-update-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
         apply_points=cmd("POST","/element",{"using":"xpath","value":"//button[@aria-label='应用断点']"})[EID]
         cmd("POST",f"/element/{apply_points}/click",{})
@@ -507,7 +532,7 @@ try:
         wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
         nested_source="def inner(values):\n    inner_total = sum(values)\n    return inner_total\ndef solve(values):\n    total = inner(values)\n    return total"
         fill(code,nested_source)
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
         keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
@@ -564,6 +589,7 @@ try:
         screenshot("resized-debugger-native.png")
         (evidence/"DOCK_NATIVE_RESULT.txt").write_text("PASS: actual X11 drag, hidden retained panel, restored height and paused source/watch state.\\n")
 
+
         reveal_debug_control('.debug-frames>button[title^="solve ·"]', fallback="up")
         caller=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'solve')]"})[EID]
         cmd("POST",f"/element/{caller}/click",{})
@@ -577,7 +603,29 @@ try:
         wait_for(lambda:watch_result()=="—","watch result invalidated on new pause")
         click('[aria-label="停止调试"]')
         wait_for(lambda:"调试结束" in text(".debug-panel"),"nested debugger stopped")
-        click(code)
+        # A second real session preserves the ordinary step-in/out assertions above
+        # and independently validates capability-gated targeted step-in.
+        click_debug_action('[aria-label="开始调试"]')
+        wait_for(lambda:"已暂停" in text(".debug-panel"),"targeted step-in source breakpoint",seconds=45)
+        click_debug_action('[aria-label="选择函数步入"]')
+        def inner_target():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-targets>button"})
+            for node in nodes:
+                label=cmd("GET",f"/element/{node[EID]}/property/textContent")
+                if "inner" in label:return node[EID]
+            return None
+        target=wait_for(inner_target,"real debugpy inner function target")
+        reveal_debug_control(".debug-targets>button")
+        target=inner_target()
+        cmd("POST",f"/element/{target}/click",{})
+        wait_for(lambda:"inner" in stack_names(),"selected adapter target enters inner function")
+        wait_for(lambda:element(".cm-execution-pointer svg"),"targeted step-in moves execution arrow")
+        screenshot("python-smart-step-native.png")
+        click_debug_action('[aria-label="停止调试"]')
+        wait_for(lambda:"调试结束" in text(".debug-panel"),"targeted debugger stopped")
+        (evidence/"SMART_STEP_NATIVE_RESULT.txt").write_text("PASS: real private debugpy target discovery, original target selection, entry into inner function and execution arrow. Other adapters require independent capability validation.\\n")
+
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
         keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
@@ -622,7 +670,7 @@ try:
         wait_for(lambda: java_saved.exists() and java_saved.read_text()==java_solution,"Java run preserves original saved source")
         (evidence/"JAVA_LOCAL_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK compiles the typed Java Solution harness, computes exact value 10 and preserves original draft. No debugger or online verdict.\n")
         click('[data-local-tab="debug"]')
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(3): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
         keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
@@ -631,6 +679,7 @@ try:
         click_debug_action('.debug-panel [aria-label="开始调试"]')
         wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
         wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
+        wait_for(lambda:element(".cm-execution-pointer svg"),"Java SVG execution arrow")
         def java_total():
             node=element('.debug-variable > button[aria-label="total"] + code')
             return cmd("GET",f"/element/{node}/property/textContent")
@@ -638,7 +687,7 @@ try:
         wait_for(lambda: "部分断点尚未验证" not in text(".debug-panel"),"Java asynchronous breakpoint verification reaches the UI")
         screenshot("java-debug-native.png")
         for _ in range(3):
-            click(code)
+            focus_code_editor()
             cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-step","actions":[{"type":"keyDown","value":"\ue03a"},{"type":"keyUp","value":"\ue03a"}]}]})
             time.sleep(.7)
             if java_total()!="0": break
@@ -710,7 +759,7 @@ try:
                 wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
                 (evidence/(group.upper()+"_LOCAL_GUI_RESULT.txt")).write_text(f"PASS: actual Linux GUI compiles a {group} solution using its private downloaded toolchain, executes the bounded typed harness and returns exact value 10. No online judge verdict.\n")
                 click('[data-local-tab="debug"]')
-                click(code)
+                focus_code_editor()
                 keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
                 for _ in range(2): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
                 keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
@@ -719,13 +768,14 @@ try:
                 click_debug_action('.debug-panel [aria-label="开始调试"]')
                 wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
                 wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
+                wait_for(lambda:element(".cm-execution-pointer svg"),f"{group} SVG execution arrow")
                 def local_total():
                     node=element('.debug-variable > button[aria-label="total"] + code')
                     return cmd("GET",f"/element/{node}/property/textContent")
                 wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
                 screenshot(group+"-debug-native.png")
                 for _ in range(3):
-                    click(code)
+                    focus_code_editor()
                     cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-step","actions":[{"type":"keyDown","value":"\ue03a"},{"type":"keyUp","value":"\ue03a"}]}]})
                     time.sleep(.7)
                     if local_total()!="0": break
@@ -736,6 +786,45 @@ try:
                 click(".local-runner [aria-label='收起']")
                 fill(code,code_text)
 
+        click('select[aria-label="编程语言"] option[value="rust"]')
+        fill(code,marker)
+
+
+        # Actual formatter processes/LSP inside the real WebView, never mocked IPC.
+        def set_auto_format(enabled):
+            click('[data-action="open-settings"]')
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='编辑器']"})[EID]
+            cmd("POST",f"/element/{category}/click",{})
+            check=element(".format-switch input")
+            selected=cmd("GET",f"/element/{check}/selected")
+            if bool(selected)!=enabled: cmd("POST",f"/element/{check}/click",{})
+            click(".format-settings .settings-form-actions button")
+            wait_for(lambda:json.loads(editor_config.read_text())["formatOnSave"]==enabled,"native format preference saved")
+            click('[aria-label="关闭设置"]')
+        set_auto_format(True)
+        formatter_sources={
+            "python3":("py","def solve(values):\n return sum(values)"),
+            "rust":("rs","fn solve(values:Vec<i32>)->i32{values.iter().sum()}"),
+            "golang":("go","func solve(values []int)int{return len(values)}"),
+            "c":("c","int solve(int* values,int valuesSize){return valuesSize;}"),
+            "cpp":("cpp","int solve(vector<int>& values){return values.size();}"),
+            "java":("java","class Solution{public int solve(int[] values){return values.length;}}"),
+        }
+        for language,(extension,unformatted) in formatter_sources.items():
+            click(f'select[aria-label="编程语言"] option[value="{language}"]')
+            if language in ("c","cpp","java"):
+                wait_for(lambda:"已连接" in text(".lsp-status"),language+" formatting service ready",seconds=100)
+            fill(code,unformatted)
+            source_file=data/("top.jacek.inkleet/notebook/lc-900000001/"+("solution."+extension))
+            wait_for(lambda:source_file.exists() and source_file.read_text()==unformatted,language+" raw source saved before formatting")
+            wait_for(lambda:source_file.read_text()!=unformatted and "solve" in source_file.read_text(),language+" real format-on-save applied",seconds=25)
+            formatted=source_file.read_text()
+            wait_for(lambda:source_text(code)==formatted.rstrip("\n") or source_text(code)==formatted,language+" formatted file and editor agree")
+            time.sleep(1.5)
+            assert source_file.read_text()==formatted,language+" formatter loop or unexpected write"
+            screenshot(language+"-formatted-native.png")
+            (evidence/(language.upper()+"_FORMAT_NATIVE_RESULT.txt")).write_text("PASS: real Linux Tauri GUI default-on preference, raw source save, private formatter/LSP result applied and persisted, stable subsequent contents.\n")
+        set_auto_format(False)
         click('select[aria-label="编程语言"] option[value="rust"]')
         fill(code,marker)
 

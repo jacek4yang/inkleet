@@ -28,7 +28,10 @@ pub type Report = Arc<dyn Fn(Progress) + Send + Sync>;
 #[derive(Clone)]
 pub struct Manager { root: PathBuf, download_proxy: DownloadProxy }
 #[derive(Serialize, Deserialize)]
-struct Receipt { package_hash: String, entry_hash: String }
+struct Receipt { package_hash: String, entry_hash: String, #[serde(default)] auxiliary:std::collections::BTreeMap<String,String> }
+fn auxiliary_entries(p:&Package)->Vec<&'static str>{
+    if p.id=="go"{vec![if p.platform=="windows-x64"{"bin/gofmt.exe"}else{"bin/gofmt"}]}else{vec![]}
+}
 pub fn platform() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux","x86_64") => "linux-x64", ("windows","x86_64") => "windows-x64",
@@ -90,7 +93,19 @@ impl Manager {
         if r.package_hash != p.sha256 || r.entry_hash != hash_file(&entry, &AtomicBool::new(false))? {
             return Err("工具文件校验失败，请修复".into());
         }
+        for relative in auxiliary_entries(&p){
+            let path=dest.join(relative);regular(&path)?;
+            if r.auxiliary.get(relative)!=Some(&hash_file(&path,&AtomicBool::new(false))?){
+                return Err("工具新增格式化组件需要重新校验，请在开发环境中修复".into());
+            }
+        }
         Ok(Some(entry))
+    }
+    /// Only this explicitly registered sibling is executable; callers cannot supply paths.
+    pub fn gofmt(&self)->Result<PathBuf>{
+        self.installed("go")?.ok_or("请先安装 Go 工具链")?;
+        let p=package("go")?;
+        Ok(self.destination(&p).join(if p.platform=="windows-x64"{"bin/gofmt.exe"}else{"bin/gofmt"}))
     }
     pub async fn install(&self, id: &str, cancel: Arc<AtomicBool>, report: Report) -> Result<PathBuf> {
         let p = package(id)?;
@@ -134,7 +149,12 @@ impl Manager {
             }
             if p.id=="gopls"{go_build::build(&manager,&p,stage.path(),verified_cancel.clone(),&report)?;}
             let entry = stage.path().join(&p.entry); regular(&entry)?;
-            let receipt = Receipt { package_hash: p.sha256.clone(), entry_hash: hash_file(&entry, &verified_cancel)? };
+            let mut auxiliary=std::collections::BTreeMap::new();
+            for relative in auxiliary_entries(&p){
+                let path=stage.path().join(relative);regular(&path)?;
+                auxiliary.insert(relative.to_owned(),hash_file(&path,&verified_cancel)?);
+            }
+            let receipt = Receipt { package_hash: p.sha256.clone(), entry_hash: hash_file(&entry, &verified_cancel)?, auxiliary };
             let receipt_file = stage.path().join(".inkleet-receipt.json");
             let mut f = io(OpenOptions::new().write(true).create_new(true).open(receipt_file))?;
             io(f.write_all(&serde_json::to_vec(&receipt).map_err(|_| "无法写入安装记录")?))?; io(f.sync_all())?; drop(f);
@@ -266,3 +286,7 @@ pub mod java_runtime;
 pub mod java_debug;
 
 pub mod lsp_scaffold;
+
+pub mod formatter;
+
+pub mod format_edits;
