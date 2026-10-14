@@ -117,6 +117,20 @@ def click_debug_action(css):
     y=int(window["y"]+rect["y"]+rect["height"]/2)
     subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","1"],check=True)
 
+
+def focus_code_editor():
+    # Prospectively choose one real OS focus click. Never replay a failed action.
+    rect=cmd("GET",f"/element/{element('.code-pane > .editor-host')}/rect")
+    window=cmd("GET","/window/rect")
+    assert rect["width"]>40 and rect["height"]>40,"code viewport is not visible"
+    x=int(window["x"]+rect["x"]+rect["width"]/2)
+    y=int(window["y"]+rect["y"]+min(32,rect["height"]/2))
+    subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","1"],check=True)
+    def focused():
+        active=cmd("GET","/element/active")[EID]
+        return cmd("GET",f"/element/{active}/attribute/aria-label")=="代码编辑器"
+    wait_for(focused,"actual code editor keyboard focus")
+
 def click(css):
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
@@ -415,7 +429,7 @@ try:
             return True
         wait_for(choose_completion, "apply freshly located completion")
         wait_for(lambda: "items.popleft" in text(code), "completion applied to document")
-        click(code)
+        focus_code_editor()
         cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
             {"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}
@@ -436,7 +450,7 @@ try:
         wait_for(lambda: element(".cm-lintRange-error"), "real Pyright type diagnostic", seconds=30)
         screenshot("python-diagnostics-native.png")
         fill(code, "def solve(values): return sum(values)")
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
         keys += [{"type":"keyDown","value":"\ue032"},{"type":"keyUp","value":"\ue032"}]
@@ -447,11 +461,11 @@ try:
         click('.lsp-rename button[type="submit"]')
         wait_for(lambda: text(code)=="def solve(numbers): return sum(numbers)","real Pyright semantic rename updates declaration and reference")
         screenshot("python-rename-native.png")
-        click(code)
+        focus_code_editor()
         cmd("POST","/actions",{"actions":[{"type":"key","id":"rename-undo","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"z"},{"type":"keyUp","value":"z"},{"type":"keyUp","value":"\ue009"}]}]})
         wait_for(lambda: text(code)=="def solve(values): return sum(values)","single undo restores complete pre-rename source")
         (evidence/"RENAME_GUI_RESULT.txt").write_text("PASS: actual Linux GUI F2, real private Pyright rename, declaration/reference updates in original source and a single undo restores both.\n")
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
         keys += [{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"},{"type":"keyUp","value":"\ue008"}]
@@ -477,7 +491,7 @@ try:
         screenshot("python-local-run-native.png")
         (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
         click('[data-local-tab="debug"]')
-        click(code)
+        focus_code_editor()
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
         wait_for(lambda: "断点：2。" in text(".debug-panel"), "F9 breakpoint on function body, not module definition")
         click_debug_action('.debug-panel [aria-label="开始调试"]')
@@ -502,7 +516,7 @@ try:
         (evidence/"EVALUATE_GUI_RESULT.txt").write_text("PASS: actual native Python paused-frame expression len(values) evaluated through private debugpy and displayed exact result 3. Other language expression adapters are not covered by this assertion.\n")
         screenshot("python-debug-native.png")
         (evidence/"DEBUG_GUI_RESULT.txt").write_text("PASS: real Linux GUI private debugpy, F9 breakpoint and paused call stack inspector. Stepping verified separately by protocol probe.\n")
-        click(code)
+        focus_code_editor()
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-update-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
         apply_points=cmd("POST","/element",{"using":"xpath","value":"//button[@aria-label='应用断点']"})[EID]
         cmd("POST",f"/element/{apply_points}/click",{})
@@ -512,7 +526,7 @@ try:
         wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
         nested_source="def inner(values):\n    inner_total = sum(values)\n    return inner_total\ndef solve(values):\n    total = inner(values)\n    return total"
         fill(code,nested_source)
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
         keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
@@ -583,7 +597,7 @@ try:
         wait_for(lambda:watch_result()=="—","watch result invalidated on new pause")
         click('[aria-label="停止调试"]')
         wait_for(lambda:"调试结束" in text(".debug-panel"),"nested debugger stopped")
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
         keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
@@ -628,7 +642,7 @@ try:
         wait_for(lambda: java_saved.exists() and java_saved.read_text()==java_solution,"Java run preserves original saved source")
         (evidence/"JAVA_LOCAL_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK compiles the typed Java Solution harness, computes exact value 10 and preserves original draft. No debugger or online verdict.\n")
         click('[data-local-tab="debug"]')
-        click(code)
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(3): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
         keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
@@ -644,7 +658,7 @@ try:
         wait_for(lambda: "部分断点尚未验证" not in text(".debug-panel"),"Java asynchronous breakpoint verification reaches the UI")
         screenshot("java-debug-native.png")
         for _ in range(3):
-            click(code)
+            focus_code_editor()
             cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-step","actions":[{"type":"keyDown","value":"\ue03a"},{"type":"keyUp","value":"\ue03a"}]}]})
             time.sleep(.7)
             if java_total()!="0": break
@@ -716,7 +730,7 @@ try:
                 wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
                 (evidence/(group.upper()+"_LOCAL_GUI_RESULT.txt")).write_text(f"PASS: actual Linux GUI compiles a {group} solution using its private downloaded toolchain, executes the bounded typed harness and returns exact value 10. No online judge verdict.\n")
                 click('[data-local-tab="debug"]')
-                click(code)
+                focus_code_editor()
                 keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
                 for _ in range(2): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
                 keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
@@ -731,7 +745,7 @@ try:
                 wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
                 screenshot(group+"-debug-native.png")
                 for _ in range(3):
-                    click(code)
+                    focus_code_editor()
                     cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-step","actions":[{"type":"keyDown","value":"\ue03a"},{"type":"keyUp","value":"\ue03a"}]}]})
                     time.sleep(.7)
                     if local_total()!="0": break
