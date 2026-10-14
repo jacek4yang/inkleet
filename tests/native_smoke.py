@@ -1038,6 +1038,10 @@ try:
         save_editor(code)
         (evidence/"VIM_NATIVE_RESULT.txt").write_text("PASS: real Linux WebView, OS keyboard ciw, atomic undo/redo, idle canonical preservation, explicit :w, persisted toggle without document replacement. Native IME not verified.\n")
 
+        if os.environ.get("INKLEET_NATIVE_PERF") == "1":
+            from native_performance import run_performance
+            run_performance(globals())
+
         (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")
     if os.environ.get("INKLEET_LIVE_CN") == "1":
         click('[data-action="open-catalogue"]')

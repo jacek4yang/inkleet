@@ -1,0 +1,87 @@
+name: Native release performance comparison
+on:
+  push:
+    branches: [perf/native-baseline]
+    paths: ['tests/native_performance.py', 'tests/native_smoke.py', '.github/workflows/native-performance.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-performance-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  native-performance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: baseline
+            source: d48e2becc5c512b391eebba4b78a9a0d8ae5fab3
+          - label: memoized
+            source: b0f39e684b586c3399930fdb5842fe284d335459
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Preserve the exact shared performance harness
+        run: |
+          mkdir -p /tmp/inkleet-perf-tests
+          cp tests/native_smoke.py tests/native_performance.py /tmp/inkleet-perf-tests/
+          git rev-parse HEAD > /tmp/inkleet-perf-tests/HARNESS_SOURCE.txt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ matrix.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+      - name: Install native testing prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Build exact production application
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ matrix.source }}"
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run tauri -- build --no-bundle
+          cp /tmp/inkleet-perf-tests/*.py tests/
+          python3 -m py_compile tests/native_smoke.py tests/native_performance.py
+          mkdir -p evidence/native
+          git rev-parse HEAD > evidence/native/BINARY_SOURCE.txt
+          cp /tmp/inkleet-perf-tests/HARNESS_SOURCE.txt evidence/native/
+          sha256sum src-tauri/target/release/inkleet > evidence/native/BINARY_SHA256.txt
+      - name: Full functional regression and opt-in native measurement
+        env:
+          INKLEET_MANAGED_ENV: "1"
+          INKLEET_LIVE_CN: "0"
+          INKLEET_NATIVE_PERF: "1"
+          INKLEET_BINARY_SOURCE: ${{ matrix.source }}
+          INKLEET_BUILD_MODE: release
+        run: |
+          export INKLEET_HARNESS_SOURCE="$(cat /tmp/inkleet-perf-tests/HARNESS_SOURCE.txt)"
+          export INKLEET_TEST_BINARY="$(realpath src-tauri/target/release/inkleet)"
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - name: Capture failure diagnostics
+        if: failure()
+        run: |
+          mkdir -p evidence/native
+          { sudo dmesg --ctime 2>/dev/null || true; } | grep -Ei 'segfault|out of memory|killed process|inkleet|webkit' | tail -80 > evidence/native/kernel-errors.txt || true
+          free -m > evidence/native/memory.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-performance-${{ matrix.label }}
+          path: evidence/native/
+          if-no-files-found: warn
+          retention-days: 7
