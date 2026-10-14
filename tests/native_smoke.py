@@ -437,8 +437,8 @@ try:
         wait_for(lambda: "inner" in stack_names(),"real stepIn enters inner function")
         click('[aria-label="单步跳过"]')
         def inner_total():
-            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[@aria-label='inner_total']]/code"})[EID]
-            return cmd("GET",f"/element/{node}/text")
+            node=element('.debug-variable > button[aria-label="inner_total"] + code')
+            return cmd("GET",f"/element/{node}/property/textContent")
         wait_for(lambda:inner_total()=="10","stepOver computes inner-frame local")
         click('.debug-variable button[aria-label="values"]')
         wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".debug-tree-children .debug-variable"}))>=3,"real nested array tree children")

@@ -93,6 +93,15 @@ impl Debugger{
             _=>return Err("当前调试状态不支持该操作".into())
         };
         let response=session.client()?.request(kind,args,Duration::from_secs(10))?;
+        // A successful resume request need not emit ContinuedEvent. Never overwrite
+        // a newer stopped/terminated event that arrived before the response.
+        if matches!(kind,"next"|"stepIn"|"stepOut"|"continue"){
+            self.session(id)?;
+            if !session.closed.load(Ordering::Acquire){
+                let mut view=session.view.lock().map_err(|_|"调试状态不可用")?;
+                resume_acknowledged(&mut view,epoch);
+            }
+        }
         if matches!(kind,"threads"|"stackTrace"|"scopes"|"variables"){
             self.session(id)?;
             if session.closed.load(Ordering::Acquire)||session.view.lock().map_err(|_|"调试状态不可用")?.epoch!=epoch{return Err("忽略上一次暂停的结果".into());}
@@ -285,5 +294,25 @@ fn capability_flags(value:&Value)->Value{
         assert_eq!(flags["supportsStepInTargetsRequest"],true);
         assert_eq!(flags["supportsSetVariable"],false);
         assert!(flags.get("secret").is_none());
+    }
+}
+
+fn resume_acknowledged(view:&mut View,requested_epoch:u64){
+    if view.epoch==requested_epoch && view.phase=="paused" {
+        view.phase="running".into();view.epoch+=1;
+    }
+}
+#[cfg(test)]mod resume_tests{
+    use super::*;
+    fn paused()->View{View{id:1,phase:"paused".into(),title:String::new(),thread_id:Some(1),epoch:3,output:String::new(),truncated:false,reason:String::new(),error:String::new(),breakpoints:vec![],capabilities:json!({})}}
+    #[test]fn response_without_event_invalidates_pause(){
+        let mut view=paused();resume_acknowledged(&mut view,3);
+        assert_eq!(view.phase,"running");assert_eq!(view.epoch,4);
+    }
+    #[test]fn late_response_preserves_newer_stop_or_termination(){
+        for phase in ["paused","finished","running"]{
+            let mut view=paused();view.phase=phase.into();view.epoch=5;
+            resume_acknowledged(&mut view,3);assert_eq!(view.phase,phase);assert_eq!(view.epoch,5);
+        }
     }
 }

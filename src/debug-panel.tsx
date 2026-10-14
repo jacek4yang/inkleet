@@ -8,10 +8,13 @@ type Snapshot = { code: string; input: string; metadata: string; title: string; 
 type State = { id: number; phase: string; title: string; threadId: number | null; epoch: number; output: string; truncated: boolean; reason: string; error: string; breakpoints: { line?: number; verified?: boolean; message?: string }[] };
 type Variable = DebugVariable;
 type Watch = { id: number; expression: string; result?: string; error?: string; token?: string };
+// One owned snapshot survives panel unmounts; never adopt an unknown session.
+let ownedSnapshot: { id: number; snapshot: Snapshot } | null = null;
 const active = (state: State | null) => state && state.phase !== "finished";
 export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { snapshot: Snapshot; breakpoints: number[]; onPauseLine: (line: number) => void; running: boolean }) {
   const [state, setState] = useState<State | null>(null), [original, setOriginal] = useState<Snapshot | null>(null);
   const [threads, setThreads] = useState<{id:number;name:string}[]>([]), [selectedThread, setThread] = useState<number | null>(null);
+  const [inspectionRevision, setInspectionRevision] = useState(0), inspectionVersion = useRef(0);
   const [watches, setWatches] = useState<Watch[]>([]), watchNext = useRef(0);
   const [expression, setExpression] = useState(""), [evaluating, setEvaluating] = useState(false);
   const [evaluation, setEvaluation] = useState<{ result: string; type?: string; truncated?: boolean; variablesReference: number } | null>(null);
@@ -23,14 +26,14 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   frameRef.current = selectedFrame;
   const alive = useRef(true), guard = useRef(false), latest = useRef<State | null>(null), version = useRef(0), pauseCallback = useRef(onPauseLine);
   pauseCallback.current = onPauseLine;
-  const stale = !!original && (original.code !== snapshot.code || original.metadata !== snapshot.metadata || original.input !== snapshot.input || original.title !== snapshot.title || original.language !== snapshot.language);
+  const stale = (!!active(state) && !original) || (!!original && (original.code !== snapshot.code || original.metadata !== snapshot.metadata || original.input !== snapshot.input || original.title !== snapshot.title || original.language !== snapshot.language));
   useEffect(() => {
     alive.current = true;
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
       try {
         const next = await invoke<State | null>("debug_status");
-        if (alive.current) { latest.current = next; setState(next); }
+        if (alive.current) { latest.current = next; setState(next); setOriginal(next && ownedSnapshot?.id === next.id ? ownedSnapshot.snapshot : null); }
       } catch (e) { if (alive.current) setError(String(e)); }
       finally { if (alive.current) timer = setTimeout(poll, 250); }
     }
@@ -45,8 +48,9 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
   }
   async function readChildren(reference: number, current = latest.current, frame = frameRef.current): Promise<Variable[]> {
     if (!current || !currentPause(current)) throw new Error("暂停位置已改变");
+    const revision = inspectionVersion.current;
     const response = await inspect("variables", reference, current);
-    if (!currentPause(current) || frameRef.current !== frame) throw new Error("忽略旧调用栈的变量");
+    if (revision !== inspectionVersion.current || !currentPause(current) || frameRef.current !== frame) throw new Error("忽略旧调用栈的变量");
     return debugVariables(response.variables);
   }
   async function showVariables(reference: number, current = latest.current) {
@@ -95,18 +99,36 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     if (!value.trim() || new TextEncoder().encode(value).length > 1024) { setError("请输入不超过 1024 字节的表达式"); return; }
     evaluationGuard.current = true; setEvaluating(true); setEvaluation(null); setError("");
     const token = ++evaluationVersion.current;
+    // Evaluation may mutate even when the adapter reports an error. Hide all
+    // previous inspection values before sending; never replay other watches.
+    const revision = ++inspectionVersion.current;
+    setInspectionRevision(revision); ++version.current; setVariables([]);
     try {
       const result = await invoke<{ result: string; type?: string; truncated?: boolean; variablesReference: number }>("evaluate_debug", { id: current.id, epoch: current.epoch, frame, expression: value });
       if (alive.current && token === evaluationVersion.current && latest.current?.id === current.id && currentPause(current) && latest.current?.phase === "paused" && frameRef.current === frame) {
         if (watchId === undefined) setEvaluation(result);
-        else setWatches(items => items.map(item => item.id === watchId ? {...item, result: result.result, error: undefined, token: `${current.id}:${current.epoch}:${frame}`} : item));
+        else setWatches(items => items.map(item => item.id === watchId ? {...item, result: result.result, error: undefined, token: `${current.id}:${current.epoch}:${frame}:${revision}`} : item));
       }
     } catch (e) {
       if (alive.current && token === evaluationVersion.current) {
         if (watchId === undefined) setError(String(e));
-        else setWatches(items => items.map(item => item.id === watchId ? {...item, result: undefined, error: String(e), token: `${current.id}:${current.epoch}:${frame}`} : item));
+        else setWatches(items => items.map(item => item.id === watchId ? {...item, result: undefined, error: String(e), token: `${current.id}:${current.epoch}:${frame}:${revision}`} : item));
       }
-    } finally { evaluationGuard.current = false; if (alive.current) setEvaluating(false); }
+    } finally {
+      evaluationGuard.current = false;
+      if (alive.current) setEvaluating(false);
+      if (currentPause(current) && frameRef.current === frame && revision === inspectionVersion.current) {
+        const request = ++version.current;
+        try {
+          const response = await inspect("scopes", frame, current);
+          if (request === version.current && currentPause(current) && frameRef.current === frame) {
+            const fresh = debugScopes(response.scopes); setScopes(fresh);
+            const first = fresh.find(scope => !scope.expensive);
+            if (first) await showVariables(first.variablesReference, current);
+          }
+        } catch (error) { if (request === version.current && currentPause(current)) setError(String(error)); }
+      }
+    }
   }
   async function action(kind: string) {
     if (guard.current || (evaluationGuard.current && kind !== "stop")) return;
@@ -114,7 +136,8 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     try {
       if (kind === "start") {
         const value = { ...snapshot };
-        await invoke("start_debug", { snapshot: value, lines: breakpoints });
+        const id = await invoke<number>("start_debug", { snapshot: value, lines: breakpoints });
+        ownedSnapshot = { id, snapshot: value };
         if (alive.current) setOriginal(value);
       } else if (state) {
         if (kind === "breakpoints") { await invoke("set_debug_breakpoints", {id: state.id, code: snapshot.code, lines: breakpoints}); if (alive.current) setNotice("断点已更新"); }
@@ -140,7 +163,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running }: { sn
     return()=>window.removeEventListener("keydown",onKey);
   },[]);
   const paused = state?.phase === "paused";
-  const frameToken = `${state?.id}:${state?.epoch}:${selectedFrame}`;
+  const frameToken = `${state?.id}:${state?.epoch}:${selectedFrame}:${inspectionRevision}`;
   function addWatch() { const value = expression.trim(); if (value && watches.length < 20 && !watches.some(w => w.expression === value)) setWatches(items => [...items, {id: ++watchNext.current, expression: value}]); }
   return <div className="debug-panel" aria-label="本地断点调试">
     <div className="local-actions">
