@@ -27,7 +27,7 @@ export async function readQuestion(slug: string) {
 }
 
 // 题面是不可信远程 HTML。仅保留排版，无脚本、表单、链接导航、远程资源或自定义元素。
-export function QuestionStatement({ question }: { question: RemoteQuestion }) {
+export const QuestionStatement=React.memo(function QuestionStatement({ question }: { question: RemoteQuestion }) {
   const raw = question.translatedContent || question.content || "";
   const clean = useMemo(() => DOMPurify.sanitize(raw, {
     ALLOWED_TAGS: ["p", "div", "span", "strong", "b", "em", "i", "u", "s", "br", "hr",
@@ -44,7 +44,7 @@ export function QuestionStatement({ question }: { question: RemoteQuestion }) {
     {/<(?:img|svg|math)\b/i.test(raw) && <p className="muted">此题包含图示或公式；当前预览尚未呈现这些内容，请对照官方题面。</p>}
     <p className="question-source">题目来源：leetcode.cn/problems/{question.titleSlug}/</p>
   </>;
-}
+});
 
 export function Catalogue({ onChoose, onClose, initialMode = "search" }: {
   onChoose: (question: RemoteQuestion, cacheWarning?: string | null, fromCache?: boolean) => void; onClose: () => void;

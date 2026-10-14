@@ -5,7 +5,7 @@ import { readQuestion, type RemoteQuestion, type QuestionList } from "./catalogu
 type Recent = { id: string; number: string; title: string; official?: RemoteQuestion };
 type Query = { keyword: string; difficulty: string; status: string; offset: number };
 const difficulties: Record<string,string> = { Easy:"简单", Medium:"中等", Hard:"困难" };
-export function QuestionSidebar({ account, recent, selected, onSelectRecent, onChoose }: {
+export const QuestionSidebar=React.memo(function QuestionSidebar({ account, recent, selected, onSelectRecent, onChoose }: {
   account: string | null; recent: Recent[]; selected: string; onSelectRecent: (id:string) => void;
   onChoose: (question: RemoteQuestion, warning?: string | null, fromCache?: boolean) => void;
 }) {
@@ -51,6 +51,7 @@ export function QuestionSidebar({ account, recent, selected, onSelectRecent, onC
       if(token === opens.current){openingGuard.current=false;setOpening(null);}
     }
   }
+  const selectedSlug=recent.find(p=>p.id===selected)?.official?.titleSlug;
   return <aside className="sidebar question-sidebar" aria-label="题目导航">
     <div className="question-sidebar-heading"><div role="group" aria-label="题目列表">
       <button aria-pressed={mode==="catalogue"} onClick={()=>setMode("catalogue")}>题库</button>
@@ -72,7 +73,7 @@ export function QuestionSidebar({ account, recent, selected, onSelectRecent, onC
       <div className="question-list" aria-busy={loading || !!opening}>
         {loading && <p className="muted" role="status">加载中…</p>}
         {!isTauri() && <p className="muted">在客户端打开题库</p>}
-        {!loading && data?.questions.map(q=><button key={q.titleSlug} data-slug={q.titleSlug} disabled={!!opening || q.paidOnly} aria-current={recent.find(p=>p.id===selected)?.official?.titleSlug===q.titleSlug ? "page" : undefined} onClick={()=>void choose(q.titleSlug)} title={q.paidOnly ? "会员题暂未开放" : q.titleCn || q.title}>
+        {!loading && data?.questions.map(q=><button key={q.titleSlug} data-slug={q.titleSlug} disabled={!!opening || q.paidOnly} aria-current={selectedSlug===q.titleSlug ? "page" : undefined} onClick={()=>void choose(q.titleSlug)} title={q.paidOnly ? "会员题暂未开放" : q.titleCn || q.title}>
           <span className={"question-status "+(account && q.status==="AC" ? "accepted" : "")} title={account ? q.status==="AC" ? "已通过" : q.status==="TRIED" ? "尝试过" : q.status==="UNKNOWN" ? "完成状态暂不可用" : "未开始" : ""}>{account && q.status==="AC" ? <Icon name="check" /> : account && q.status==="TRIED" ? <Icon name="attempt" /> : account && q.status==="UNKNOWN" ? <Icon name="info" /> : null}</span>
           <span className="question-number">{q.frontendQuestionId}</span><span className="question-title">{q.titleCn||q.title}</span><span className={"question-difficulty "+q.difficulty}>{q.paidOnly ? <Icon name="lock" /> : difficulties[q.difficulty] ?? q.difficulty}</span>
         </button>)}
@@ -85,4 +86,4 @@ export function QuestionSidebar({ account, recent, selected, onSelectRecent, onC
       {!recent.length && <p className="muted">暂无最近题目</p>}
     </div>}
   </aside>;
-}
+});

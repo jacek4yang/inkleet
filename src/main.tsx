@@ -9,7 +9,7 @@ import { Icon, IconButton } from "./icons";
 import { SettingsHub, type SettingsSection, type SettingsAction } from "./settings-hub";
 import { RecoveryDialog } from "./recovery";
 import { ConflictDialog, type FileConflict } from "./conflict";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { languages, draftKey, type Language } from "./domain";
@@ -356,12 +356,12 @@ function App() {
     } catch (e) { if (selected.current === key) setStatus(String(e)); }
     finally { openingNotes.current = false; }
   }
-  function chooseQuestion(question: RemoteQuestion, warning?: string | null, fromCache = false) {
+  const chooseQuestion=useCallback((question: RemoteQuestion, warning?: string | null, fromCache = false) => {
     const entry: WorkbenchProblem = { id: "lc-" + question.questionId, number: question.questionFrontendId, title: question.translatedTitle || question.title, official: question, cached: fromCache };
     setCacheWarning(warning ?? "");
     setProblems(current => [...current.filter(p => p.id !== entry.id), entry]);
     setProblemId(entry.id); setTab("problem");
-  }
+  },[]);
   function settingsRun(action: () => void) { setSettings(null); action(); }
   const settingsActions: SettingsAction[] = [
     { id:"font", label:"Intel One Mono", section:"editor", icon:"type", run:() => settingsRun(() => setFontInfo(true)) },
