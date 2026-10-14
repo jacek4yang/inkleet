@@ -358,7 +358,7 @@ try {
   await authPage.getByRole("button", { name: "中国站题库", exact: true }).click();
   await authPage.getByRole("textbox", { name: "搜索中国站题目" }).fill("test");
   await authPage.getByRole("button", { name: "搜索", exact: true }).click();
-  await authPage.getByRole("button", { name: /T1 题库测试样例/ }).click();
+  await authPage.getByRole("dialog", { name: "中国站题库", exact: true }).getByRole("button", { name: /T1 题库测试样例/ }).click();
   await authPage.getByRole("heading", { name: "题库测试样例", exact: true }).waitFor();
   assert.equal(await authPage.locator(".question-content script, .question-content img, .question-content iframe, .question-content a").count(), 0);
   assert.equal(await authPage.evaluate(() => !!window.__unsafeExecuted), false);
