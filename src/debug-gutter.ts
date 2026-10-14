@@ -1,9 +1,15 @@
+import { debugLocation, type DebugPosition } from "./debug-position";
 import { RangeSet, StateEffect, StateField } from "@codemirror/state";
-import { Decoration, EditorView, GutterMarker, gutter, keymap } from "@codemirror/view";
+import { Decoration, EditorView, GutterMarker, gutter, keymap, WidgetType } from "@codemirror/view";
 const toggle = StateEffect.define<number>({ map: (value, mapping) => mapping.mapPos(value) });
-const stoppedAt = StateEffect.define<number>();
+const stoppedAt = StateEffect.define<DebugPosition|null>();
 class Breakpoint extends GutterMarker {
-  toDOM() { const dot = document.createElement("span"); dot.textContent = "●"; dot.title = "断点 · 点击取消，F9 切换当前行"; return dot; }
+  toDOM() { const dot = document.createElement("span"); const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("viewBox","0 0 12 12");svg.setAttribute("width","12");svg.setAttribute("height","12");svg.setAttribute("aria-hidden","true");const circle=document.createElementNS(svg.namespaceURI,"circle");circle.setAttribute("cx","6");circle.setAttribute("cy","6");circle.setAttribute("r","4");circle.setAttribute("fill","currentColor");svg.append(circle);dot.append(svg); dot.title = "断点 · 点击取消，F9 切换当前行"; return dot; }
+}
+class PositionMarker extends WidgetType {
+  constructor(readonly execution:boolean){super();}
+  eq(other:PositionMarker){return other.execution===this.execution;}
+  toDOM(){const node=document.createElement("span");node.className="cm-debug-column";node.title=this.execution?"调试器报告的执行列":"调用帧位置";node.setAttribute("aria-label",node.title);return node;}
 }
 const dot = new Breakpoint();
 export function debugGutter(initial: number[], onChange: (lines: number[]) => void) {
@@ -28,8 +34,15 @@ export function debugGutter(initial: number[], onChange: (lines: number[]) => vo
     update(value, transaction) {
       if (transaction.docChanged) value = Decoration.none;
       for (const effect of transaction.effects) if (effect.is(stoppedAt)) {
-        value = effect.value > 0 && effect.value <= transaction.state.doc.lines
-          ? Decoration.set([Decoration.line({ class: "cm-debug-stopped" }).range(transaction.state.doc.line(effect.value).from)]) : Decoration.none;
+        const location=debugLocation(transaction.state.doc,effect.value);
+        if(!location){value=Decoration.none;continue;}
+        const execution=effect.value!.execution;
+        const marks=[Decoration.line({class:execution?"cm-debug-stopped":"cm-debug-frame"}).range(transaction.state.doc.line(location.line).from)];
+        if(location.from!==undefined){
+          if(location.to!==undefined)marks.push(Decoration.mark({class:execution?"cm-debug-range":"cm-debug-frame-range",attributes:{title:execution?"调试器报告的执行范围":"调用帧范围"}}).range(location.from,location.to));
+          else marks.push(Decoration.widget({widget:new PositionMarker(execution),side:1}).range(location.from));
+        }
+        value=Decoration.set(marks,true);
       }
       return value;
     },
@@ -48,10 +61,11 @@ export function debugGutter(initial: number[], onChange: (lines: number[]) => vo
           onChange([...new Set(lines)]);
         }
       }),
-      EditorView.theme({ ".cm-debug-gutter": { color: "#bc4d43", width: "18px", cursor: "pointer" }, ".cm-debug-gutter .cm-gutterElement": { padding: "0 3px" }, ".cm-debug-stopped": { backgroundColor: "#e8bd4b35", boxShadow: "inset 3px 0 #bc8e22" } }),
+      EditorView.theme({ ".cm-debug-gutter": { color: "#bc4d43", width: "18px", cursor: "pointer" }, ".cm-debug-gutter .cm-gutterElement": { padding: "0 3px" }, ".cm-debug-column": { display:"inline-block", width:"0", height:"1.1em", borderLeft:"2px solid #a66b00", verticalAlign:"text-bottom" }, ".cm-debug-range": {backgroundColor:"#e7bd4b66",textDecoration:"underline",textDecorationColor:"#956a12",textUnderlineOffset:"3px"}, ".cm-debug-frame": {backgroundColor:"#7891ac22",boxShadow:"inset 3px 0 #7891ac"}, ".cm-debug-frame-range": {backgroundColor:"#7891ac44",textDecoration:"underline"}, ".cm-debug-stopped": { backgroundColor: "#e8bd4b35", boxShadow: "inset 3px 0 #bc8e22" } }),
     ],
-    stopped(view: EditorView, line: number) {
-      view.dispatch({ effects: stoppedAt.of(line) });
+    stopped(view: EditorView, position: DebugPosition|null) {
+      const line=position?.line??0;
+      view.dispatch({ effects: stoppedAt.of(position) });
       if (line > 0 && line <= view.state.doc.lines) view.dispatch({ effects: EditorView.scrollIntoView(view.state.doc.line(line).from, { y: "center" }) });
     },
   };

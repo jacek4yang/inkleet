@@ -126,6 +126,7 @@ def click(css):
         with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
             log.write(f"Checking idempotent test UI operation after WebKit connection reset: {css}\n")
         time.sleep(.3)
+        if css==".local-runner [aria-label='收起']" and cmd("POST","/elements",{"using":"css selector","value":".local-runner[hidden]"}): return
         if closing and not cmd("POST","/elements",{"using":"css selector","value":css}): return
         try: return cmd("POST",f"/element/{element(css)}/click",{})
         except http.client.RemoteDisconnected:
@@ -549,6 +550,26 @@ try:
             return cmd("GET",f"/element/{element('.debug-watch > span')}/property/textContent")
         wait_for(lambda:watch_result()=="10","real current-frame watch")
         screenshot("python-nested-debugger-native.png")
+        # Real X11 drag/collapse: visibility changes must retain the exact paused session.
+        dock=cmd("GET",f"/element/{element('.local-runner')}/rect")
+        separator=cmd("GET",f"/element/{element('[aria-label=\"调整本地面板高度\"]')}/rect")
+        window=cmd("GET","/window/rect")
+        x=int(window["x"]+separator["x"]+separator["width"]/2)
+        y=int(window["y"]+separator["y"]+separator["height"]/2)
+        subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"mousedown","1","mousemove","--sync",str(x),str(y-50),"mouseup","1"],check=True)
+        wait_for(lambda:cmd("GET",f"/element/{element('.local-runner')}/rect")["height"]>dock["height"]+35,"native vertical dock drag")
+        saved_height=cmd("GET",f"/element/{element('.local-runner')}/rect")["height"]
+        click(".local-runner [aria-label='收起']")
+        wait_for(lambda:element(".local-runner[hidden]"),"dock hidden without unmount")
+        wait_for(lambda:element(".cm-debug-stopped"),"hidden paused session retains source position")
+        click('[aria-label="本地"]')
+        wait_for(lambda:abs(cmd("GET",f"/element/{element('.local-runner')}/rect")["height"]-saved_height)<2,"native dock height restored")
+        reveal_debug_control('[aria-label="刷新监视 inner_total"]')
+        wait_for(lambda:watch_result()=="10","collapse preserves existing watch result")
+        screenshot("resized-debugger-native.png")
+        (evidence/"DOCK_NATIVE_RESULT.txt").write_text("PASS: actual X11 drag, hidden retained panel, restored height and paused source/watch state.\\n")
+
+
         reveal_debug_control('.debug-frames>button[title^="solve ·"]', fallback="up")
         caller=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'solve')]"})[EID]
         cmd("POST",f"/element/{caller}/click",{})
@@ -684,7 +705,7 @@ try:
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
                 if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
-                if not cmd("POST","/elements",{"using":"css selector","value":".local-runner"}):
+                if not cmd("POST","/elements",{"using":"css selector","value":".local-runner:not([hidden])"}):
                     click(".pane-heading .actions button")
                 click('[data-local-tab="run"]')
                 fill('[aria-label="本地测试输入"]',"[3,-1,8]")
@@ -750,7 +771,7 @@ try:
             if language in ("c","cpp","java"):
                 wait_for(lambda:"已连接" in text(".lsp-status"),language+" formatting service ready",seconds=100)
             fill(code,unformatted)
-            source_file=data/("top.jacek.inkleet/notebook/lc-900000001/"+("Solution.java" if language=="java" else "solution."+extension))
+            source_file=data/("top.jacek.inkleet/notebook/lc-900000001/"+("solution."+extension))
             wait_for(lambda:source_file.exists() and source_file.read_text()==unformatted,language+" raw source saved before formatting")
             wait_for(lambda:source_file.read_text()!=unformatted and "solve" in source_file.read_text(),language+" real format-on-save applied",seconds=25)
             formatted=source_file.read_text()

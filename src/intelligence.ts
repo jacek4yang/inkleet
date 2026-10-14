@@ -1,3 +1,5 @@
+// Bound pending formatter work across destroyed/recreated EditorViews.
+let formatQueue:Promise<unknown>=Promise.resolve();let queuedFormats=0;
 import { DocumentSyncQueue } from "./document-sync-queue";
 import { findReferences } from "./references";
 import { renameSymbol } from "./rename";
@@ -223,6 +225,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   return {
     extensions,
     async format(text:string):Promise<string>{
+      if(queuedFormats>=8)throw Error("格式化请求过多，请稍后保存");
+      ++queuedFormats;
+      const request=formatQueue.then(async()=>{
       if(closed||!view||view.state.doc.toString()!==text)throw Error("格式化文档已切换");
       const doc=view.state.doc;
       if(["c","cpp","java"].includes(language)){
@@ -235,6 +240,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if(closed||!view||view.state.doc!==doc||(["c","cpp","java"].includes(language)&&(session?.id!==id||version!==askedVersion)))throw Error("忽略过期格式化结果");
       if(typeof result!=="string")throw Error("格式化器未返回正文");
       return result;
+      }).finally(()=>{--queuedFormats;});
+      formatQueue=request.then(()=>undefined,()=>undefined);
+      return request;
     },
     async connect(target: EditorView) {
       view = target;

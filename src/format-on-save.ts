@@ -6,12 +6,12 @@ type Options={enabled:()=>boolean;saved:(text:string)=>Promise<boolean>;request:
 export function formatOnSave(options:Options){
   class Controller{
     private timer:ReturnType<typeof setTimeout>|undefined;
-    private generation=0;private closed=false;private busy=false;private again=false;
+    private generation=0;private closed=false;private busy=false;private pending:{generation:number;explicit:boolean}|null=null;
     private worker:Worker|null=null;private rejectDiff:((reason:Error)=>void)|null=null;
     constructor(private view:EditorView){}
     update(update:ViewUpdate){
       if(!update.docChanged)return;
-      ++this.generation;clearTimeout(this.timer);this.cancelDiff();
+      ++this.generation;this.pending=null;clearTimeout(this.timer);this.cancelDiff();
       if(update.transactions.some(t=>t.annotation(formattedTransaction)||t.isUserEvent("undo")||t.isUserEvent("redo")))return;
       this.schedule();
     }
@@ -24,8 +24,8 @@ export function formatOnSave(options:Options){
     async run(explicit:boolean){
       clearTimeout(this.timer);
       if(this.closed||this.view.composing||(!explicit&&!options.enabled()))return;
-      if(this.busy){this.again=true;return;}
-      this.busy=true;this.again=false;
+      if(this.busy){this.pending={generation:this.generation,explicit:explicit||!!(this.pending?.generation===this.generation&&this.pending.explicit)};return;}
+      this.busy=true;this.pending=null;
       const doc=this.view.state.doc,text=doc.toString(),generation=this.generation;
       const current=()=>!this.closed&&generation===this.generation&&this.view.state.doc===doc&&!this.view.composing&&(explicit||options.enabled());
       try{
@@ -57,9 +57,9 @@ export function formatOnSave(options:Options){
         this.view.dispatch({changes:changeSet,annotations:[formattedTransaction.of(true),isolateHistory.of("full")],userEvent:"input.format"});
         options.report("");
       }catch(error){if(current())options.report("格式化未完成 · "+String(error).slice(0,220));}
-      finally{this.busy=false;if(this.again&&!this.closed)this.schedule();}
+      finally{this.busy=false;const pending=this.pending;this.pending=null;if(pending&&!this.closed&&pending.generation===this.generation)void this.run(pending.explicit);}
     }
-    destroy(){this.closed=true;++this.generation;clearTimeout(this.timer);this.cancelDiff();}
+    destroy(){this.closed=true;this.pending=null;++this.generation;clearTimeout(this.timer);this.cancelDiff();}
   }
   const plugin=ViewPlugin.fromClass(Controller);
   return [plugin,keymap.of([{key:"Mod-s",run:view=>{void view.plugin(plugin)?.run(true);return true;}},{key:"Mod-Shift-f",run:view=>{void view.plugin(plugin)?.run(true);return true;}}]),
