@@ -796,7 +796,7 @@ try:
                 local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
                 if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
-                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let mut total=0;\n for value in values {total+=value;}\n total\n}"
+                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let map=std::collections::HashMap::from([(3,30),(8,80)]); let empty:std::collections::HashMap<i32,i32>=std::collections::HashMap::new(); let set=std::collections::HashSet::from([3,8]); let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
                 if group=="golang":
                     wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function"}),"real gopls semantic function classification",seconds=45)
@@ -834,6 +834,30 @@ try:
                     node=element('.debug-variable > button[aria-label="total"] + code')
                     return cmd("GET",f"/element/{node}/property/textContent")
                 wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
+
+                if group=="rust":
+                    map_node='.debug-tree-node:has(> .debug-variable > button[aria-label="map"])'
+                    click('.debug-variable > button[aria-label="map"]')
+                    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashMap exposes two logical pairs")
+                    assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"], '+map_node+' button[aria-label="[raw]"]'}),"internal map layout hidden by default"
+                    pair_buttons=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-variable > button'})
+                    for pair in pair_buttons: cmd("POST",f"/element/{pair[EID]}/click",{})
+                    def map_values():
+                        nodes=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-tree-children > .debug-tree-node > .debug-variable > code'})
+                        return sorted(cmd("GET",f"/element/{item[EID]}/text") for item in nodes)
+                    wait_for(lambda:map_values()==["3","30","8","80"],"logical HashMap keys and values regardless of iteration order")
+                    click(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
+                    click(map_node+' button[aria-label="[raw]"]')
+                    wait_for(lambda:element(map_node+' button[aria-label="base"]'),"raw map retains implementation fields")
+                    click(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"]'}),"hide raw removes internal layout"
+                    click('.debug-variable > button[aria-label="set"]')
+                    set_node='.debug-tree-node:has(> .debug-variable > button[aria-label="set"])'
+                    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":set_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashSet logical elements")
+                    screenshot("rust-logical-collections-native.png")
+                    (evidence/"RUST_COLLECTIONS_NATIVE_RESULT.txt").write_text("PASS: private Rust compiler visualizers expose two HashMap pairs with exact keys/values, two HashSet elements, default-hidden raw layout and explicit reversible raw view. Large-map retrieval and other platforms unverified.\\n")
+
                 screenshot(group+"-debug-native.png")
                 for _ in range(3):
                     focus_code_editor()

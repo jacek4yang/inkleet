@@ -438,3 +438,5 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .editor-command-palette:focus-within{border-color:var(--accent)}
 
 .lsp-completion-documentation{max-height:min(320px,40vh);overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
+
+.debug-tree-children>.debug-raw-toggle{margin:2px 0 2px 16px;padding:2px 5px;font-size:11px;color:var(--muted);background:transparent;border-color:transparent}.debug-tree-children>.debug-raw-toggle:hover{color:var(--text);background:var(--hover)}
