@@ -483,3 +483,24 @@ button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(
 
 
 .vim-switch{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:34px;font-size:12px}.vim-switch input{width:15px;height:15px;accent-color:var(--accent)}
+
+/* One quiet workbench status line; input and command panels retain native CM focus. */
+:root{--vim-cursor:rgba(91,112,88,.38);--vim-mode-bg:#e2e7dc;--vim-mode-ink:#485a42}
+.statusbar{gap:8px;padding:0 8px 0 0;height:24px;min-height:24px;white-space:nowrap;font-size:11px;line-height:24px}
+.editor-status{display:contents}
+.statusbar .editor-status-mode{display:inline-flex;align-items:center;justify-content:center;align-self:stretch;min-width:66px;padding:0 10px;background:var(--vim-mode-bg);color:var(--vim-mode-ink);font-size:10px;font-weight:600;letter-spacing:.045em;order:0}
+.editor-status-mode:empty{visibility:hidden}
+.statusbar .editor-status-meta{display:flex;gap:16px;align-items:center;margin-left:auto;order:4;font-variant-numeric:tabular-nums}
+.statusbar .editor-status-meta>span{display:inline}
+.statusbar .storage-status{order:1;min-width:0;overflow:auto;white-space:nowrap}
+.statusbar>.icon-button{order:3;flex:none}
+#vim-command-slot{order:2;flex:1;min-width:0}
+#vim-command-slot:empty{display:none}
+.vim-command-host{display:none}
+.vim-command-host[data-active=true]:has(.cm-panel){display:block}
+#vim-command-slot .cm-panels{position:static;border:0;background:transparent;color:var(--ink)}
+#vim-command-slot .cm-vim-panel{height:23px;min-height:0;padding:0 4px;line-height:23px;background:transparent;font:inherit}
+#vim-command-slot .cm-vim-panel input{outline:0;border:0;border-radius:0;padding:0;min-height:0;line-height:23px;background:transparent;color:var(--ink)}
+.inkleet-steady-vim .cm-fat-cursor{background:var(--vim-cursor)!important;color:var(--ink)!important}
+.inkleet-steady-vim:not(.cm-focused) .cm-fat-cursor{background:transparent!important;outline:1px solid var(--muted)!important;color:transparent!important}
+@media(max-width:760px){.statusbar{padding:0 6px 0 0;gap:5px}.statusbar .editor-status-meta{gap:8px}.statusbar .editor-status-mode{min-width:60px;padding:0 7px}.statusbar .storage-status{max-width:45vw}}

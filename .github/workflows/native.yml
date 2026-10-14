@@ -1,7 +1,7 @@
 name: Native Linux
 on:
   push:
-    branches: [main, feat/first-workbench, feat/editor-p0-reliability, feat/workbench-minimal-ui, feat/real-question-workspace, feat/download-proxy-inputs, feat/debugger-workspace, feat/named-solutions, feat/language-adapter-contract, feat/lsp-p1-recovery, feat/workbench-visual-polish, feat/format-on-save, feat/debugger-precision-dock, feat/lsp-semantic-analysis, feat/ide-command-routing, feat/editor-input-reliability, feat/explicit-save, feat/polished-linux-preview]
+    branches: [main, feat/first-workbench, feat/editor-p0-reliability, feat/workbench-minimal-ui, feat/real-question-workspace, feat/download-proxy-inputs, feat/debugger-workspace, feat/named-solutions, feat/language-adapter-contract, feat/lsp-p1-recovery, feat/workbench-visual-polish, feat/format-on-save, feat/debugger-precision-dock, feat/lsp-semantic-analysis, feat/ide-command-routing, feat/editor-input-reliability, feat/explicit-save, feat/polished-linux-preview, feat/vim-status-cursor]
     paths: ['src/**', 'src-tauri/**', 'crates/managed-env/src/**', 'crates/managed-env/packages.json', 'crates/managed-env/Cargo.toml', 'crates/managed-env/Cargo.lock', 'package*.json', 'tests/native_smoke.py', '.github/workflows/native.yml']
   workflow_dispatch:
 permissions:

@@ -1,3 +1,4 @@
+import {editorStatus} from "./editor-status";
 import {vimEditing,vimNormal,getCM} from "./vim";
 import {indentGuides} from "./indent-guides";
 import {editorCommands} from "./editor-commands";
@@ -6,7 +7,7 @@ import type { DebugPosition } from "./debug-position";
 import { formatOnSave, formatDocument, saveDocument } from "./format-on-save";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import { EditorState, StateEffect, Prec, Compartment } from "@codemirror/state";
-import { EditorView, keymap, tooltips } from "@codemirror/view";
+import { EditorView, keymap, tooltips, panels } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { indentMore, indentLess, undo, redo, selectAll } from "@codemirror/commands";
 import { acceptCompletion, startCompletion, closeCompletion } from "@codemirror/autocomplete";
@@ -87,8 +88,11 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:formatDocument}]:[]),
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
     ];
+    const footer=document.getElementById("vim-command-slot");
+    const commandHost=footer?document.createElement("div"):null;
+    if(commandHost){commandHost.className="vim-command-host";footer!.appendChild(commandHost);}
     const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
-      basicSetup, syntax(language), theme, ...(language==="markdown"?[]:[indentGuides]),
+      basicSetup, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), ...(language==="markdown"?[]:[indentGuides]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
@@ -127,6 +131,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       intelligence?.destroy();
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
       view.destroy();
+      commandHost?.remove();
     };
   }, [documentKey, language, label, connection, metadata]);
   useLayoutEffect(()=>{const view=liveView.current;if(view)view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});},[vimEnabled]);
