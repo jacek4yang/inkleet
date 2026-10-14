@@ -418,6 +418,50 @@ try:
         wait_for(lambda: "断点：未设置。" in text(".debug-panel"), "cleared breakpoint list is reflected in actual UI")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-stop-keys","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
         wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
+        nested_source="def inner(values):\n    inner_total = sum(values)\n    return inner_total\ndef solve(values):\n    total = inner(values)\n    return total"
+        fill(code,nested_source)
+        click(code)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+        keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"nested-breakpoint","actions":keys}]})
+        wait_for(lambda: "断点：5。" in text(".debug-panel"),"nested call breakpoint")
+        click('[aria-label="开始调试"]')
+        wait_for(lambda: "已暂停" in text(".debug-panel"),"pause before nested function",seconds=45)
+        wait_for(lambda: "solve" in text(".debug-frames"),"caller stack initially selected")
+        click('[aria-label="单步进入"]')
+        wait_for(lambda: "inner" in text(".debug-frames"),"real stepIn enters inner function")
+        click('[aria-label="单步跳过"]')
+        def inner_total():
+            node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='inner_total']]/code"})[EID]
+            return cmd("GET",f"/element/{node}/text")
+        wait_for(lambda:inner_total()=="10","stepOver computes inner-frame local")
+        click('.debug-variable button[aria-label="values"]')
+        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".debug-tree-children .debug-variable"}))>=3,"real nested array tree children")
+        assert cmd("POST","/elements",{"using":"css selector","value":".debug-variable button[aria-label='values']"}),"parent lost while expanding"
+        fill('[aria-label="调试表达式输入"]',"inner_total")
+        click('[aria-label="添加监视表达式"]')
+        click('[aria-label="刷新监视 inner_total"]')
+        wait_for(lambda:"10" in text(".debug-watch"),"real current-frame watch")
+        screenshot("python-nested-debugger-native.png")
+        caller=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'solve')]"})[EID]
+        cmd("POST",f"/element/{caller}/click",{})
+        wait_for(lambda:"—" in text(".debug-watch"),"watch result invalidated on caller selection")
+        inner=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'inner')]"})[EID]
+        cmd("POST",f"/element/{inner}/click",{})
+        wait_for(lambda:inner_total()=="10","selecting inner frame restores its own variables")
+        click('[aria-label="单步跳出"]')
+        wait_for(lambda:"inner" not in text(".debug-frames") and "solve" in text(".debug-frames"),"real stepOut returns to caller")
+        wait_for(lambda:"—" in text(".debug-watch"),"watch result invalidated on new pause")
+        click('[aria-label="停止调试"]')
+        wait_for(lambda:"调试结束" in text(".debug-panel"),"nested debugger stopped")
+        click(code)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+        keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"clear-nested-breakpoint","actions":keys}]})
+        wait_for(lambda:"断点：未设置。" in text(".debug-panel"),"nested test breakpoint cleaned")
+        (evidence/"NESTED_DEBUGGER_RESULT.txt").write_text("PASS: real private debugpy step-in to nested function, step-over local value, hierarchical array expansion, explicit Watch, caller frame switching, step-out and old-frame/epoch Watch invalidation. Other adapters not covered by nested-function assertion.\n")
         click(".local-runner [aria-label='收起']")
         settings_action("语言与环境", '[data-action="open-environments"]')
         wait_for(lambda: element('select[aria-label="开发环境语言"]'), "language-specific tool groups")

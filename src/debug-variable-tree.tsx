@@ -27,7 +27,7 @@ export function VariableNode({ variable, token, read, depth = 0 }: Props) {
     <div className="debug-variable" style={{ paddingLeft: depth * 12 }}>
       <button type="button" aria-label={variable.name} aria-expanded={expandable ? open : undefined} disabled={!expandable} onClick={() => void toggle()} title={variable.type ?? variable.name}>
         {expandable && <span className={open ? "debug-chevron open" : "debug-chevron"}><Icon name="chevron" /></span>}
-        <span>{variable.name.slice(0, 200)}</span>
+        {variable.name.slice(0, 200)}
       </button><code title={variable.type}>{variable.value.slice(0, 4000)}</code>
     </div>
     {open && <div className="debug-tree-children">

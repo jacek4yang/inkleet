@@ -260,3 +260,23 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .download-settings>p{font-size:11px;line-height:1.65}
 .settings-form-actions{display:flex;gap:8px;margin-top:16px}
 .settings-form-actions button{font-size:12px;padding:6px 10px}
+
+/* Compact debugger inspection: stack context and nested values stay visible. */
+.debug-inspector{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(0,1.5fr);gap:12px}
+.debug-frames{min-width:0;border-right:1px solid #e5ded5;padding-right:8px}
+.debug-frames>button{display:block;width:100%;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.debug-frames>button[aria-pressed=true]{background:#e7dfd2}
+.debug-frames select{width:100%;font-size:11px}
+.debug-variable{display:flex;gap:6px;align-items:baseline;min-width:0}
+.debug-variable>button{flex-shrink:0;max-width:55%;overflow:hidden;color:#51483c}
+.debug-variable>code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#80705b;font:11px/1.65 var(--font-mono)}
+.debug-tree-node{min-width:0}
+.debug-chevron{display:inline-flex;transition:transform .1s}.debug-chevron.open{transform:rotate(90deg)}
+.debug-tree-children>small{font-size:10px;color:#8c8276;padding-left:12px}
+.debug-watches{border-top:1px solid #e5ded5;margin-top:8px}
+.debug-watches>header{display:flex;align-items:center;justify-content:space-between}
+.debug-watches h4{font-size:11px;font-weight:500;margin:8px 0;color:#7c746a}
+.debug-watches button{border:0;padding:3px}
+.debug-watch{display:grid;grid-template-columns:minmax(65px,1fr) minmax(40px,1fr) 24px 20px;gap:6px;align-items:center;font:11px/1.6 var(--font-mono)}
+.debug-watch>code,.debug-watch>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.debug-watch .icon-button{width:24px;height:24px;padding:4px}
