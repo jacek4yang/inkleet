@@ -480,3 +480,6 @@ button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(
 .case-result>.local-result,.case-result>pre{margin:0;border:0;border-radius:0;padding:9px;background:transparent;white-space:pre-wrap;overflow-wrap:anywhere}
 
 .case-result{position:relative}.case-result>header{padding-right:34px}.local-raw>summary{position:absolute;right:6px;top:3px;list-style:none;cursor:pointer;color:var(--muted);padding:2px}.local-raw>summary>svg{display:block}.local-raw>pre{margin:0;padding:8px;border:0;border-top:1px solid var(--line);border-radius:0;font-size:11px}
+
+
+.vim-switch{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:34px;font-size:12px}.vim-switch input{width:15px;height:15px;accent-color:var(--accent)}

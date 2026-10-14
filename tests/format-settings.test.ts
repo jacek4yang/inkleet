@@ -13,3 +13,10 @@ test("bad settings never silently enable formatting",()=>{
   }
   assert.deepEqual(validateEditorSettings({settings:defaultEditorSettings,revision:null}).settings,defaultEditorSettings);
 });
+
+test("Vim defaults off, accepts legacy config and rejects malformed modes",()=>{
+  assert.equal(defaultEditorSettings.vim,false);
+  assert.equal(validateEditorSettings({settings:{version:1,formatOnSave:true,overrides:{}},revision:null}).settings.vim??false,false);
+  assert.equal(validateEditorSettings({settings:{...defaultEditorSettings,vim:true},revision:null}).settings.vim,true);
+  assert.throws(()=>validateEditorSettings({settings:{...defaultEditorSettings,vim:"true"},revision:null}));
+});
