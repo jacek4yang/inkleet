@@ -343,8 +343,8 @@ function App() {
     const key = activeKey, target = problemId;
     try {
       await queue.current.idle;
-      if(dirty.current.has(target+"/notes"))throw new Error("请先保存笔记，再用外部编辑器打开");
       if (queue.current.failed(target + "/notes")) throw new Error("请先处理笔记保存失败或文件冲突");
+      if(dirty.current.has(target+"/notes"))throw new Error("请先保存笔记，再用外部编辑器打开");
       await invoke("open_note_external", { problem: target, editor });
       // Opening a new empty notes.md establishes an empty persisted baseline.
       if (persisted.current.get(target + "/notes") === null && (notes.current.get(target) ?? "") === "") persisted.current.set(target + "/notes", "");

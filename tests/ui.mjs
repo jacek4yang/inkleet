@@ -1182,6 +1182,10 @@ try {
   await externalPage.getByRole("button", { name: "笔记", exact: true }).click();
   const externalNote = externalPage.getByRole("textbox", { name: "Markdown 笔记", exact: true });
   await externalNote.fill("# Saved");
+  await openSettings(externalPage,"笔记");
+  await externalPage.getByRole("button",{name:"Typora 编辑",exact:true}).click();
+  await externalPage.locator(".statusbar").filter({hasText:"请先保存笔记"}).waitFor();
+  assert.equal(await externalPage.evaluate(()=>window.__externalTest.opened.length),0,"dirty notes cannot open stale external contents");
   await externalNote.press("Control+s");
   await openSettings(externalPage, "笔记");
   await externalPage.getByRole("button", { name: "Typora 编辑", exact: true }).click();
