@@ -12,13 +12,13 @@ concurrency:
 jobs:
   native-performance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: memoized
-            source: b0f39e684b586c3399930fdb5842fe284d335459
+          - label: paired-reading-panes
+            source: 2679c2749bb6daacacb4f7233f7565c27ec33f7f
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

@@ -56,8 +56,8 @@ def run_performance(g):
         "kernel":platform.platform(),"cpu":next((line.split(":",1)[1].strip() for line in pathlib.Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")),"unknown"),
         "logicalCpus":os.cpu_count(),"compositingDisabled":os.environ.get("WEBKIT_DISABLE_COMPOSITING_MODE"),"environment":"Linux WebKitGTK on GitHub Actions Xvfb; real X11 input, private Pyright and durable draft IPC",
         "limitations":["input-to-rAF is not OS-key-to-screen or completed paint","RSS sums double-count shared pages and are not peak/private memory",
-            "two /proc snapshots exclude CPU of descendants that start and exit between samples","fixed phase order; no hardware-independent speed claim","IPC timings include bridge/backend scheduling; syncMs is invoke call time, not pure serialization","IPC records without endAt are censored at capture; no source or response content is logged","CPU snapshots approximately bracket, but do not exactly match, the wall interval"],
-        "samples":[]}
+            "two /proc snapshots exclude CPU of descendants that start and exit between samples","fixed runner phase order; paired equal-byte fixtures alternate order; no hardware-independent speed claim","IPC timings include bridge/backend scheduling; syncMs is invoke call time, not pure serialization","IPC records without endAt are censored at capture; no source or response content is logged","CPU snapshots approximately bracket, but do not exactly match, the wall interval"],
+        "fixtureDesign":"Python valid one-line function definitions versus padded comment lines, equal UTF-8 byte and line counts at each size; insertion at final comment",\n        "samples":[]}
     output=evidence/"NATIVE_PERFORMANCE.json"
     stop();start()
     click('select[aria-label="编程语言"] option[value="python3"]')
@@ -78,43 +78,52 @@ def run_performance(g):
                 wait_for(lambda:js("return document.querySelector('.local-runner')?.hidden;"),"performance runner hidden")
             output_bytes=js("return new TextEncoder().encode([...document.querySelectorAll('.local-raw pre')].map(n=>n.textContent).join('')).length;")
             for lines in (100,1000,10000):
-                source="def solve(values): return list(range(8192))\n"+"".join("# performance fixture %d\n"%i for i in range(lines-2))+"# "
-                paste(source)
+                # Alternate order, with identical byte and line counts for each pair.
+                fixtures=("comments","functions") if (lines==1000) == (phase=="visible") else ("functions","comments")
+                for fixture in fixtures:
+                    rows=(("def fixture_%05d(): return %d"%(i,i)) if fixture=="functions" else ("# performance fixture %d"%i) for i in range(lines-2))
+                    source="def solve(values): return list(range(8192))\n"+"".join(row.ljust(48)+"\n" for row in rows)+"# "
+                    paste(source)
+                    for burst in range(3):
+                        js("""
+                            const sample={frames:[],gaps:[],tasks:[],inputIntervals:[],frameIntervals:[],ipc:[],startedAt:performance.now(),longTaskSupported:!!(window.PerformanceObserver&&PerformanceObserver.supportedEntryTypes?.includes('longtask'))};
+                            let last=performance.now(),active=true,frame;
+                            function tick(now){sample.gaps.push(now-last);sample.frameIntervals.push({startAt:last,endAt:now});last=now;if(active)frame=requestAnimationFrame(tick);}
+                            frame=requestAnimationFrame(tick);
+                            const input=event=>{if(event.inputType!=='insertText'||!event.target.closest('[aria-label="代码编辑器"]'))return;
+                                const at=performance.now();requestAnimationFrame(()=>{const endAt=performance.now();sample.frames.push(endAt-at);sample.inputIntervals.push({startAt:at,endAt});});};
+                            document.addEventListener('beforeinput',input,true);
+                            let observer;
+                            if(sample.longTaskSupported){observer=new PerformanceObserver(list=>{for(const e of list.getEntries())sample.tasks.push(e.duration);});observer.observe({type:'longtask'});}
+                            if(!window.__inkleetIpcInstrumentation)throw Error('test build instrumentation absent');
+                            window.__nativePerf={sample,active:true,stop(){if(!active)return;active=false;this.active=false;sample.stoppedAt=performance.now();
+                                cancelAnimationFrame(frame);document.removeEventListener('beforeinput',input,true);observer?.disconnect();}};
+                        """)
+                        before=processes(binary);begin=time.monotonic()
+                        typed="0123456789"*4
+                        try:
+                            subprocess.run(["xdotool","type","--clearmodifiers","--delay","20",typed],check=True)
+                            wait_for(lambda:js("return window.__nativePerf.sample.frames.length;")==len(typed),"all native input-to-rAF samples")
+                            elapsed=time.monotonic()-begin;after=processes(binary)
+                            sample=js("window.__nativePerf.stop();window.__nativePerf.sample.capturedAt=performance.now();return window.__nativePerf.sample;")
+                        finally:
+                            js("window.__nativePerf?.stop();")
+                        source+=typed
+                        verify_source(source)
+                        ordered=sorted(sample["frames"])
+                        sample.update({"phase":phase,"fixture":fixture,"lines":lines,"burst":burst,"sourceBytes":len(source.encode()),"outputBytes":output_bytes,
+                            "inputToRafP50Ms":ordered[len(ordered)//2],"inputToRafP95Ms":ordered[int(len(ordered)*.95)],
+                            "inputToRafMaxMs":max(ordered),"longestTaskMs":max(sample["tasks"],default=0) if sample["longTaskSupported"] else None,
+                            "resources":resource_delta(before,after,elapsed)})
+                        report["samples"].append(sample)
+                        output.write_text(json.dumps(report,indent=2))
+        assert len(report["samples"])==54
+        for phase in ("unopened","visible","hidden"):
+            for lines in (100,1000,10000):
                 for burst in range(3):
-                    js("""
-                        const sample={frames:[],gaps:[],tasks:[],inputIntervals:[],frameIntervals:[],ipc:[],startedAt:performance.now(),longTaskSupported:!!(window.PerformanceObserver&&PerformanceObserver.supportedEntryTypes?.includes('longtask'))};
-                        let last=performance.now(),active=true,frame;
-                        function tick(now){sample.gaps.push(now-last);sample.frameIntervals.push({startAt:last,endAt:now});last=now;if(active)frame=requestAnimationFrame(tick);}
-                        frame=requestAnimationFrame(tick);
-                        const input=event=>{if(event.inputType!=='insertText'||!event.target.closest('[aria-label="代码编辑器"]'))return;
-                            const at=performance.now();requestAnimationFrame(()=>{const endAt=performance.now();sample.frames.push(endAt-at);sample.inputIntervals.push({startAt:at,endAt});});};
-                        document.addEventListener('beforeinput',input,true);
-                        let observer;
-                        if(sample.longTaskSupported){observer=new PerformanceObserver(list=>{for(const e of list.getEntries())sample.tasks.push(e.duration);});observer.observe({type:'longtask'});}
-                        if(!window.__inkleetIpcInstrumentation)throw Error('test build instrumentation absent');
-                        window.__nativePerf={sample,active:true,stop(){if(!active)return;active=false;this.active=false;sample.stoppedAt=performance.now();
-                            cancelAnimationFrame(frame);document.removeEventListener('beforeinput',input,true);observer?.disconnect();}};
-                    """)
-                    before=processes(binary);begin=time.monotonic()
-                    typed="0123456789"*4
-                    try:
-                        subprocess.run(["xdotool","type","--clearmodifiers","--delay","20",typed],check=True)
-                        wait_for(lambda:js("return window.__nativePerf.sample.frames.length;")==len(typed),"all native input-to-rAF samples")
-                        elapsed=time.monotonic()-begin;after=processes(binary)
-                        sample=js("window.__nativePerf.stop();window.__nativePerf.sample.capturedAt=performance.now();return window.__nativePerf.sample;")
-                    finally:
-                        js("window.__nativePerf?.stop();")
-                    source+=typed
-                    verify_source(source)
-                    ordered=sorted(sample["frames"])
-                    sample.update({"phase":phase,"lines":lines,"burst":burst,"sourceBytes":len(source.encode()),"outputBytes":output_bytes,
-                        "inputToRafP50Ms":ordered[len(ordered)//2],"inputToRafP95Ms":ordered[int(len(ordered)*.95)],
-                        "inputToRafMaxMs":max(ordered),"longestTaskMs":max(sample["tasks"],default=0) if sample["longTaskSupported"] else None,
-                        "resources":resource_delta(before,after,elapsed)})
-                    report["samples"].append(sample)
-                    output.write_text(json.dumps(report,indent=2))
-        assert len(report["samples"])==27
-        (evidence/"NATIVE_PERFORMANCE_RESULT.txt").write_text("PASS: 27 native X11 input bursts, complete source integrity and descriptive timing/resource samples. No smoothness threshold or speedup claim; actual IME/physical display not covered.\n")
+                    pair=[item for item in report["samples"] if item["phase"]==phase and item["lines"]==lines and item["burst"]==burst]
+                    assert len(pair)==2 and len({item["sourceBytes"] for item in pair})==1,"paired fixture byte sizes differ"
+        (evidence/"NATIVE_PERFORMANCE_RESULT.txt").write_text("PASS: 54 paired-fixture native X11 input bursts, complete source integrity and descriptive timing/resource samples. No smoothness threshold or speedup claim; actual IME/physical display not covered.\n")
     finally:
         output.write_text(json.dumps(report,indent=2))
         try: js("window.__nativePerf?.stop();")
