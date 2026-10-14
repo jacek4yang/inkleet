@@ -46,16 +46,19 @@ Ubuntu / Mint 可先安装：
 - 公开中国站搜索、题目链接、离线缓存与本机笔记已测试。
 - 真实账号登录与在线运行/提交尚未完整验收。
 - 工具目录隔离不是安全沙箱；仅运行你信任的代码。
-- 此检查点没有后来添加的 Typora 外部编辑、引用查找和恢复历史浏览。
+- 具体能力以 SOURCE_COMMIT.txt 所列提交及仓库 STATUS.md 为准。
 
 程序数据与压缩包分离，位于系统应用数据目录（通常为 ~/.local/share/top.jacek.inkleet）。
 删除解压目录不会自动删除笔记、源码和下载的语言工具。
 升级前请备份应用数据，不要同时运行多个版本写同一份笔记。
 
 仓库：https://github.com/jacek4yang/inkleet
-已验证构建：https://github.com/jacek4yang/inkleet/actions/runs/38489326380
+测试记录与对应构建请查看仓库 Actions 和 STATUS.md。
 DOC
 printf '%s\n' "$commit" > "$work/$name/SOURCE_COMMIT.txt"
+if test "$commit" = a62a3db00a740f83425476b4daeab1dbe75abc21; then
+  printf '\n本包为已验证的 a62a3db 检查点，不包含后来的 Typora、引用查找和恢复历史浏览。\nhttps://github.com/jacek4yang/inkleet/actions/runs/38489326380\n' >> "$work/$name/README.txt"
+fi
 dpkg-deb -f "$deb" Depends > "$work/$name/DEPENDENCIES.txt"
 sha256sum "$deb" | awk '{print $1}' > "$work/$name/SOURCE_DEB_SHA256.txt"
 if test -f LICENSE; then cp LICENSE "$work/$name/LICENSE"; fi
