@@ -481,6 +481,24 @@ try:
         wait_for(lambda: text(code)=="def solve(values): return sum(values)","single undo restores complete pre-rename source")
         (evidence/"RENAME_GUI_RESULT.txt").write_text("PASS: actual Linux GUI F2, real private Pyright rename, declaration/reference updates in original source and a single undo restores both.\n")
         focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home"],check=True)
+        subprocess.run(["xdotool","key","--repeat","11","--repeat-delay","10","Right"],check=True)
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+p"],check=True)
+        wait_for(lambda:element(".editor-command-palette"),"rename palette opens at source selection")
+        fill('[aria-label="搜索编辑器命令"]',"重命名符号")
+        subprocess.run(["xdotool","key","Return"],check=True)
+        rename_input=wait_for(lambda:element(".lsp-rename input"),"palette invokes same rename controller")
+        assert not cmd("POST","/elements",{"using":"css selector","value":".editor-command-palette"}),"executed palette closes"
+        cmd("POST",f"/element/{rename_input}/clear",{})
+        cmd("POST",f"/element/{rename_input}/value",{"text":"items","value":list("items")})
+        click('.lsp-rename button[type="submit"]')
+        wait_for(lambda:text(code)=="def solve(items): return sum(items)","palette invokes real semantic rename")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+        wait_for(lambda:text(code)=="def solve(values): return sum(values)","palette rename remains one undo transaction")
+        (evidence/"COMMAND_RENAME_NATIVE_RESULT.txt").write_text("PASS: real palette invokes Pyright rename at preserved source selection, edits declaration/reference, and single undo restores both.\n")
+
+        focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
         keys += [{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"},{"type":"keyUp","value":"\ue008"}]
