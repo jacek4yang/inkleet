@@ -102,19 +102,19 @@ def fill(css, value):
             time.sleep(.3)
 def fill_once(css, value):
     node=wait_for(lambda:element(css),"input target available after document switch")
-    cmd("POST",f"/element/{node}/click",{})
-    # Paste exercises the real OS clipboard path. Sending each line through
-    # Enter would intentionally trigger editor indentation and bracket pairing.
+    try:
+        cmd("POST",f"/element/{node}/click",{})
+    except http.client.RemoteDisconnected:
+        # Only proceed after an uncertain focus click if the actual field owns focus.
+        if cmd("GET","/element/active").get(EID)!=node: raise
+    wait_for(lambda:cmd("GET","/element/active").get(EID)==node,"fixture field owns native keyboard focus")
+    # Exercise actual X11 input, avoiding WebKit's intermittent POST/actions reset.
+    # This path only replaces authored fixture text; it never replays debug/judge actions.
     if value: subprocess.run(["xclip","-selection","clipboard"],input=value.encode("utf-8"),check=True)
     is_editor=bool(cmd("POST",f"/element/{node}/elements",{"using":"css selector","value":".cm-line"}))
-    # Escape dismisses CodeMirror completion, but closes a settings dialog.
-    actions=([{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"}] if is_editor else []) + [
-        {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"a"},{"type":"keyUp","value":"a"},{"type":"keyUp","value":"\ue009"}
-    ]
-    if value:
-        actions += [{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"v"},{"type":"keyUp","value":"v"},{"type":"keyUp","value":"\ue009"}]
-    else: actions += [{"type":"keyDown","value":"\ue003"},{"type":"keyUp","value":"\ue003"}]
-    cmd("POST","/actions",{"actions":[{"type":"key","id":"keyboard","actions":actions}]})
+    if is_editor: subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+a"],check=True)
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+v" if value else "BackSpace"],check=True)
     def editor_text():
         current=element(css)  # Read-only reacquisition after a controlled React update.
         lines=cmd("POST",f"/element/{current}/elements",{"using":"css selector","value":".cm-line"})
