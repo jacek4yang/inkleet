@@ -198,6 +198,37 @@ try:
     wait_for(lambda: source.exists() and source.read_text() == marker, "plain source persisted")
     wait_for(lambda: "已保存到本机文件" in text('.statusbar[role="status"]'), "save acknowledgement")
     screenshot("desktop-code-native.png")
+
+    def named_action(action,name):
+        click(".solution-menu>summary")
+        button=cmd("POST","/element",{"using":"xpath","value":f"//details[contains(@class,'solution-menu')]/div/button[text()='{action}']"})
+        cmd("POST",f"/element/{button[EID]}/click",{})
+        fill('[aria-label="解答名称"]',name)
+        click('.solution-name-dialog button[type="submit"]')
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".solution-name-dialog"}),"named operation committed")
+    named_action("复制解答","双指针")
+    first_id=cmd("GET",f"/element/{element('select[aria-label=\"解答\"]')}/property/value")
+    assert len(first_id)==32
+    named_source=source.parent/".solutions"/"rust"/first_id/"solution.rs"
+    wait_for(lambda:named_source.exists() and named_source.read_text()==marker,"native duplicate preserves current source")
+    fill(code,"// named solution")
+    wait_for(lambda:named_source.read_text()=="// named solution","named source saves independently")
+    assert source.read_text()==marker
+    named_action("重命名","优化版")
+    assert json.loads(named_source.with_name("name.json").read_text())["name"]=="优化版"
+    assert cmd("GET",f"/element/{element('select[aria-label=\"解答\"]')}/property/value")==first_id
+    screenshot("named-solutions-native.png")
+    click('select[aria-label="解答"] option[value="default"]')
+    wait_for(lambda:source_text(code)==marker,"default solution unchanged")
+    stop();start()
+    wait_for(lambda:element(f'select[aria-label="解答"] option[value="{first_id}"]'),"named solution listed after restart")
+    click(f'select[aria-label="解答"] option[value="{first_id}"]')
+    wait_for(lambda:source_text(code)=="// named solution","named source restored after native restart")
+    assert json.loads(named_source.with_name("name.json").read_text())["name"]=="优化版"
+    click('select[aria-label="解答"] option[value="default"]')
+    wait_for(lambda:source_text(code)==marker,"legacy default remains intact after restart")
+    (evidence/"NAMED_SOLUTIONS_NATIVE_RESULT.txt").write_text("PASS: real UI duplicate and rename, immutable ID, independent plain-text persistence, restart restoration, unchanged legacy default. No simulated IPC.\n")
+
     click('nav[aria-label="工作区"] button:last-child')
     note = '[aria-label="Markdown 笔记"]'
     fill(note, "# Native note")

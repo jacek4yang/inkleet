@@ -44,6 +44,7 @@ export function SolutionPicker({problem,language,value,code,template,disabled,on
  }
  return <div className="solution-picker">
   <select aria-label="解答" value={value} disabled={pending} onChange={event=>onChange(event.target.value)}>
+   {value!=="default"&&!entries.some(entry=>entry.id===value)&&<option value={value}>…</option>}
    {entries.map(entry=><option key={entry.id} value={entry.id}>{entry.name}</option>)}
   </select>
   <details ref={menu} className="solution-menu">

@@ -1091,5 +1091,88 @@ try {
   await proxyPage.close();
   await writeFile("evidence/DOWNLOAD_SETTINGS_UI_RESULT.txt","PASS: mocked IPC; save/reopen, duplicate-save guard, visible failure retaining prior settings and draft, reload and direct mode. Native proxy routing/persistence tested separately.\n");
 
+
+  const solutionsPage=await testPage({viewport:{width:1440,height:900}});
+  await solutionsPage.addInitScript(()=>{
+    window.isTauri=true;
+    const state=window.__solutionsTest={entries:{},docs:{},notes:null,writes:[],creates:0,fail:false};
+    const group=args=>JSON.stringify([args.problem,args.language]);
+    const key=args=>JSON.stringify([args.problem,args.language,args.solution??"default"]);
+    window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
+      if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="search_questions")return {questions:[],total:0,hasMore:false};
+      if(command==="external_editor_supported")return false;
+      if(command==="login_status")return null;
+      if(command==="stop_language_service")return;
+      if(command==="start_language_service")throw Error("No language server in named-solution fixture");
+      if(command==="list_solutions")return {entries:state.entries[group(args)]??[{id:"default",name:"默认解答"}],unreadable:0};
+      if(command==="load_document")return {code:state.docs[key(args)]??null,notes:state.notes};
+      if(command==="save_text"){
+        state.writes.push({...args});
+        if(args.kind==="notes"){state.notes=args.text;return;}
+        if((state.docs[key(args)]??null)!==args.expected)throw Error("External source conflict");
+        state.docs[key(args)]=args.text;return;
+      }
+      if(command==="create_solution"){
+        ++state.creates;if(state.fail)throw Error("磁盘写入失败");
+        const entry={id:args.id,name:args.name};
+        state.entries[group(args)]=[...(state.entries[group(args)]??[{id:"default",name:"默认解答"}]),entry];
+        state.docs[JSON.stringify([args.problem,args.language,args.id])]=args.code;return entry;
+      }
+      if(command==="rename_solution"){
+        const list=state.entries[group(args)]??[{id:"default",name:"默认解答"}];
+        const current=list.find(item=>item.id===args.id);if(current.name!==args.expected)throw Error("名称已变化");
+        current.name=args.name;state.entries[group(args)]=list;return current;
+      }
+      throw Error("Unexpected named-solution command "+command);
+    }};
+  });
+  await solutionsPage.goto("http://127.0.0.1:5173");
+  const solutionCode=solutionsPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await solutionCode.fill("// default source");
+  await solutionsPage.waitForFunction(()=>window.__solutionsTest.writes.some(w=>w.text==="// default source"));
+  async function namedAction(action,name){
+    await solutionsPage.locator(".solution-menu>summary").click();
+    await solutionsPage.getByRole("button",{name:action,exact:true}).click();
+    const dialog=solutionsPage.getByRole("dialog",{name:action,exact:true});
+    await dialog.getByRole("textbox",{name:"解答名称",exact:true}).fill(name);
+    await dialog.getByRole("button",{name:"保存",exact:true}).click();
+    await dialog.waitFor({state:"hidden"});
+  }
+  await namedAction("复制解答","双指针");
+  const first=await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).inputValue();
+  assert.match(first,/^[a-f0-9]{32}$/);
+  assert.equal(await solutionCode.innerText(),"// default source","copy is the captured draft");
+  await solutionCode.fill("// named source");
+  await solutionsPage.waitForFunction(()=>window.__solutionsTest.writes.some(w=>w.text==="// named source"));
+  await namedAction("重命名","优化版");
+  assert.equal(await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).inputValue(),first,"rename preserves immutable ID");
+  await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).selectOption("default");
+  assert.equal(await solutionCode.innerText(),"// default source");
+  await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).selectOption(first);
+  assert.equal(await solutionCode.innerText(),"// named source");
+  await solutionsPage.getByRole("combobox",{name:"编程语言",exact:true}).selectOption("python3");
+  assert.equal(await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).inputValue(),"default");
+  await solutionsPage.getByRole("combobox",{name:"编程语言",exact:true}).selectOption("rust");
+  await solutionsPage.waitForFunction(()=>document.querySelector('select[aria-label="解答"]').selectedOptions[0]?.text==="优化版");
+  assert.equal(await solutionCode.innerText(),"// named source");
+  await solutionsPage.screenshot({path:"evidence/named-solutions-browser.png",fullPage:true});
+  await solutionsPage.locator(".solution-menu>summary").click();
+  await solutionsPage.getByRole("button",{name:"复制解答",exact:true}).click();
+  const duplicate=solutionsPage.getByRole("dialog",{name:"复制解答",exact:true});
+  await duplicate.getByRole("textbox",{name:"解答名称",exact:true}).fill("优化版");
+  await duplicate.getByRole("button",{name:"保存",exact:true}).click();
+  await duplicate.getByRole("alert").filter({hasText:"同名"}).waitFor();
+  assert.equal(await solutionsPage.evaluate(()=>window.__solutionsTest.creates),1,"duplicate name does not invoke creation");
+  await duplicate.getByRole("textbox",{name:"解答名称",exact:true}).fill("磁盘失败");
+  await solutionsPage.evaluate(()=>{window.__solutionsTest.fail=true;});
+  await duplicate.getByRole("button",{name:"保存",exact:true}).click();
+  await duplicate.getByRole("alert").filter({hasText:"磁盘写入失败"}).waitFor();
+  assert.equal(await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).inputValue(),first);
+  await duplicate.getByRole("button",{name:"取消",exact:true}).click();
+  assert.equal(await solutionCode.innerText(),"// named source","failed creation preserves selected draft");
+  await solutionsPage.close();
+  await writeFile("evidence/NAMED_SOLUTIONS_UI_RESULT.txt","PASS: mocked IPC copy snapshot, rename identity, independent source, language switching, duplicate-name rejection and disk failure preserving draft; native disk/restart tested separately.\n");
+
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }
