@@ -2,7 +2,7 @@ name: Linux polished preview
 on:
   push:
     branches: [feat/real-use-hardening]
-    paths: ['.github/workflows/linux-preview.yml', 'scripts/package-linux-portable.sh', 'tests/native_smoke.py']
+    paths: ['src/**', 'src-tauri/**', 'crates/**', 'public/**', 'package*.json', '.github/workflows/linux-preview.yml', 'scripts/package-linux-portable.sh', 'tests/native_smoke.py']
   workflow_dispatch:
 permissions:
   contents: read
