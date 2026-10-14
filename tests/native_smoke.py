@@ -63,8 +63,12 @@ def click(css):
             if not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}): return
             # Exercise the real dialog Escape handler, never inject JavaScript
             # or remove the viewer from the DOM to manufacture a passing test.
-            cmd("DELETE","/actions")
-            return cmd("POST","/actions",{"actions":[{"type":"key","id":"source-dialog-escape","actions":[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"}]}]})
+            # WebKit may also reject release-actions during this transport bug.
+            # Send Escape through the real X11 keyboard, then require the real
+            # application's close handler to remove the viewer.
+            subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+            wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),"source viewer closes through actual OS Escape")
+            return
 
 def fill(css, value):
     # Only authored test-field replacement is replayable. Never replay a judge,
