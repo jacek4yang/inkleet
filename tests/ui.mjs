@@ -1141,6 +1141,54 @@ try {
   await runPanel.getByText("编译中…", { exact: true }).waitFor();
   await runPanel.getByRole("button", { name: "停止", exact: true }).click();
   await runPanel.getByText("已停止", { exact: true }).waitFor();
+
+  // Performance baseline: actual App/LocalRunner, mocked IPC and no real LSP/disk.
+  // Count only parsing of exact authored result envelopes, not all JSON operations.
+  const runnerPerf = [];
+  await runPage.evaluate(() => {
+    const s=window.__runTest;
+    s.perfRaw=Array.from({length:3},(_,i)=>JSON.stringify({case:i+1,ok:true,value:Array.from({length:16384},(_,n)=>n+i)}));
+    Object.assign(s.result,{phase:"finished",canceled:false,exitCode:0,results:s.perfRaw,stdout:"",elapsedMs:1});
+    s.perfPolls=0;
+    const invoke=window.__TAURI_INTERNALS__.invoke;
+    window.__TAURI_INTERNALS__.invoke=(command,args)=>{if(command==="local_run_status")s.perfPolls++;return invoke(command,args);};
+  });
+  await runPanel.locator(".case-result").nth(2).waitFor();
+  await runPage.evaluate(() => {
+    const s=window.__runTest, original=JSON.parse;
+    s.perf={parses:0,parseMs:0,frames:[]};
+    JSON.parse=function(...args){if(s.perfRaw.includes(args[0])){const start=performance.now();try{return Reflect.apply(original,JSON,args);}finally{s.perf.parses++;s.perf.parseMs+=performance.now()-start;}}return Reflect.apply(original,JSON,args);};
+    const input=event=>{if(event.inputType!=="insertText"||!event.target.closest('[aria-label="代码编辑器"]'))return;const start=performance.now();requestAnimationFrame(()=>s.perf.frames.push(performance.now()-start));};
+    document.addEventListener("beforeinput",input,true);
+    s.perfCleanup=()=>{JSON.parse=original;document.removeEventListener("beforeinput",input,true);};
+  });
+  try {
+    for(const hidden of [false,true]){
+      if(hidden){await runPanel.getByRole("button",{name:"收起",exact:true}).click();await runPanel.waitFor({state:"hidden"});}
+      const edit=runPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+      await edit.click();await edit.press("Control+End");
+      await runPage.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      await runPage.evaluate(()=>{const s=window.__runTest;s.perf={parses:0,parseMs:0,frames:[]};s.perfPollStart=s.perfPolls;});
+      await edit.pressSequentially(" // runner performance 01234567890123456789",{delay:20});
+      await runPage.waitForFunction(()=>window.__runTest.perfPolls-window.__runTest.perfPollStart>=4&&window.__runTest.perf.frames.length>=30);
+      const sample=await runPage.evaluate(()=>{const s=window.__runTest;return {...s.perf,polls:s.perfPolls-s.perfPollStart,rawBytes:s.perfRaw.reduce((n,v)=>n+new TextEncoder().encode(v).length,0)};});
+      const sorted=[...sample.frames].sort((a,b)=>a-b);
+      assert.ok(sorted.length>=30,"record real keyboard beforeinput samples");
+      runnerPerf.push({hidden,...sample,inputToRafP50Ms:sorted[Math.floor(sorted.length*.5)],inputToRafP95Ms:sorted[Math.floor(sorted.length*.95)]});
+    }
+  } finally {await runPage.evaluate(()=>window.__runTest.perfCleanup());}
+  await writeFile("evidence/RUNNER_PERFORMANCE.json",JSON.stringify({environment:"GitHub Actions headless Chromium; actual App with mocked IPC, no native LSP or disk; development React build",cpu:os.cpus()[0]?.model,logicalCpus:os.cpus().length,viewport:"1440x900",meaning:"input-to-next-rAF is not completed paint; parseMs counts JSON.parse only, not subsequent exact-value scanning",samples:runnerPerf},null,2));
+  // Retain current source snapshots despite any rendering optimization.
+  await runPage.getByRole("button",{name:"本地",exact:true}).click();
+  const newestCode="class Solution { /* latest performance snapshot */ }";
+  await runPage.getByRole("textbox",{name:"代码编辑器",exact:true}).fill(newestCode);
+  await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.starts.length===8);
+  assert.equal(await runPage.evaluate(()=>window.__runTest.starts[7].code),newestCode);
+  await runPage.evaluate(()=>window.__runTest.pending[7]());
+  await runPanel.getByRole("button",{name:"停止",exact:true}).click();
+  await runPanel.getByText("已停止",{exact:true}).waitFor();
+
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");
