@@ -132,9 +132,9 @@ def focus_code_editor():
     wait_for(focused,"actual code editor keyboard focus")
 
 def click(css):
-    # Use a single prospective OS click for ordinary visible controls. Native
-    # select options retain their WebDriver selection semantics below.
-    if not (" option[value=" in css):
+    # Only known visible transport-sensitive controls use one OS click.
+    # WebDriver retains auto-scroll for other controls and native options.
+    if css in (".pane-heading .actions button", '[data-action="local-execute"]'):
         return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
@@ -243,6 +243,7 @@ try:
     # Persist a download-only endpoint through the real Settings UI, never use it
     # for login or configure the runner's system network.
     click('[data-action="open-settings"]')
+    wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":"nav[aria-label='设置分类']"}),"settings categories mounted")
     downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='下载']"})[EID]
     cmd("POST",f"/element/{downloads_tab}/click",{})
     wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-mode')}/enabled"),"download settings read")
