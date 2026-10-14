@@ -57,7 +57,8 @@ def run_performance(g):
         "logicalCpus":os.cpu_count(),"compositingDisabled":os.environ.get("WEBKIT_DISABLE_COMPOSITING_MODE"),"environment":"Linux WebKitGTK on GitHub Actions Xvfb; real X11 input, private Pyright and durable draft IPC",
         "limitations":["input-to-rAF is not OS-key-to-screen or completed paint","RSS sums double-count shared pages and are not peak/private memory",
             "two /proc snapshots exclude CPU of descendants that start and exit between samples","fixed runner phase order; paired equal-byte fixtures alternate order; no hardware-independent speed claim","IPC timings include bridge/backend scheduling; syncMs is invoke call time, not pure serialization","IPC records without endAt are censored at capture; no source or response content is logged","CPU snapshots approximately bracket, but do not exactly match, the wall interval"],
-        "fixtureDesign":"Python valid one-line function definitions versus padded comment lines, equal UTF-8 byte and line counts at each size; insertion at final comment",\n        "samples":[]}
+        "fixtureDesign":"Python valid one-line function definitions versus padded comment lines, equal UTF-8 byte and line counts at each size; insertion at final comment",
+        "samples":[]}
     output=evidence/"NATIVE_PERFORMANCE.json"
     stop();start()
     click('select[aria-label="编程语言"] option[value="python3"]')

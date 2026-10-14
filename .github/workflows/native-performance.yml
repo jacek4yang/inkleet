@@ -28,6 +28,7 @@ jobs:
           mkdir -p /tmp/inkleet-perf-tests
           cp tests/native_smoke.py tests/native_performance.py tests/perf-tauri-core.ts tests/vite-perf.config.ts /tmp/inkleet-perf-tests/
           git rev-parse HEAD > /tmp/inkleet-perf-tests/HARNESS_SOURCE.txt
+          python3 -m py_compile tests/native_smoke.py tests/native_performance.py
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ matrix.source }}
