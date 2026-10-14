@@ -21,3 +21,11 @@ test("incomplete continuation accepts only one adjacent identifier insertion",()
   }
   assert.equal(advanceIncomplete(previous,Text.of(["Other"]),after,[{from:4,to:4,text:"M"}]),null);
 });
+
+test("scalar triggers include Java space and astral identifiers preserve UTF16 offsets",()=>{
+  assert.deepEqual(completionTrigger(false,"x ",[" "],false),{triggerKind:2,triggerCharacter:" "});
+  assert.deepEqual(completionTrigger(false,"x𐐀",["𐐀"],false),{triggerKind:2,triggerCharacter:"𐐀"});
+  assert.equal("obj.𐐀name".match(identifierTail)?.[0],"𐐀name");
+  const before=Text.of(["x"]),after=Text.of(["x𐐀"]);
+  assert.equal(advanceIncomplete({doc:before,from:0,pos:1,session:1},before,after,[{from:1,to:1,text:"𐐀"}])?.pos,3);
+});

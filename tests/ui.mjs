@@ -1615,7 +1615,7 @@ try {
   assert.equal(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1).triggerKind),1,"late response after Escape cannot restore incomplete context");
   await providerPage.evaluate(()=>{window.__providerTest.client.destroy();window.__providerTest.view.destroy();});
   await providerPage.close();
-  await writeFile("evidence/COMPLETION_CONTEXT_UI_RESULT.txt","PASS: actual CodeMirror keyboard manual context1, adjacent incomplete context3, provider-specific > context2 and manual override. Mocked IPC; native adapters separately verified.\\n");
+  await writeFile("evidence/COMPLETION_CONTEXT_UI_RESULT.txt","PASS: actual CodeMirror keyboard manual context1, adjacent incomplete context3, provider-specific > context2 and manual override. Mocked IPC; native adapter verification is a separate required check.\\n");
 
   const inputPage=await browser.newPage({viewport:{width:1200,height:800}});
   await inputPage.route("**/input-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor' style='width:600px'></div></body></html>"}));
