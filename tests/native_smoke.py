@@ -314,6 +314,7 @@ try:
             node=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-variable')][button[normalize-space(text())='total']]/code"})[EID]
             return cmd("GET",f"/element/{node}/text")
         wait_for(lambda: java_total()=="0","Java initial total")
+        wait_for(lambda: "部分断点尚未验证" not in text(".debug-panel"),"Java asynchronous breakpoint verification reaches the UI")
         screenshot("java-debug-native.png")
         for _ in range(3):
             click(code)

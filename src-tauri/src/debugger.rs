@@ -38,7 +38,7 @@ impl Debugger{
         let mut lines=lines;lines.sort_unstable();lines.dedup();
         let requested:Vec<Value>=lines.into_iter().map(|line|json!({"line":line})).collect();
         let response=session.client()?.request("setBreakpoints",json!({"source":{"path":session.source},"breakpoints":requested}),Duration::from_secs(10))?;
-        if let Ok(mut view)=session.view.lock(){view.breakpoints=response.get("breakpoints").and_then(Value::as_array).cloned().unwrap_or_default();}
+        if let Ok(mut view)=session.view.lock(){view.breakpoints=merge_breakpoints(&view.breakpoints,response.get("breakpoints").and_then(Value::as_array).cloned().unwrap_or_default());}
         Ok(())
     }
     pub fn request(&self,id:u64,epoch:u64,kind:&str,reference:i64)->Result<Value>{
@@ -112,6 +112,7 @@ fn launch(session:&Arc<Session>,manager:&inkleet_managed_env::Manager,root:&std:
         if name=="initialized"{let _=initialized_tx.try_send(());}
         if let Ok(mut view)=session.view.lock(){
             match name{
+                "breakpoint"=>update_breakpoint_event(&mut view.breakpoints,&event),
                 "stopped"=>{view.phase="paused".into();view.thread_id=event.pointer("/body/threadId").and_then(Value::as_i64);view.reason=event.pointer("/body/reason").and_then(Value::as_str).unwrap_or("暂停").chars().take(100).collect();view.epoch+=1;},
                 "continued"=>{view.phase="running".into();view.epoch+=1;},
                 "terminated"=>{view.phase="finished".into();view.epoch+=1;},
@@ -137,7 +138,7 @@ fn launch(session:&Arc<Session>,manager:&inkleet_managed_env::Manager,root:&std:
     lines.sort_unstable();lines.dedup();
     let requested:Vec<Value>=lines.into_iter().map(|line|json!({"line":line})).collect();
     let verified=client.request("setBreakpoints",json!({"source":{"path":session.source},"breakpoints":requested}),Duration::from_secs(10))?;
-    if let Ok(mut view)=session.view.lock(){if !session.closed.load(Ordering::Acquire){view.breakpoints=verified.get("breakpoints").and_then(Value::as_array).cloned().unwrap_or_default();view.phase="running".into();}}
+    if let Ok(mut view)=session.view.lock(){if !session.closed.load(Ordering::Acquire){view.breakpoints=merge_breakpoints(&view.breakpoints,verified.get("breakpoints").and_then(Value::as_array).cloned().unwrap_or_default());view.phase="running".into();}}
     client.request("configurationDone",json!({}),Duration::from_secs(10))?;
     launch_thread.join().map_err(|_|"调试启动任务中断")??;
     Ok(())
@@ -173,5 +174,48 @@ fn validate_breakpoints(code:&str,lines:&[u32])->Result<()>{
         assert!(validate_breakpoints("a",&[0]).is_err());
         assert!(validate_breakpoints("a",&[2]).is_err());
         assert!(validate_breakpoints("a",&vec![1;201]).is_err());
+    }
+}
+
+
+/// Adapters can verify pending breakpoints only after a class/module is loaded.
+/// Keep these asynchronous updates; otherwise a hit breakpoint stays "unverified".
+fn update_breakpoint_event(points:&mut Vec<Value>,event:&Value){
+    let Some(point)=event.pointer("/body/breakpoint").filter(|p|p.is_object())else{return;};
+    let Some(id)=point.get("id").and_then(Value::as_i64)else{return;};
+    let reason=event.pointer("/body/reason").and_then(Value::as_str);
+    let index=points.iter().position(|p|p.get("id").and_then(Value::as_i64)==Some(id));
+    match (reason,index){
+        (Some("removed"),Some(i))=>{points.remove(i);},
+        (Some("changed"|"new"),Some(i))=>{points[i]=point.clone();},
+        (Some("changed"|"new"),None) if points.len()<200=>points.push(point.clone()),
+        _=>{},
+    }
+}
+fn merge_breakpoints(current:&[Value],mut response:Vec<Value>)->Vec<Value>{
+    response.truncate(200);
+    for point in &mut response{
+        if point.get("verified").and_then(Value::as_bool)==Some(true){continue;}
+        if let Some(id)=point.get("id").and_then(Value::as_i64){
+            if let Some(newer)=current.iter().find(|p|p.get("id").and_then(Value::as_i64)==Some(id)&&p.get("line")==point.get("line")&&p.get("verified").and_then(Value::as_bool)==Some(true)){
+                *point=newer.clone();
+            }
+        }
+    }
+    response
+}
+#[cfg(test)]mod breakpoint_event_tests{
+    use super::*;
+    #[test]fn asynchronously_verified_breakpoint_survives_late_initial_response(){
+        let initial=json!({"id":1,"line":4,"verified":false});
+        let verified=json!({"id":1,"line":4,"verified":true});
+        let mut points=vec![initial.clone()];
+        update_breakpoint_event(&mut points,&json!({"body":{"reason":"changed","breakpoint":verified}}));
+        assert_eq!(points[0]["verified"],true);
+        assert_eq!(merge_breakpoints(&points,vec![initial])[0]["verified"],true);
+        let moved=json!({"id":1,"line":7,"verified":false});
+        assert_eq!(merge_breakpoints(&points,vec![moved])[0]["verified"],false);
+        update_breakpoint_event(&mut points,&json!({"body":{"reason":"removed","breakpoint":{"id":1}}}));
+        assert!(points.is_empty());
     }
 }
