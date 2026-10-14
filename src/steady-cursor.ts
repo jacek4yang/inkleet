@@ -2,17 +2,17 @@ import {drawSelection,EditorView,ViewPlugin,type ViewUpdate} from "@codemirror/v
 import {getCM} from "@replit/codemirror-vim";
 // Visual-only INSERT overlay. Never changes Vim insert/overwrite state or document.
 export function steadyVimCursor(){
- return [drawSelection({cursorBlinkRate:0}),ViewPlugin.fromClass(class{
+ return [EditorView.editorAttributes.of({class:"inkleet-steady-vim"}),drawSelection({cursorBlinkRate:0}),ViewPlugin.fromClass(class{
   layer=document.createElement("div");
   private destroyed=false;
   private cm:ReturnType<typeof getCM>;
   private measure={read:()=>this.read(),write:(rects:{left:number;top:number;width:number;height:number}[])=>this.paint(rects)};
   private schedule=()=>{if(!this.destroyed)this.view.requestMeasure(this.measure);};
-  private composing=()=>{this.view.dom.classList.add("inkleet-composing");this.layer.replaceChildren();};
-  private composed=()=>{this.view.dom.classList.remove("inkleet-composing");this.schedule();};
+  private composing=()=>{this.view.dom.setAttribute("data-inkleet-composing","true");this.layer.replaceChildren();};
+  private composed=()=>{this.view.dom.removeAttribute("data-inkleet-composing");this.schedule();};
   constructor(readonly view:EditorView){
    this.cm=getCM(view);this.layer.className="inkleet-insert-cursors";this.layer.setAttribute("aria-hidden","true");
-   view.scrollDOM.appendChild(this.layer);view.dom.classList.add("inkleet-steady-vim");
+   view.scrollDOM.appendChild(this.layer);
    this.cm?.on("vim-mode-change",this.schedule);this.cm?.on("vim-command-done",this.schedule);
    view.contentDOM.addEventListener("compositionstart",this.composing);view.contentDOM.addEventListener("compositionend",this.composed);
    this.schedule();
@@ -33,12 +33,12 @@ export function steadyVimCursor(){
    this.layer.replaceChildren(...rects.map(rect=>{const node=document.createElement("div");node.className="inkleet-insert-cursor";Object.assign(node.style,{left:rect.left+"px",top:rect.top+"px",width:rect.width+"px",height:rect.height+"px"});return node;}));
   }
   update(update:ViewUpdate){if(update.docChanged||update.selectionSet||update.geometryChanged||update.viewportChanged||update.focusChanged)this.schedule();}
-  destroy(){this.destroyed=true;this.cm?.off("vim-mode-change",this.schedule);this.cm?.off("vim-command-done",this.schedule);this.view.contentDOM.removeEventListener("compositionstart",this.composing);this.view.contentDOM.removeEventListener("compositionend",this.composed);this.layer.remove();this.view.dom.classList.remove("inkleet-steady-vim","inkleet-composing");}
+  destroy(){this.destroyed=true;this.cm?.off("vim-mode-change",this.schedule);this.cm?.off("vim-command-done",this.schedule);this.view.contentDOM.removeEventListener("compositionstart",this.composing);this.view.contentDOM.removeEventListener("compositionend",this.composed);this.layer.remove();this.view.dom.removeAttribute("data-inkleet-composing");}
  }),EditorView.theme({
   "&.inkleet-steady-vim .cm-cursorLayer":{animation:"none !important"},
-  "&.inkleet-steady-vim:not(.inkleet-composing) .cm-content":{caretColor:"transparent !important"},
-  "&.inkleet-steady-vim:not(.inkleet-composing) .cm-cursorLayer:not(.cm-vimCursorLayer)":{display:"none"},
-  "&.inkleet-steady-vim.inkleet-composing .cm-content":{caretColor:"var(--accent) !important"},
+  "&.inkleet-steady-vim:not([data-inkleet-composing]) .cm-content":{caretColor:"transparent !important"},
+  "&.inkleet-steady-vim:not([data-inkleet-composing]) .cm-cursorLayer:not(.cm-vimCursorLayer)":{display:"none"},
+  "&.inkleet-steady-vim[data-inkleet-composing] .cm-content":{caretColor:"var(--accent) !important"},
   ".inkleet-insert-cursors":{position:"absolute",inset:"0",pointerEvents:"none",zIndex:"150"},
   ".inkleet-insert-cursor":{position:"absolute",background:"var(--vim-cursor)",borderRadius:"0"},
  })];
