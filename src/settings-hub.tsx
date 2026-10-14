@@ -25,11 +25,7 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
         {!visible.length && !showDownloads && section !== "debug" && <p className="muted">没有匹配项</p>}
         {showDownloads && <DownloadSettings />}
         {!normalized && section === "environment" && <p className="settings-service" role="status">{languageStatus || "语言服务未启动"}</p>}
-        {!normalized && section === "debug" && <div className="settings-reference">
-          <h3>快捷键</h3><dl><dt>开始 / 继续</dt><dd>F5</dd><dt>停止</dt><dd>Shift+F5</dd><dt>单步跳过</dt><dd>F10</dd><dt>单步进入 / 跳出</dt><dd>F11 / Shift+F11</dd><dt>切换断点</dt><dd>F9</dd></dl>
-          <h3>执行边界</h3><p>仅运行可信代码。工具目录隔离不是安全沙箱，程序使用当前用户权限执行。本地输出不代表力扣判题结果。</p>
-          <p>普通运行限时10秒；调试连续执行限时30秒，会话最多30分钟。表达式只在点击时求值，可能调用函数或改变状态；超时会停止当前调试。</p>
-        </div>}
+
       </section>
     </div>
   </dialog>;

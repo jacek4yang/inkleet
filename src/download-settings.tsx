@@ -39,8 +39,6 @@ export function DownloadSettings() {
       <option value="system">跟随系统</option><option value="direct">直接连接</option><option value="custom">自定义代理</option>
     </select>
     {draft.mode==="custom" && <><label htmlFor="download-proxy-url">HTTP / HTTPS 地址</label><input id="download-proxy-url" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={2048} placeholder="http://127.0.0.1:7890" value={draft.url} disabled={saving} onChange={event=>{setDraft(current=>({...current,url:event.target.value}));setNotice("");}} /></>}
-    <p className="muted">仅用于工具链、LSP 和调试器安装下载（含 gopls 依赖）。不会改变力扣访问、代码运行或系统网络；已开始的安装保留原连接方式。</p>
-    {draft.mode==="custom" && <p className="muted">使用代理软件的 HTTP 或混合端口。暂不支持带账号密码的地址。</p>}
     <div className="settings-form-actions"><button type="button" disabled={!dirty||saving||loading} onClick={()=>void save()}>{saving?"保存中…":"保存下载设置"}</button><button type="button" disabled={saving||loading||!isTauri()} onClick={()=>void load()}>重新读取</button></div>
     {loading&&<p role="status">读取中…</p>}{notice&&<p role="status">{notice}</p>}{error&&<p role="alert" className="error">{error}</p>}
   </section>;
