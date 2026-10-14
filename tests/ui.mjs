@@ -1597,6 +1597,9 @@ try {
   assert.deepEqual(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1)),{triggerKind:1});
   await providerPage.keyboard.type("N");
   try{await providerPage.waitForFunction(()=>window.__providerTest.calls.some(x=>x.triggerKind===3));}catch(error){await writeFile("evidence/completion-context-failure.json",JSON.stringify(await providerPage.evaluate(()=>({calls:window.__providerTest.calls,text:window.__providerTest.view.state.doc.toString()}))));throw error;}
+  await providerPage.evaluate(()=>{window.__providerTest.calls=[];});
+  await providerPage.keyboard.type(">");
+  await providerPage.waitForFunction(()=>window.__providerTest.calls.some(x=>x.triggerKind===2&&x.triggerCharacter===">"));
   await providerPage.keyboard.press("Escape");
   await providerPage.evaluate(()=>{const s=window.__providerTest;s.calls=[];s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:"obj"},selection:{anchor:3}});s.view.focus();});
   await providerPage.keyboard.type(">");

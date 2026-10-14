@@ -123,7 +123,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     return !closed && session?.id === id && version === askedVersion && view.state.doc === doc ? result : null;
   }
   let completionApplyGeneration=0,activeCompletionResolves=0;
-  let incomplete:IncompleteContext|null=null,completionRequestGeneration=0;
+  let incomplete:IncompleteContext|null=null,typing:{doc:Text;pos:number}|null=null,completionRequestGeneration=0;
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
     const generation=++completionRequestGeneration;
@@ -131,7 +131,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     const triggers=session.completionTriggerCharacters??[".",":"];
     const before=context.state.sliceDoc(Math.max(0,context.pos-2),context.pos);
     const continued=!!incomplete?.continued&&incomplete.session===session.id&&incomplete.doc===context.state.doc&&incomplete.from===(word?.from??context.pos)&&incomplete.pos===context.pos;
-    const trigger=completionTrigger(context.explicit&&!continued,before,triggers,continued);
+    const typed=typing?.doc===context.state.doc&&typing.pos===context.pos;
+    const trigger=completionTrigger(context.explicit&&!typed,before,triggers,continued);
     if(!context.explicit&&!word?.text&&trigger.triggerKind!==2)return null;
     context.addEventListener("abort", () => {}, { onDocChange: true });
     const doc = context.state.doc;
@@ -289,8 +290,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60 }),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventObservers({keydown(event){if((event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&(event.code==="Space"||event.key===" ")&&!event.isComposing){incomplete=null;++completionRequestGeneration;}if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;}}}),
-    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;return false;}, compositionstart(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;return false;}, mousedown(event, target) {
+    EditorView.domEventObservers({keydown(event){if((event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&(event.code==="Space"||event.key===" ")&&!event.isComposing){incomplete=null;typing=null;++completionRequestGeneration;}if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;}}}),
+    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;return false;}, compositionstart(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
@@ -302,7 +303,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         const changes:{from:number;to:number;text:string}[]=[];
         update.changes.iterChanges((from,to,_fromB,_toB,inserted)=>{if(changes.length<2)changes.push({from,to,text:inserted.length<=256?inserted.toString():""});});
         incomplete=update.view.composing?null:advanceIncomplete(incomplete,update.startState.doc,update.state.doc,changes);
-      }else if(update.selectionSet){incomplete=null;++completionRequestGeneration;}
+        const inserted=changes.length===1?changes[0]:null;
+        typing=!update.view.composing&&inserted&&inserted.from===inserted.to&&inserted.text&&update.transactions.some(transaction=>transaction.isUserEvent("input.type"))&&update.state.selection.main.empty&&update.state.selection.main.head===inserted.from+inserted.text.length?{doc:update.state.doc,pos:update.state.selection.main.head}:null;
+      }else if(update.selectionSet){incomplete=null;typing=null;++completionRequestGeneration;}
 
       if (update.docChanged || update.selectionSet) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); }
       if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
@@ -349,13 +352,13 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         const started = await connecting;
         if (!started) return;
         if (closed) { await invoke("stop_language_service", { id: started.id }); return; }
-        incomplete=null;++completionRequestGeneration;session = started; version = started.version; sent = initial;
+        incomplete=null;typing=null;++completionRequestGeneration;session = started; version = started.version; sent = initial;
         await flush();
         if (!closed) { status(`${serverName} 已连接 · F12 / Ctrl+单击查看定义`); void poll(); scheduleSemantic(); }
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      references.destroy(); rename.destroy(); incomplete=null; ++completionRequestGeneration; ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration; ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },
