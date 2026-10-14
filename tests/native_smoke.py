@@ -72,14 +72,17 @@ def reveal_debug_control(css):
     # Use the real pointer wheel over the outer padding, never execute JS clicks.
     for _ in range(12):
         panel=cmd("GET",f"/element/{element('.debug-body')}/rect")
-        target=cmd("GET",f"/element/{element(css)}/rect")
+        try: target=cmd("GET",f"/element/{element(css)}/rect")
+        except RuntimeError as error:
+            if "element not interactable" not in str(error): raise
+            target=None
         top=panel["y"]+4; bottom=panel["y"]+panel["height"]-4
-        if target["height"]>0 and target["y"]>=top and target["y"]+target["height"]<=bottom:
+        if target and target["height"]>0 and target["y"]>=top and target["y"]+target["height"]<=bottom:
             return
         window=cmd("GET","/window/rect")
         x=int(window["x"]+panel["x"]+4)
         y=int(window["y"]+panel["y"]+panel["height"]/2)
-        direction="5" if target["y"]+target["height"]>bottom else "4"
+        direction="5" if target is None or target["y"]+target["height"]>bottom else "4"
         subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","--repeat","2","--delay","80",direction],check=True)
         time.sleep(.15)
     raise AssertionError("Debug control remains unreachable through real wheel: "+css)
