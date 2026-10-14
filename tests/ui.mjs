@@ -1964,6 +1964,14 @@ try {
   await ownerPage.waitForFunction(()=>document.querySelector(".lsp-status")?.getAttribute("data-status")?.includes("clangd 已连接"));
   await ownerCode.press("Control+Space");
   await ownerPage.getByRole("option",{name:"value",exact:true}).waitFor();
+  await ownerPage.keyboard.press("Escape");
+  await ownerPage.evaluate(()=>{window.__statusOwner.releaseStart=null;});
+  await ownerPage.locator(".lsp-status").click();
+  await ownerPage.getByRole("dialog",{name:"设置",exact:true}).getByRole("button",{name:"重连语言服务",exact:true}).click();
+  await ownerPage.waitForFunction(()=>typeof window.__statusOwner.releaseStart==="function");
+  assert.equal(await ownerPage.locator(".lsp-status.ready").count(),0,"same editor reconnect does not relabel old ready status");
+  await ownerPage.evaluate(()=>window.__statusOwner.releaseStart());
+  await ownerPage.waitForFunction(()=>document.querySelector(".lsp-status")?.getAttribute("data-status")?.includes("clangd 已连接"));
   await ownerPage.close();
   await writeFile("evidence/LSP_STATUS_OWNERSHIP_UI_RESULT.txt","PASS: actual App CPP-to-C switch never displays previous ready state during deferred document load/start; completion unavailable until new session is ready, then succeeds. Mocked IPC; native verification separate.\\n");
 

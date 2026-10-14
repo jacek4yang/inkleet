@@ -48,20 +48,22 @@ function syntax(language: Language | "markdown") {
     case "markdown": return markdown();
   }
 }
+export type EditorLanguageStatus={owner:string;text:string};
 type Props = {
+  statusOwner?:string;
   vimEnabled?:boolean;
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
-  label: string; onChange: (text: string) => void; onStatus?: (status: string) => void; reconnectToken?: number; onSettings?: () => void;
+  label: string; onChange: (text: string) => void; onStatus?: (status: EditorLanguageStatus) => void; reconnectToken?: number; onSettings?: () => void;
   onSave?:()=>void;onSaveReady?:(save:(()=>boolean)|null)=>void;
   formatting?: {epoch?:()=>number;ready?:(save:boolean)=>boolean;enabled:boolean;save:(text:string)=>Promise<boolean>;report:(message:string)=>void};
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
-export function CodeEditor({ vimEnabled=false, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
+export function CodeEditor({ vimEnabled=false, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, statusOwner, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
   const formatOptions=useRef(formatting);formatOptions.current=formatting;
   const saveCallback=useRef(onSave),saveReady=useRef(onSaveReady);saveCallback.current=onSave;saveReady.current=onSaveReady;
   const host = useRef<HTMLDivElement>(null);
   const vimSlot=useRef(new Compartment()),liveView=useRef<EditorView|null>(null),vimSave=useRef<(view:EditorView)=>boolean>(()=>false);
-  const [lspStatus, setLspStatus] = useState("");
+  const [lspStatus, setLspStatus] = useState<EditorLanguageStatus>({owner:"",text:""});
   const connection = reconnectToken;
   const [source, setSource] = useState<Source | null>(null);
   const callback = useRef(onChange), pointCallback = useRef(onBreakpoints);
@@ -69,7 +71,10 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => { onStatus?.(lspStatus); }, [lspStatus,onStatus]);
   useLayoutEffect(() => {
-    const intelligence = (language !== "markdown") ? languageIntelligence(language, setLspStatus, setSource, metadata, true) : null;
+    let live=true;
+    const owner=statusOwner??JSON.stringify([documentKey,language,reconnectToken]);
+    const report=(text:string)=>{if(live)setLspStatus(current=>current.owner===owner&&current.text===text?current:{owner,text});};
+    const intelligence = (language !== "markdown") ? languageIntelligence(language, report, setSource, metadata, true) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
     const save=(target:EditorView)=>{if(target.composing)return false;if(language==="markdown"){saveCallback.current?.();return true;}return saveDocument(target);};
     vimSave.current=save;
@@ -125,6 +130,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
     if (cached) view.scrollDOM.scrollTop = cached.scroll;
     if (intelligence) void intelligence.connect(view);
     return () => {
+      live=false;
       liveView.current=null;
       saveReady.current?.(null);
       debugView.current = null;
@@ -133,7 +139,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       view.destroy();
       commandHost?.remove();
     };
-  }, [documentKey, language, label, connection, metadata]);
+  }, [documentKey, language, label, connection, metadata, statusOwner]);
   useLayoutEffect(()=>{const view=liveView.current;if(view)view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});},[vimEnabled]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection, language, label, metadata]);
   return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
