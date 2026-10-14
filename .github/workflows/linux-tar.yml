@@ -1,0 +1,36 @@
+name: Linux tar developer package
+on:
+  push:
+    branches: [feat/first-workbench]
+    paths: ['.github/workflows/linux-tar.yml', 'scripts/package-linux-portable.sh']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package-verified-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Download exact verified Linux package artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p verified-linux
+          gh api repos/jacek4yang/inkleet/actions/artifacts/11860853161/zip > verified-linux.zip
+          echo 'f232b3c45f750eda0640b3fd506b5b5cc3c20866a98f8a4ba65987deb2504af8  verified-linux.zip' | sha256sum --check
+          unzip -q verified-linux.zip -d verified-linux
+      - name: Package the already tested executable without rebuilding
+        run: |
+          mapfile -d '' packages < <(find verified-linux -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          bash scripts/package-linux-portable.sh "${packages[0]}" a62a3db00a740f83425476b4daeab1dbe75abc21 portable
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: inkleet-linux-x86_64-tar
+          path: portable/
+          if-no-files-found: error
+          retention-days: 30
