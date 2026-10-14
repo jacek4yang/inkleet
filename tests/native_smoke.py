@@ -534,6 +534,7 @@ try:
             return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
         wait_for(lambda:all(value in child_values() for value in ["3","-1","8"]),"expanded array children preserve exact values")
 
+        reveal_debug_control('[aria-label="调试表达式输入"]')
         fill('[aria-label="调试表达式输入"]',"inner_total")
         reveal_debug_control('[aria-label="添加监视表达式"]')
         click('[aria-label="添加监视表达式"]')
