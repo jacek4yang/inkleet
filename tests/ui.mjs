@@ -1172,6 +1172,7 @@ try {
       await edit.pressSequentially(" // runner performance 01234567890123456789",{delay:20});
       await runPage.waitForFunction(()=>window.__runTest.perfPolls-window.__runTest.perfPollStart>=4&&window.__runTest.perf.frames.length>=30);
       const sample=await runPage.evaluate(()=>{const s=window.__runTest;return {...s.perf,polls:s.perfPolls-s.perfPollStart,rawBytes:s.perfRaw.reduce((n,v)=>n+new TextEncoder().encode(v).length,0)};});
+      assert.equal(sample.parses,0,"unchanged result envelopes must not be reparsed during source edits or fresh-array polls");
       const sorted=[...sample.frames].sort((a,b)=>a-b);
       assert.ok(sorted.length>=30,"record real keyboard beforeinput samples");
       runnerPerf.push({hidden,...sample,inputToRafP50Ms:sorted[Math.floor(sorted.length*.5)],inputToRafP95Ms:sorted[Math.floor(sorted.length*.95)]});
@@ -1180,6 +1181,14 @@ try {
   await writeFile("evidence/RUNNER_PERFORMANCE.json",JSON.stringify({environment:"GitHub Actions headless Chromium; actual App with mocked IPC, no native LSP or disk; development React build",cpu:os.cpus()[0]?.model,logicalCpus:os.cpus().length,viewport:"1440x900",meaning:"input-to-next-rAF is not completed paint; parseMs counts JSON.parse only, not subsequent exact-value scanning",samples:runnerPerf},null,2));
   // Retain current source snapshots despite any rendering optimization.
   await runPage.getByRole("button",{name:"本地",exact:true}).click();
+  // Changed bytes and display context must still refresh after row memoization.
+  const oldLabel=await runPanel.locator(".case-result header span").first().innerText();
+  await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":99,"ok":true,"value":9007199254740993}'];});
+  await runPanel.locator(".local-result").getByText("9007199254740993",{exact:true}).waitFor();
+  assert.equal(await runPanel.locator(".case-result").count(),1);
+  assert.equal(await runPanel.locator(".case-result header span").first().innerText(),oldLabel.replace(/ · \d+$/,""),"single result removes ordinal suffix without dropping snapshot name");
+  await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":99,"ok":false,"error":"changed error result"}'];});
+  await runPanel.locator(".case-result [role=alert]").getByText("changed error result",{exact:true}).waitFor();
   const newestCode="class Solution { /* latest performance snapshot */ }";
   await runPage.getByRole("textbox",{name:"代码编辑器",exact:true}).fill(newestCode);
   await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
