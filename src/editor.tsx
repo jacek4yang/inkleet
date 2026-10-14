@@ -20,16 +20,16 @@ import { SourceViewer } from "./source-viewer";
 // 切换题目/语言时保留各自的撤销历史、光标与滚动位置。
 const sessions = new Map<string, { state: EditorState; scroll: number }>();
 const theme = EditorView.theme({
-  "&": { height: "100%", backgroundColor: "#fcfcfa", color: "#2b2621", fontSize: "14px" },
+  "&": { height: "100%", backgroundColor: "var(--surface-editor)", color: "var(--ink)", fontSize: "14px" },
   ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", lineHeight: "1.75" },
-  ".cm-content": { padding: "20px 0", caretColor: "#bc6a3a" },
+  ".cm-content": { padding: "20px 0", caretColor: "var(--accent)" },
   ".cm-line": { padding: "0 16px" },
-  ".cm-gutters": { backgroundColor: "#f5f2ec", color: "#9b8d7b", border: "none" },
-  ".cm-activeLineGutter, .cm-activeLine": { backgroundColor: "#f5f2ec88" },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: "#e8ddd0" },
+  ".cm-gutters": { backgroundColor: "var(--surface-editor)", color: "var(--muted)", border: "none" },
+  ".cm-activeLineGutter, .cm-activeLine": { backgroundColor: "var(--active-line)" },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: "var(--selection)" },
   "&.cm-focused": { outline: "none" },
-  ".cm-cursor": { borderLeftColor: "#bc6a3a" },
-  ".cm-tooltip": { backgroundColor: "#faf9f5", border: "1px solid #ddd5ca" },
+  ".cm-cursor": { borderLeftColor: "var(--accent)" },
+  ".cm-tooltip": { backgroundColor: "var(--surface)", border: "1px solid var(--line)" },
 });
 function syntax(language: Language | "markdown") {
   switch (language) {

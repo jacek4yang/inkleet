@@ -25,6 +25,13 @@ try {
     try { if ((await fetch("http://127.0.0.1:5173")).ok) break; } catch {}
     await new Promise(r => setTimeout(r, 500));
   }
+  // Preserve the original approval sheet as history; only owner-approved C is adopted.
+  const iconReview = await browser.newPage({viewport:{width:900,height:380}});
+  await iconReview.setContent(await readFile("docs/design/inkleet-icon-candidates.svg","utf8"));
+  await iconReview.addStyleTag({content:"html,body{margin:0;padding:0}"});
+  await iconReview.screenshot({path:"evidence/inkleet-icon-candidates.png"});
+  await iconReview.close();
+  for(const file of ["inkleet-icon-candidates.svg","inkleet-a.svg","inkleet-b.svg","inkleet-c.svg"]) await writeFile("evidence/"+file,await readFile("docs/design/"+file));
   // Fresh production startup has no built-in mock problem or hidden draft file.
   const cataloguePage = await testPage({ viewport:{width:1440,height:900} });
   await cataloguePage.addInitScript(() => {
@@ -74,8 +81,11 @@ try {
   assert.equal(await cataloguePage.locator('.question-sidebar [data-slug="old-result"]').count(),0,"late filter response is discarded");
   assert.equal(await cataloguePage.getByRole("textbox",{name:"代码编辑器",exact:true}).innerText(),"// retained while filtering");
   assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[2].args.difficulty),"EASY");
+  assert.equal(await cataloguePage.getByRole("button",{name:"登录力扣",exact:true}).locator("svg").count(),1,"login destination uses its SVG logo with accessible name");
   await cataloguePage.getByRole("button",{name:"登录力扣",exact:true}).click();
-  await cataloguePage.getByRole("button",{name:"已完成登录，校验会话",exact:true}).click();
+  assert.deepEqual(await cataloguePage.locator(".login-panel button").allTextContents(),["验证登录","取消登录"],"login panel retains verification and cancellation");
+  assert.equal(await cataloguePage.locator(".login-panel p:not(.error)").count(),0,"login help lives in the manual");
+  await cataloguePage.getByRole("button",{name:"验证登录",exact:true}).click();
   await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===4);
   assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[3].args.account),"account-A");
   await cataloguePage.getByRole("combobox",{name:"完成状态",exact:true}).selectOption("AC");
@@ -118,9 +128,11 @@ try {
   await page.goto("http://127.0.0.1:5173");
   const editor = page.getByRole("textbox", { name: "代码编辑器", exact: true });
   await editor.waitFor({ state: "visible" });
+  assert.equal(await page.getByRole("button",{name:"测试用例与结果",exact:true}).locator("svg").count(),1,"test panel uses an accessible SVG toggle");
   await page.evaluate(async () => { await document.fonts.load('14px "Intel One Mono"'); await document.fonts.ready; });
   const fontLoaded = await page.evaluate(() => document.fonts.check('14px "Intel One Mono"'));
   assert.equal(fontLoaded, true, "必须实际加载内置 Intel One Mono");
+  assert.equal(await page.getByRole("img",{name:"墨题 InkLeet",exact:true}).locator("svg").count(),1,"owner-approved C replaces the visible wordmark");
   assert.ok((await editor.evaluate(el => getComputedStyle(el).fontFamily)).includes("Intel One Mono"));
   await openSettings(page, "编辑器");
   await page.getByRole("button", { name: "Intel One Mono", exact: true }).click();
@@ -186,6 +198,37 @@ try {
     await editor.waitFor({ state: "visible" });
   }
   assert.ok((await editor.innerText()).startsWith("// Rust 独立草稿"));
+
+  // Real rendered layout, including a narrow desktop code pane. Never clip controls
+  // to hide an overflow failure: the solution menu and keyboard focus must remain usable.
+  for (const width of [1440, 1100, 800]) {
+    await page.setViewportSize({width,height:900});
+    const geometry=await page.locator(".code-pane>.pane-heading").evaluate(heading=>{
+      const outer=heading.getBoundingClientRect();
+      const controls=[...heading.querySelectorAll("select,summary,.actions>button")].map(node=>{
+        const r=node.getBoundingClientRect();return {left:r.left,right:r.right,width:r.width};
+      });
+      return {left:outer.left,right:outer.right,controls,scroll:document.documentElement.scrollWidth,viewport:innerWidth};
+    });
+    assert.ok(geometry.controls.every(r=>r.width>15 && r.left>=geometry.left-1 && r.right<=geometry.right+1),"all editor toolbar controls stay inside pane at "+width);
+
+    const ordered=[...geometry.controls].sort((a,b)=>a.left-b.left);
+    assert.ok(ordered.every((r,i)=>i===0 || r.left>=ordered[i-1].right-1),"toolbar controls do not overlap at "+width);
+    assert.ok(geometry.scroll<=geometry.viewport+1,"no page-level horizontal overflow at "+width);
+    await page.locator(".solution-menu>summary").click();
+    const menuAction=page.getByRole("button",{name:"复制解答",exact:true});
+    await menuAction.click();
+    await page.getByRole("dialog",{name:"复制解答",exact:true}).getByRole("button",{name:"取消",exact:true}).click();
+
+  }
+  await page.setViewportSize({width:1440,height:960});
+  const editorSurface=await page.locator(".code-pane .cm-editor").evaluate(node=>getComputedStyle(node).backgroundColor);
+  const gutterSurface=await page.locator(".code-pane .cm-gutters").evaluate(node=>getComputedStyle(node).backgroundColor);
+  assert.equal(gutterSurface,editorSurface,"gutter shares editor surface instead of a second colored slab");
+  await page.emulateMedia({forcedColors:"active",reducedMotion:"reduce"});
+  assert.equal(await page.getByRole("combobox",{name:"编程语言"}).evaluate(node=>getComputedStyle(node).appearance),"auto","high-contrast mode restores native select affordance");
+  await page.emulateMedia({forcedColors:"none",reducedMotion:"no-preference"});
+
   await page.screenshot({ path: "evidence/desktop-code.png", fullPage: true });
   await page.getByRole("button", { name: "笔记", exact: true }).click();
   await page.getByRole("textbox", { name: "Markdown 笔记" }).fill("# 推导\n\n- 检查空数组\n- 时间复杂度 O(n)\n\n自编样例，非私人笔记。");
@@ -342,7 +385,7 @@ try {
   });
   await authPage.goto("http://127.0.0.1:5173");
   await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
-  await authPage.getByRole("button", { name: "已完成登录，校验会话", exact: true }).click();
+  await authPage.getByRole("button", { name: "验证登录", exact: true }).click();
   await authPage.waitForFunction(() => window.__inkAuthTest.pending.length === 1);
   const cancel = authPage.getByRole("button", { name: "取消登录", exact: true });
   assert.equal(await cancel.isEnabled(), true, "校验中仍必须可以取消");
@@ -351,9 +394,9 @@ try {
   // 新登录开始后，旧校验的成功不能改变当前账号或关闭当前登录。
   await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
   await authPage.evaluate(() => window.__inkAuthTest.pending[0].resolve({ username: "stale-test-user", account: "stale", persistence: "memory-only" }));
-  await authPage.getByRole("button", { name: "已完成登录，校验会话", exact: true }).waitFor();
+  await authPage.getByRole("button", { name: "验证登录", exact: true }).waitFor();
   assert.equal(await authPage.getByText("stale-test-user", { exact: false }).count(), 0);
-  await authPage.getByRole("button", { name: "已完成登录，校验会话", exact: true }).click();
+  await authPage.getByRole("button", { name: "验证登录", exact: true }).click();
   await authPage.waitForFunction(() => window.__inkAuthTest.pending.length === 2);
   await authPage.evaluate(() => window.__inkAuthTest.pending[1].reject(new Error("测试网络失败")));
   await authPage.getByText("Error: 测试网络失败", { exact: true }).waitFor();
@@ -388,7 +431,7 @@ try {
   assert.equal(await fixtureEditor.innerText(), "// restored Java draft", "读取完成前不能挂载空模板并忽略恢复内容");
   // 以下仍为纯 UI 协议 fixture，不是真实力扣评测。
   await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
-  await authPage.getByRole("button", { name: "已完成登录，校验会话", exact: true }).click();
+  await authPage.getByRole("button", { name: "验证登录", exact: true }).click();
   await authPage.waitForFunction(() => window.__inkAuthTest.pending.length === 3);
   await authPage.evaluate(() => window.__inkAuthTest.pending[2].resolve({ username: "fixture-user", account: "fixture-user", persistence: "memory-only" }));
   await authPage.getByRole("button", { name: "fixture-user · 退出", exact: true }).waitFor();
@@ -845,9 +888,26 @@ try {
   await runPanel.getByRole("button", {name: "刷新监视 len(values)", exact: true}).click();
   await runPage.waitForFunction(() => window.__runTest.evaluations === 2);
   assert.match(await runPanel.locator(".debug-watch").innerText(), /3/);
+
+  assert.equal(await runPanel.getByRole("button",{name:"添加监视表达式",exact:true}).locator("svg[aria-hidden=true]").count(),1,"watch add uses the same accessible SVG control");
+  assert.equal(await runPanel.locator(".debug-inspector>div").first().evaluate(node=>getComputedStyle(node).overflowY),"visible","inspector uses a single outer scroll surface");
   await runPage.screenshot({path: "evidence/debugger-variable-tree-watches.png", fullPage:true});
   await runPanel.getByRole("button", {name: "caller · 1", exact: true}).click();
   await runPanel.getByRole("button", {name: "caller_only", exact:true}).waitFor();
+  const scalar=runPanel.getByRole("button",{name:"caller_only",exact:true});
+  assert.equal(await scalar.isDisabled(),true,"scalar has no expansion action");
+  assert.equal(await scalar.evaluate(node=>getComputedStyle(node).opacity),"1","scalar values remain legible despite having no expansion action");
+  assert.equal(await runPanel.locator(".debug-frames>button").first().evaluate(node=>getComputedStyle(node).display),"flex","stack name and line occupy separate columns");
+  // Pure layout stress fixture: temporarily lengthen the rendered breakpoint label.
+  // This does not claim breakpoint protocol coverage; real F9 assertions remain below.
+  const breakpointOverflow=await runPanel.locator(".debug-meta").evaluate(meta=>{
+    const label=meta.querySelector(".breakpoint-summary"),previous=label.textContent;
+    label.textContent="断点："+Array.from({length:100},(_,i)=>i+1).join(", ")+"。";
+    const overflow=meta.scrollWidth>meta.clientWidth+1;
+    label.textContent=previous;return overflow;
+  });
+  assert.equal(breakpointOverflow,false,"long breakpoint labels wrap without hiding the adjacent session state");
+
   assert.equal(await runPanel.getByRole("button", {name: "x", exact: true}).count(),0,"frame switch discards old child references");
   assert.match(await runPanel.locator(".debug-watch").innerText(), /—/, "watch never presents previous frame result as current");
   await runPanel.getByRole("button", {name: "solve · 1", exact:true}).click();

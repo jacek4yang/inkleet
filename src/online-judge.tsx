@@ -1,3 +1,4 @@
+import { IconButton } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { Language } from "./domain";
@@ -111,7 +112,7 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
   }
   const stale = current && (current.snapshot.code !== code || (current.snapshot.kind === "online-run" && current.snapshot.testCase !== input));
   const panel = question && <>
-    <div className="judge-toggle"><button onClick={() => setOpen(!open)}>{open ? "收起测试与结果" : "测试用例与结果"}</button></div>
+    <div className="judge-toggle"><IconButton icon="tests" label={open ? "收起测试与结果" : "测试用例与结果"} aria-expanded={open} onClick={() => setOpen(!open)} /></div>
     {open && <section className="judge-panel" aria-label="在线评测">
       <label>测试用例<textarea aria-label="在线测试用例" spellCheck={false} value={input} onChange={e => setCases(old => ({ ...old, [question.questionId]: e.target.value }))} /></label>
       {phase && <p role="status">{phase}</p>}

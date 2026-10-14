@@ -35,7 +35,7 @@ def native_keys(payload):
     # transport. No mutation is retried; all source/selection assertions remain.
     sources=payload.get("actions",[])
     assert len(sources)==1 and sources[0].get("type")=="key", "unsupported native action source"
-    mapping={"\ue010":"End","\ue007":"Return","\ue008":"Shift_L","\ue004":"Tab","\ue003":"BackSpace","\ue009":"Control_L","\ue03c":"F12","\ue012":"Left","\ue011":"Home","\ue014":"Right","\ue032":"F2","\ue015":"Down","\ue039":"F9","\ue035":"F5","\ue00c":"Escape","\ue03a":"F10","z":"z"}
+    mapping={"\ue010":"End","\ue007":"Return","\ue008":"Shift_L","\ue004":"Tab","\ue003":"BackSpace","\ue009":"Control_L","\ue03c":"F12","\ue012":"Left","\ue011":"Home","\ue014":"Right","\ue032":"F2","\ue015":"Down","\ue039":"F9","\ue035":"F5","\ue00c":"Escape","\ue03a":"F10","z":"z"," ":"space"}
     command=["xdotool"];held=set();used=set()
     for action in sources[0].get("actions",[]):
         kind=action.get("type");key=mapping.get(action.get("value"))
@@ -83,7 +83,7 @@ def source_text(css):
     return "\n".join(cmd("GET",f"/element/{line[EID]}/property/textContent") for line in lines)
 
 
-def reveal_debug_control(css):
+def reveal_debug_control(css, fallback="down"):
     # Native WebKit does not reliably auto-scroll controls in nested inspectors.
     # Use the real pointer wheel over the outer padding, never execute JS clicks.
     for _ in range(12):
@@ -98,7 +98,7 @@ def reveal_debug_control(css):
         window=cmd("GET","/window/rect")
         x=int(window["x"]+panel["x"]+4)
         y=int(window["y"]+panel["y"]+panel["height"]/2)
-        direction="5" if target is None or target["y"]+target["height"]>bottom else "4"
+        direction=("4" if fallback=="up" else "5") if target is None else ("5" if target["y"]+target["height"]>bottom else "4")
         subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","--repeat","2","--delay","80",direction],check=True)
         time.sleep(.15)
     raise AssertionError("Debug control remains unreachable through real wheel: "+css)
@@ -534,6 +534,7 @@ try:
             return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
         wait_for(lambda:all(value in child_values() for value in ["3","-1","8"]),"expanded array children preserve exact values")
 
+        reveal_debug_control('[aria-label="调试表达式输入"]')
         fill('[aria-label="调试表达式输入"]',"inner_total")
         reveal_debug_control('[aria-label="添加监视表达式"]')
         click('[aria-label="添加监视表达式"]')
@@ -543,9 +544,11 @@ try:
             return cmd("GET",f"/element/{element('.debug-watch > span')}/property/textContent")
         wait_for(lambda:watch_result()=="10","real current-frame watch")
         screenshot("python-nested-debugger-native.png")
+        reveal_debug_control('.debug-frames>button[title^="solve ·"]', fallback="up")
         caller=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'solve')]"})[EID]
         cmd("POST",f"/element/{caller}/click",{})
         wait_for(lambda:watch_result()=="—","watch result invalidated on caller selection")
+        reveal_debug_control('.debug-frames>button[title^="inner ·"]', fallback="up")
         inner=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'inner')]"})[EID]
         cmd("POST",f"/element/{inner}/click",{})
         wait_for(lambda:inner_total()=="10","selecting inner frame restores its own variables")
