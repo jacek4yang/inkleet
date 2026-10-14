@@ -27,7 +27,7 @@ async function testPage(options) {
         internals={...value,invoke:(command,args)=>{
           if(command==="begin_draft_session"&&!window.__recoveryTest)return Promise.resolve(1);
           if(command==="checkpoint_draft"&&!window.__recoveryTest)return Promise.resolve();
-          if(command==="get_editor_settings"&&!window.__formatTest)return Promise.resolve({settings:{version:1,formatOnSave:false,overrides:{}},revision:null});
+          if(command==="get_editor_settings"&&!window.__formatTest&&!window.__vimTest)return Promise.resolve({settings:{version:1,formatOnSave:false,overrides:{}},revision:null});
           return invoke(command,args);
         }};
       }
@@ -1561,6 +1561,73 @@ try {
   assert.equal(await recoveryPage.locator('[data-action="review-code-conflict"]').count(),0,"newer draft rebased against older committed save");
   await recoveryPage.close();
   await writeFile("evidence/EXPLICIT_RECOVERY_UI_RESULT.txt","PASS: mocked disk IPC, real CodeMirror dirty recovery and external conflict, clean source/notes sidecars ignored, save D while editing E rebases recovery to D without clearing dirty.\n");
+
+
+  const vimPage=await testPage({viewport:{width:1440,height:900}});
+  await vimPage.addInitScript(()=>{
+    window.isTauri=true;
+    const state=window.__vimTest={code:"one two\nthree four",saves:[],formats:[],settings:{version:1,formatOnSave:false,vim:false,overrides:{}},revision:null};
+    window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
+      if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="external_editor_supported")return false;
+      if(command==="login_status")return null;
+      if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+      if(command==="load_document")return {code:state.code,notes:"note"};
+      if(command==="get_editor_settings")return JSON.parse(JSON.stringify({settings:state.settings,revision:state.revision}));
+      if(command==="save_editor_settings"){if(args.expected!==state.revision)throw Error("settings conflict");state.settings=args.settings;state.revision=JSON.stringify(args.settings);return JSON.parse(JSON.stringify({settings:state.settings,revision:state.revision}));}
+      if(command==="start_language_service")throw Error("offline");
+      if(command==="stop_language_service")return;
+      if(command==="save_text"){if(args.expected!==state.code)throw Error("save conflict");state.code=args.text;state.saves.push(args.text);return;}
+      if(command==="format_source"){state.formats.push(args.text);return args.text.trimEnd()+"\n";}
+      throw Error("Unexpected Vim IPC "+command);
+    }};
+  });
+  await vimPage.goto("http://127.0.0.1:5173");
+  const vimCode=vimPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await vimCode.waitFor();
+  await openSettings(vimPage,"编辑器");
+  await vimPage.getByRole("checkbox",{name:"Vim",exact:true}).check();
+  await vimPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await vimPage.waitForFunction(()=>window.__vimTest.settings.vim===true);
+  await vimPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+  await vimCode.click();await vimPage.keyboard.press("Escape");await vimPage.keyboard.type("gg0ciwONE");await vimPage.keyboard.press("Escape");
+  const vimText=()=>vimCode.locator(".cm-line").allTextContents().then(lines=>lines.join("\n"));
+  assert.equal(await vimText(),"ONE two\nthree four","real Vim ciw replaces word");
+  await vimPage.keyboard.type("u");assert.equal(await vimText(),"one two\nthree four");
+  await vimPage.keyboard.press("Control+r");assert.equal(await vimText(),"ONE two\nthree four");
+  await vimPage.keyboard.press("Tab");assert.equal(await vimText(),"ONE two\nthree four","NORMAL Tab cannot indent source");
+  await vimPage.keyboard.type("gg0w.");assert.equal(await vimText(),"ONE ONE\nthree four","dot repeats change");
+  await vimPage.keyboard.type("u");
+  await vimPage.keyboard.type("/three");await vimPage.keyboard.press("Enter");
+  await vimPage.keyboard.type("0vll");await vimPage.keyboard.press("Escape");
+  assert.equal(await vimText(),"ONE two\nthree four","search and visual selection preserve source");
+  await vimPage.keyboard.type("gg0i");await vimPage.keyboard.insertText("中文 ");await vimPage.keyboard.press("Escape");
+  assert.equal(await vimText(),"中文 ONE two\nthree four","Unicode insertion preserved");
+  await vimPage.waitForTimeout(1400);
+  assert.deepEqual(await vimPage.evaluate(()=>window.__vimTest.saves),[],"Vim edits never idle-save");
+  await vimPage.keyboard.type(":w");await vimPage.keyboard.press("Enter");
+  await vimPage.waitForFunction(()=>window.__vimTest.saves.length===1);
+  assert.equal(await vimPage.evaluate(()=>window.__vimTest.code),await vimText());
+  assert.equal(await vimPage.evaluate(()=>window.__vimTest.formats.length),0,"Vim write respects disabled formatter");
+  await vimPage.keyboard.type(":w other.rs");await vimPage.keyboard.press("Enter");
+  await vimPage.waitForTimeout(100);
+  assert.equal(await vimPage.evaluate(()=>window.__vimTest.saves.length),1,"unsupported write path never writes");
+  await vimPage.keyboard.press("Escape");
+  await vimPage.keyboard.press("Control+Shift+p");
+  await vimPage.getByRole("dialog",{name:"编辑器命令",exact:true}).waitFor();
+  await vimPage.keyboard.press("Escape");
+  assert.equal(await vimCode.evaluate(node=>node===document.activeElement),true,"palette restores editor focus");
+  const beforeVimToggle=await vimText();
+  await openSettings(vimPage,"编辑器");
+  await vimPage.getByRole("checkbox",{name:"Vim",exact:true}).uncheck();
+  await vimPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await vimPage.waitForFunction(()=>window.__vimTest.settings.vim===false);
+  await vimPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+  assert.equal(await vimText(),beforeVimToggle,"Compartment toggle preserves document");
+  assert.equal(await vimPage.locator(".code-pane .cm-vim-panel").count(),0);
+  await vimPage.screenshot({path:"evidence/vim-workflow.png"});
+  await vimPage.close();
+  await writeFile("evidence/VIM_UI_RESULT.txt","PASS: real keyboard modal edits, undo/redo/dot/search/visual selection, Unicode insert (not native IME), NORMAL Tab, explicit :w with disabled formatting, rejected filename, palette focus and dynamic toggle. Native IME and full Zed parity remain unverified.\n");
 
   const semanticPage=await browser.newPage();
   await semanticPage.route("**/semantic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
