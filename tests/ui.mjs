@@ -1626,6 +1626,14 @@ try {
   await inputPage.keyboard.press("ArrowLeft");
   await inputPage.evaluate(()=>window.__inputTest.reply());
   assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","cursor movement discards resolve result without partial imports");
+  await inputPage.evaluate(()=>{const s=window.__inputTest;s.reply=null;s.view.dispatch({selection:{anchor:s.view.state.doc.line(2).to}});});
+  await inputPage.keyboard.press("Control+Space");await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
+  await inputPage.waitForTimeout(150);await inputPage.keyboard.press("Enter");
+  await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
+  await inputPage.keyboard.press("Escape");
+  await inputPage.evaluate(()=>window.__inputTest.reply());
+  assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","Escape cancels pending acceptance even when autocomplete consumes the key");
+
   assert.deepEqual(await inputPage.evaluate(()=>window.__inputTest.columns("  \tvalue",4)),{columns:4,blank:false});
   assert.equal(await inputPage.evaluate(()=>window.__inputTest.columns(" ".repeat(1000000),4).columns),128);
   await inputPage.evaluate(()=>{const s=window.__inputTest;const text="fn example() {\n    if true {\n        let value = 1;\n\n        println!(\"{value}\");\n    }\n}";s.view.dispatch({changes:{from:0,to:s.view.state.doc.length,insert:text},selection:{anchor:text.indexOf("let value")}});});
