@@ -1,3 +1,4 @@
+import { DocumentSyncQueue } from "./document-sync-queue";
 import { findReferences } from "./references";
 import { renameSymbol } from "./rename";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -42,17 +43,17 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   let signatureGeneration = 0;
   let signatureTimer: ReturnType<typeof setTimeout> | undefined;
   let view: EditorView | null = null, session: Started | null = null, closed = false;
-  let version = 1, sent: Text | null = null, synchronization = Promise.resolve();
+  let version = 1, sent: Text | null = null;
+  const synchronization = new DocumentSyncQueue();
   let changeTimer: ReturnType<typeof setTimeout> | undefined, pollTimer: ReturnType<typeof setTimeout> | undefined;
   function flush() {
-    synchronization = synchronization.then(async () => {
+    return synchronization.run(async () => {
       while (!closed && view && session && sent !== view.state.doc) {
         const doc = view.state.doc, nextVersion = ++version;
         await invoke("update_language_document", { id: session.id, version: nextVersion, text: doc.toString() });
         sent = doc;
       }
     });
-    return synchronization;
   }
   async function request(kind: string, pos: number, doc: Text, newName?: string): Promise<unknown> {
     if (!session || closed || !view) return null;
