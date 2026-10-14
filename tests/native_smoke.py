@@ -197,6 +197,21 @@ try:
         wait_for(lambda: element(".cm-lintRange-error"), "real Pyright type diagnostic", seconds=30)
         screenshot("python-diagnostics-native.png")
         fill(code, "def solve(values): return sum(values)")
+        click(code)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
+        keys += [{"type":"keyDown","value":"\ue032"},{"type":"keyUp","value":"\ue032"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-rename","actions":keys}]})
+        rename_input=wait_for(lambda: element('.lsp-rename input'),"native F2 rename input")
+        cmd("POST",f"/element/{rename_input}/clear",{})
+        cmd("POST",f"/element/{rename_input}/value",{"text":"numbers","value":list("numbers")})
+        click('.lsp-rename button[type="submit"]')
+        wait_for(lambda: text(code)=="def solve(numbers): return sum(numbers)","real Pyright semantic rename updates declaration and reference")
+        screenshot("python-rename-native.png")
+        click(code)
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"rename-undo","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"z"},{"type":"keyUp","value":"z"},{"type":"keyUp","value":"\ue009"}]}]})
+        wait_for(lambda: text(code)=="def solve(values): return sum(values)","single undo restores complete pre-rename source")
+        (evidence/"RENAME_GUI_RESULT.txt").write_text("PASS: actual Linux GUI F2, real private Pyright rename, declaration/reference updates in original source and a single undo restores both.\n")
         click(".actions button:first-child")
         wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
         click('[data-action="local-execute"]')
