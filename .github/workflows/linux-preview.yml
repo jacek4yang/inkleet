@@ -1,0 +1,96 @@
+name: Linux polished preview
+on:
+  push:
+    branches: [feat/polished-linux-preview]
+    paths: ['.github/workflows/linux-preview.yml', 'scripts/package-linux-portable.sh', 'tests/native_smoke.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: linux-polished-preview
+  cancel-in-progress: false
+jobs:
+  linux-preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+          key: ubuntu-24.04-desktop
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Prepare frontend and icon
+        shell: bash
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run build
+          rustc --version
+      - name: Test native storage
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Build unsigned developer installer
+        run: npm run tauri -- build --bundles deb
+      - name: Validate and install Linux package, then test the installed application
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p evidence/install
+          mapfile -d '' packages < <(find src-tauri/target/release/bundle/deb -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          package="$(realpath "${packages[0]}")"
+          dpkg-deb --info "$package" | tee evidence/install/package-info.txt
+          sha256sum "$package" > evidence/install/SHA256.txt
+          sudo apt-get install -y "$package" > evidence/install/install.log 2>&1
+          package_name="$(dpkg-deb -f "$package" Package)"
+          dpkg-query -W -f='${Status} ${Version} ${Architecture}\\n' "$package_name" > evidence/install/installed.txt
+          test -x /usr/bin/inkleet
+          ldd /usr/bin/inkleet > evidence/install/linked-libraries.txt
+          ! grep -q 'not found' evidence/install/linked-libraries.txt
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY=/usr/bin/inkleet
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - name: Build and verify Linux tar distribution
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mapfile -d '' packages < <(find src-tauri/target/release/bundle/deb -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          bash scripts/package-linux-portable.sh "${packages[0]}" "$GITHUB_SHA" src-tauri/target/release/bundle/portable
+          mkdir -p evidence/tar
+          unpacked="$(mktemp -d)"
+          tar -xzf src-tauri/target/release/bundle/portable/*.tar.gz -C "$unpacked"
+          mapfile -d '' binaries < <(find "$unpacked" -type f -name inkleet -print0)
+          test "${#binaries[@]}" -eq 1
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY="${binaries[0]}"
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+          cp evidence/native/*RESULT.txt evidence/tar/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-ubuntu-24.04
+          path: |
+            src-tauri/target/release/bundle/
+            src-tauri/Cargo.lock
+            evidence/install/
+            evidence/native/
+            evidence/tar/
+          if-no-files-found: warn
+          retention-days: 7
