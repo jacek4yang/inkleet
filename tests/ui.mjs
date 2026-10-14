@@ -337,12 +337,18 @@ try {
     });
     observer.observe({ type: "longtask" });
   });
+  const profileSession=await page.context().newCDPSession(page);
+  await profileSession.send("Profiler.enable");
+  await profileSession.send("Profiler.start");
   await editor.pressSequentially(" // performance probe 0123456789", { delay: 20 });
   await page.waitForFunction(() => window.__inkPerf.frames.length >= 20);
   const measured = await page.evaluate(() => window.__inkPerf);
+  const cpuProfile=await profileSession.send("Profiler.stop");
+  await writeFile("evidence/EDITOR_INPUT.cpuprofile",JSON.stringify(cpuProfile.profile));
+  await profileSession.detach();
   const sorted = [...measured.frames].sort((a, b) => a - b);
   const report = {
-    environment: "GitHub Actions Linux Chromium headless; not native WebView or IME",
+    environment: "GitHub Actions Linux Chromium headless; development React with CPU sampling enabled; not native WebView or IME",
     platform: os.platform(), cpu: os.cpus()[0]?.model, logicalCpus: os.cpus().length,
     viewport: "390x844", lines: 10000, initialCharacters: large.length,
     setup: "Synthetic paste event through CodeMirror; input samples use Playwright keyboard", pasteSetupMs,
