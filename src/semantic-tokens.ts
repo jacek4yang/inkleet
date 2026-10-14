@@ -27,7 +27,7 @@ export const semanticField=StateField.define<DecorationSet>({
     for(const effect of tr.effects)if(effect.is(setSemanticTokens))value=Decoration.set(effect.value.map(t=>Decoration.mark({class:"cm-semantic cm-semantic-"+t.kind+(t.readonly?" cm-semantic-readonly":"")+(t.deprecated?" cm-semantic-deprecated":"")}).range(t.from,t.to)),true);
     return value;
   },
-  provide:field=>Prec.high(EditorView.decorations.from(field)),
+  provide:field=>Prec.highest(EditorView.decorations.from(field)),
 });
 export const semanticTheme=EditorView.baseTheme({
   ".cm-semantic-type, .cm-semantic-class, .cm-semantic-struct, .cm-semantic-interface, .cm-semantic-enum, .cm-semantic-typeParameter":{color:"var(--semantic-type, #866447)"},
