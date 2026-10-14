@@ -31,3 +31,23 @@ No credentials or system trust exceptions are introduced.
 Pending this commit: Rust proxy routing/config persistence tests, browser failure/reopen/double-save tests, native Settings persistence and full six-language GUI.
 Existing native UI checkpoint 3fb6b8e passed six-language installation/completion/source/local run/debug, actual Python evaluation, editing keys, rename/references, conflicts/recovery and public CN/offline flow in run 38499195464. Anonymous login UI remained UNVERIFIED.
 No real authenticated proxy/account interaction or Windows/macOS/Android native acceptance is claimed. No merge or Release.
+
+
+## Verified checkpoints (2026-10-14)
+
+- Browser CI 38502208793 at 6257a74 passed all regressions.
+- Native 38502203562 at 6257a74 passed six-language local IDE checks and download
+  configuration save/restart. Artifact11866905178 SHA256
+  cddf362d5a11ac51edec9124bbd327b8ac9ee2f3435efb7ec7d2333119954cd9.
+- That run's public CN probe failed strict difficulty validation, so green local
+  native status is NOT proof of online compatibility.
+- c3f8bbb normalized the two known difficulty wire casings. Real public CN probe
+  then passed in run38503742736 (exit-code0), and the actual Linux GUI sidebar
+  opened Two Sum and its official Rust template. Artifact11867055866 SHA256
+  d37a3d5ee056bd3b54a83f8fac1905058fea6cd0d6d3a68b6b3b7e3506123c12.
+  This run later failed WebDriver transport while pasting Java fixture input;
+  the full suite was not declared passed. 80b5619 uses verified-focus X11 keyboard
+  paste and preserves exact text/disk assertions. New result pending.
+- Authenticated completion filtering, real login and online judge are unverified.
+
+![Actual Linux public catalogue](evidence/real-catalogue-linux.png)
