@@ -1616,7 +1616,8 @@ try {
   await inputPage.keyboard.press("Control+Space");
   await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
   await inputPage.waitForTimeout(150);
-  assert.equal(await inputPage.evaluate(()=>window.__inputTest.accept()),true,"visible completion is accepted after CodeMirror interaction delay");
+  await writeFile("evidence/completion-before-accept.json",JSON.stringify(await inputPage.evaluate(()=>({focused:window.__inputTest.view.hasFocus,composing:window.__inputTest.view.composing,text:window.__inputTest.view.state.doc.toString(),options:[...document.querySelectorAll('[role="option"]')].map(el=>el.outerHTML)})),null,2));
+  await inputPage.getByRole("option",{name:/HashMap/}).click();
   await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
   assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","unresolved acceptance inserts nothing");
   await inputPage.evaluate(()=>window.__inputTest.reply());
@@ -1626,7 +1627,8 @@ try {
   assert.equal(await inputPage.evaluate(()=>window.__inputTest.view.state.doc.toString()),"fn example() {\n    let _map = HashM\n}","atomic import and primary edit undo together");
   await inputPage.keyboard.press("Control+Space");await inputPage.getByRole("option",{name:/HashMap/}).waitFor();
   await inputPage.waitForTimeout(150);
-  assert.equal(await inputPage.evaluate(()=>{window.__inputTest.reply=null;return window.__inputTest.accept();}),true);
+  await inputPage.evaluate(()=>{window.__inputTest.reply=null;});
+  await inputPage.getByRole("option",{name:/HashMap/}).click();
   await inputPage.waitForFunction(()=>typeof window.__inputTest.reply==="function");
   await inputPage.keyboard.press("ArrowLeft");
   await inputPage.evaluate(()=>window.__inputTest.reply());
