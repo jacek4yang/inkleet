@@ -182,13 +182,49 @@ def save_editor(css):
     assert cmd("GET","/element/active").get(EID)==node,"explicit save target owns focus"
     subprocess.run(["xdotool","key","--clearmodifiers","ctrl+s"],check=True)
 
+def focus_case_control(css):
+    # Reach a field through real pointer scrolling, never DOM-injected focus.
+    for _ in range(16):
+        bounds=cmd("POST","/execute/sync",{"script":"""
+          const t=document.querySelector(arguments[0]),p=t?.closest('.case-editor');
+          if(!t||!p)return null;
+          return {target:t.getBoundingClientRect().toJSON(),panel:p.getBoundingClientRect().toJSON()};
+        ""","args":[css]})
+        assert bounds,"case input belongs to visible case editor"
+        t,p=bounds["target"],bounds["panel"]
+        assert p["width"]>20 and p["height"]>20 and t["width"]>0 and t["height"]>0,"case input has visible bounds"
+        window=cmd("GET","/window/rect")
+        fits=t["height"]<=p["height"]-8
+        if fits and (t["y"]<p["y"]+4 or t["y"]+t["height"]>p["y"]+p["height"]-4):
+            direction="4" if t["y"]<p["y"]+4 else "5"
+            x=int(window["x"]+p["x"]+6);y=int(window["y"]+p["y"]+p["height"]/2)
+            subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click",direction],check=True)
+            with (evidence/"case-scroll-events.txt").open("a") as log:log.write(css+" "+direction+"\n")
+            continue
+        left=max(t["x"],p["x"]+2);right=min(t["x"]+t["width"],p["x"]+p["width"]-2)
+        top=max(t["y"],p["y"]+2);bottom=min(t["y"]+t["height"],p["y"]+p["height"]-2)
+        if right-left>8 and bottom-top>8:
+            x=(left+right)/2;y=(top+bottom)/2
+            hit=cmd("POST","/execute/sync",{"script":"const t=document.querySelector(arguments[0]),h=document.elementFromPoint(arguments[1],arguments[2]);return !!t&&(t===h||t.contains(h));","args":[css,x,y]})
+            assert hit,"visible case input is not covered by another control"
+            subprocess.run(["xdotool","mousemove","--sync",str(int(window["x"]+x)),str(int(window["y"]+y)),"click","1"],check=True)
+            node=element(css)
+            wait_for(lambda:cmd("GET","/element/active").get(EID)==node,"native case field owns focus")
+            return node
+        direction="4" if t["y"]<p["y"] else "5"
+        subprocess.run(["xdotool","mousemove","--sync",str(int(window["x"]+p["x"]+6)),str(int(window["y"]+p["y"]+p["height"]/2)),"click",direction],check=True)
+    raise AssertionError("Case input remains unreachable by real scrolling: "+css)
+
 def fill_once(css, value):
     node=wait_for(lambda:element(css),"input target available after document switch")
-    try:
-        cmd("POST",f"/element/{node}/click",{})
-    except http.client.RemoteDisconnected:
-        # Only proceed after an uncertain focus click if the actual field owns focus.
-        if cmd("GET","/element/active").get(EID)!=node: raise
+    if css in ('[aria-label="预期结果"]','[aria-label="本地测试输入"]'):
+        node=focus_case_control(css)
+    else:
+        try:
+            cmd("POST",f"/element/{node}/click",{})
+        except http.client.RemoteDisconnected:
+            # Only proceed after uncertain focus if the field really owns it.
+            if cmd("GET","/element/active").get(EID)!=node:raise
     wait_for(lambda:cmd("GET","/element/active").get(EID)==node,"fixture field owns native keyboard focus")
     # Exercise actual X11 input, avoiding WebKit's intermittent POST/actions reset.
     # This path only replaces authored fixture text; it never replays debug/judge actions.
@@ -1098,6 +1134,15 @@ try:
             (evidence/"EXPECTED_RESULT_NATIVE.txt").write_text("PASS: actual Python void output compares against explicitly selected argument expectation, both match and mismatch. Exact JSON policy only, not official judge acceptance.\n")
 
             (evidence/"IN_PLACE_NATIVE_RESULT.txt").write_text("PASS: actual private Python void call reverses input and normal GUI result displays captured parameter values without raw JSON. Non-void mutation and other language mutation GUI cases not asserted here.\n")
+        except Exception:
+            try:
+                screenshot("case-failure-before-cleanup.png")
+                subprocess.run(["scrot",str(evidence/"case-failure-desktop.png")],check=False)
+                state=cmd("POST","/execute/sync",{"script":"const t=document.querySelector('[aria-label=\"预期结果\"]'),p=t?.closest('.case-editor');return {target:t?.getBoundingClientRect().toJSON(),panel:p?.getBoundingClientRect().toJSON(),scrollTop:p?.scrollTop,active:document.activeElement?.getAttribute('aria-label'),open:document.querySelector('.case-expectation')?.open};","args":[]})
+                (evidence/"case-failure-before-cleanup.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+            except Exception as capture_error:
+                (evidence/"case-failure-capture-error.txt").write_text(str(capture_error))
+            raise
         finally:
             stop();cache_path.write_text(original_cache);start()
 
