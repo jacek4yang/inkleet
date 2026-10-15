@@ -67,7 +67,7 @@ jobs:
       - name: Verify native storage through the actual GUI
         env:
           INKLEET_MANAGED_ENV: "1"
-          INKLEET_CLANG_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPET_FEATURE == 'native-clang-snippet-validation' && '1' || '0' }}
+          INKLEET_CLANG_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPETS == 'true' && env.INKLEET_NATIVE_SNIPPET_FEATURE == 'native-clang-snippet-validation' && '1' || '0' }}
           INKLEET_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPETS == 'true' && '1' || '0' }}
           INKLEET_LIVE_CN: ${{ steps.public-probe.outcome == 'success' && '1' || '0' }}
         run: |
