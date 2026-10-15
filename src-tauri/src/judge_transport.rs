@@ -81,10 +81,16 @@ fn parse_start(kind: Kind, value: &Value) -> StartResult {
         None => StartResult::Unknown { message: "未收到有效评测编号，发送状态未知；请核查后再决定是否重发".into() },
     }
 }
+fn verdict_code(value:&Value)->Option<u64>{
+    value.get("status_code").and_then(Value::as_u64).filter(|code|*code>0&&*code<=9_007_199_254_740_991)
+}
+fn verdict_message(value:&Value)->Option<&str>{
+    value.get("status_msg").and_then(Value::as_str).map(str::trim).filter(|message|!message.is_empty()&&message.len()<=1024)
+}
 fn parse_check(value: Value) -> Result<CheckResult, String> {
     match value.get("state").and_then(Value::as_str) {
         Some("PENDING" | "STARTED") => Ok(CheckResult::Pending),
-        Some("SUCCESS") if value.get("status_code").is_some() || value.get("status_msg").is_some() => {
+        Some("SUCCESS") if verdict_code(&value).is_some() || verdict_message(&value).is_some() => {
             // 只把明确的判题字段返回界面，页面按文本呈现；不执行返回内容。
             let mut filtered = serde_json::Map::new();
             let mut remaining = 256 * 1024usize;
@@ -93,6 +99,10 @@ fn parse_check(value: Value) -> Result<CheckResult, String> {
                 "total_testcases", "status_runtime", "status_memory", "display_runtime", "memory",
                 "full_compile_error", "compile_error", "full_runtime_error", "runtime_error",
                 "code_answer", "expected_code_answer", "expected_code_output", "expected_output", "display_memory", "last_testcase", "code_output", "std_output_list", "std_output", "task_finish_time"] {
+                // Malformed optional verdict fields must not consume the output
+                // budget or turn a valid alternate field into confusing UI text.
+                if key=="status_code"&&verdict_code(&value).is_none(){continue;}
+                if key=="status_msg"&&verdict_message(&value).is_none(){continue;}
                 if let Some(field) = value.get(key) {
                     let encoded = serde_json::to_string(field).map_err(|_| "判题字段编码失败")?;
                     if encoded.len() <= remaining {
@@ -249,6 +259,52 @@ mod tests {
         assert_eq!(result["status_msg"], "Wrong Answer");
         assert_eq!(result["output_truncated"], true);
         assert!(serde_json::to_vec(&result).unwrap().len() < 300 * 1024);
+    }
+
+    #[test]
+    fn successful_envelope_requires_a_typed_nonempty_verdict(){
+        for field in [Value::Null,json!(false),json!({}),json!([]),json!(""),json!("   ")]{
+            assert!(parse_check(json!({"state":"SUCCESS","status_code":field,"status_msg":field})).is_err());
+        }
+        for code in [json!(0),json!(-1),json!(10.5),json!("10"),json!(9_007_199_254_740_992u64)]{
+            assert!(parse_check(json!({"state":"SUCCESS","status_code":code})).is_err());
+        }
+        assert!(parse_check(json!({"state":"SUCCESS","status_msg":"x".repeat(1025)})).is_err());
+        let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_code":10,"status_msg":{"invalid":true}})).unwrap()else{panic!("numeric verdict rejected")};
+        assert_eq!(result["status_code"],10);assert!(result.get("status_msg").is_none());
+        let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_code":null,"status_msg":"Accepted"})).unwrap()else{panic!("message verdict rejected")};
+        assert_eq!(result["status_msg"],"Accepted");assert!(result.get("status_code").is_none());
+        let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_code":11,"status_msg":"x".repeat(300000),"code_answer":["actual"]})).unwrap()else{panic!("valid alternate verdict rejected")};
+        assert_eq!(result["code_answer"],json!(["actual"]));assert!(result.get("status_msg").is_none());
+    }
+    #[test]
+    fn malformed_check_preserves_waiting_id_and_duplicate_send_protection(){
+        use crate::journal::{Journal,State};
+        let root=tempfile::tempdir().unwrap();let journal=Journal::new(root.path().into());
+        let source=snapshot();assert!(journal.reserve(source.clone()).unwrap().1);
+        let server="runcode_1627219627.5662382_fixture";
+        journal.update(&source.account,&source.id,State::Waiting{server_id:server.into()}).unwrap();
+        for response in [
+            json!({"state":"SUCCESS","status_code":null,"status_msg":null}),
+            json!({"state":"SUCCESS","status_msg":""}),
+            json!({"state":"SUCCESS","status_code":{},"status_msg":[]})
+        ]{
+            let current=journal.get(&source.account,&source.id).unwrap();
+            assert!(crate::judge::apply_check_result(&journal,current,parse_check(response)).is_err());
+            let restarted=Journal::new(root.path().into());
+            assert!(matches!(restarted.get(&source.account,&source.id).unwrap().state,State::Waiting{server_id} if server_id==server));
+            assert!(!restarted.reserve(source.clone()).unwrap().1);
+            let mut other=source.clone();other.id="different-operation".into();assert!(restarted.reserve(other).is_err());
+        }
+        let current=journal.get(&source.account,&source.id).unwrap();
+        assert!(crate::judge::apply_check_result(&journal,current,Err("query interrupted".into())).is_err());
+        let current=journal.get(&source.account,&source.id).unwrap();
+        let pending=crate::judge::apply_check_result(&journal,current,parse_check(json!({"state":"STARTED"}))).unwrap();
+        assert!(matches!(pending.state,State::Waiting{server_id} if server_id==server));
+        let current=journal.get(&source.account,&source.id).unwrap();
+        let finished=crate::judge::apply_check_result(&journal,current,parse_check(json!({"state":"SUCCESS","status_code":10}))).unwrap();
+        assert!(matches!(finished.state,State::Finished{server_id,..} if server_id==server));
+        let mut next=source.clone();next.id="next-operation".into();assert!(journal.reserve(next).unwrap().1);
     }
     #[test]
     fn invalid_destination_and_empty_code_are_rejected_before_send() {

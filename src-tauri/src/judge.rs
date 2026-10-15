@@ -42,13 +42,18 @@ pub async fn check(app: AppHandle, account: String, id: String) -> Result<Record
         .await.map_err(|_| "评测记录读取中断")??;
     let State::Waiting { server_id } = &record.state else { return Ok(record); };
     if !auth::still_current(&app, generation) { return Err("账号已切换，已停止旧会话查询".into()); }
-    let result = Transport::new()?.check(server_id, &record.snapshot.slug, &credentials).await?;
-    match result {
-        CheckResult::Pending => Ok(record),
-        CheckResult::Finished { result } => {
-            let server_id = server_id.clone();
-            tauri::async_runtime::spawn_blocking(move || app.state::<Journal>().update(&account, &id, State::Finished { server_id, result }))
-                .await.map_err(|_| "评测结果保存中断".to_string())?
+    let result = Transport::new()?.check(server_id, &record.snapshot.slug, &credentials).await;
+    tauri::async_runtime::spawn_blocking(move || apply_check_result(&app.state::<Journal>(),record,result))
+        .await.map_err(|_| "评测结果保存中断".to_string())?
+}
+// This boundary never starts a request: an error/pending check retains the
+// original Waiting record and its duplicate-send protection.
+pub(crate) fn apply_check_result(journal:&Journal,record:Record,result:Result<CheckResult,String>)->Result<Record,String>{
+    match result?{
+        CheckResult::Pending=>Ok(record),
+        CheckResult::Finished{result}=>{
+            let State::Waiting{server_id}=&record.state else{return Err("评测状态已经变化，忽略过期更新".into())};
+            journal.update(&record.snapshot.account,&record.snapshot.id,State::Finished{server_id:server_id.clone(),result})
         }
     }
 }
