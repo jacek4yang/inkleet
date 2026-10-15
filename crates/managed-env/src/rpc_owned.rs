@@ -275,4 +275,48 @@ mod tests {
         for value in &values{dispatch(&s,&mut wire,Outgoing::Plain(value.clone())).unwrap();}
         assert_eq!(messages(wire),values);assert!(s.owned.lock().unwrap().is_empty());
     }
+
+    #[test] fn success_while_writer_is_blocked_retains_slot_without_cancel(){
+        let (s,tx,rx)=setup();let r=request(&s,&tx,1);
+        let (entered,ready)=mpsc::sync_channel(1);let (release,gate)=mpsc::sync_channel(1);let state=s.clone();
+        let thread=std::thread::spawn(move||{
+            let mut writer=GateWriter{bytes:Vec::new(),entered,release:gate,first:true};
+            dispatch(&state,&mut writer,rx.recv().unwrap()).unwrap();writer.bytes
+        });
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        deliver(&s,&tx,1,Ok(json!(9)));assert_eq!(r.wait(Duration::ZERO).unwrap(),json!(9));
+        {let owned=s.owned.lock().unwrap();let e=owned.get(&1).unwrap();assert!(e.completed);assert!(!e.cancelled);assert_eq!(e.phase,Phase::Writing);}
+        release.send(()).unwrap();assert_eq!(messages(thread.join().unwrap()).len(),1);
+        assert!(s.owned.lock().unwrap().is_empty());
+    }
+    #[test] fn blocked_cancel_frame_keeps_strict_transport_capacity(){
+        let (s,tx,rx)=setup();let mut wire=Vec::new();let mut requests=Vec::new();
+        for id in 1..=MAX_OWNED as u64{
+            requests.push(request(&s,&tx,id));dispatch(&s,&mut wire,rx.recv().unwrap()).unwrap();
+        }
+        for r in requests{r.canceller().cancel();assert_eq!(r.wait(Duration::ZERO).unwrap_err(),"补全请求已取消");}
+        let (entered,ready)=mpsc::sync_channel(1);let (release,gate)=mpsc::sync_channel(1);let state=s.clone();
+        let thread=std::thread::spawn(move||{
+            let mut writer=GateWriter{bytes:Vec::new(),entered,release:gate,first:true};
+            drain(&state,&mut writer).unwrap();writer.bytes
+        });
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(s.owned.lock().unwrap().len(),MAX_OWNED);
+        assert!(s.pending.lock().unwrap().is_empty());
+        assert!(begin(&s,&tx,100,"x",json!({})).is_err());
+        release.send(()).unwrap();assert_eq!(messages(thread.join().unwrap()).len(),MAX_OWNED);
+        assert!(s.owned.lock().unwrap().is_empty());drop(request(&s,&tx,101));
+    }
+    #[test] fn both_terminal_orderings_are_deterministic(){
+        for cancel_first in [false,true]{
+            let (s,tx,rx)=setup();let r=request(&s,&tx,1);let c=r.canceller();let mut wire=Vec::new();
+            dispatch(&s,&mut wire,rx.recv().unwrap()).unwrap();
+            if cancel_first{c.cancel();deliver(&s,&tx,1,Ok(json!(7)));}
+            else{deliver(&s,&tx,1,Ok(json!(7)));c.cancel();}
+            assert_eq!(r.wait(Duration::ZERO),if cancel_first{Err("补全请求已取消".into())}else{Ok(json!(7))});
+            for item in rx.try_iter(){dispatch(&s,&mut wire,item).unwrap();}
+            assert_eq!(messages(wire).len(),if cancel_first{2}else{1});
+            assert!(s.pending.lock().unwrap().is_empty());assert!(s.owned.lock().unwrap().is_empty());
+        }
+    }
 }

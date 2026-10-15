@@ -8,7 +8,7 @@ pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, a
 struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
     id:u64, client:Client, uri:String, language:String, context:inkleet_managed_env::lsp_scaffold::Context, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
-    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, completion_resolve:bool, completion_trigger_characters:Vec<String>, completion_generation:AtomicU64, completion_cache:Mutex<crate::completion_cache::CompletionCache>, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
+    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, completion_resolve:bool, completion_trigger_characters:Vec<String>, completion_requests:Mutex<crate::completion_requests::CompletionRequests<inkleet_managed_env::rpc::RequestCanceller>>, completion_cache:Mutex<crate::completion_cache::CompletionCache>, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
@@ -58,11 +58,34 @@ impl Services {
             if name.is_empty()||name.len()>128||!name.chars().all(|c|c.is_alphanumeric()||matches!(c,'_'|'$'))||name.chars().next().is_some_and(|c|c.is_numeric()){return Err("名称必须为不超过 128 字节的标识符".into());}
             params["newName"]=json!(name);
         }
-        // Validate the entire request before superseding any valid completion.
-        let completion_generation=if kind=="completion"{crate::completion_cache::admit_sequence(&session.completion_generation,completion_sequence)?}else{if completion_sequence.is_some(){return Err("此请求不接受补全序号".into());}0};
-        if kind=="completion"&&session.completion_generation.load(Ordering::Relaxed)!=completion_generation{return Err("补全请求已经过期".into());}
+        // Full validation above must precede supersession. Admission and handle
+        // registration share the cancel-through mutex; no response wait holds it.
+        if kind=="completion"{
+            let (sequence,request)={
+                let mut requests=session.completion_requests.lock().map_err(|_|"补全请求状态不可用")?;
+                let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+                if document.version!=version{return Err("文档已更新，请重试".into());}
+                requests.begin(completion_sequence,||{
+                    let request=session.client.begin_cancellable_lsp_request(method,params)?;
+                    let cancel=request.canceller();Ok((request,cancel))
+                })?
+            };
+            let result=request.wait(Duration::from_secs(8));
+            let mut requests=session.completion_requests.lock().map_err(|_|"补全请求状态不可用")?;
+            requests.finish(sequence);
+            let mut response=result?;
+            if !requests.is_current(sequence){return Err("忽略过期的补全结果".into());}
+            let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+            if document.version!=version{return Err("忽略旧版本的语言服务结果".into());}
+            self.session(id)?;
+            // Keep issuer validation and cache publication in the same critical
+            // section, preventing a superseded response from publishing tokens.
+            if session.completion_resolve{session.completion_cache.lock().map_err(|_|"补全缓存不可用")?.remember(&mut response,version,sequence);}
+            crate::lsp_document::response(kind,&mut response,prefix);
+            return Ok(response);
+        }
+        if completion_sequence.is_some(){return Err("此请求不接受补全序号".into());}
         let mut response=session.client.request(method,params,Duration::from_secs(8))?;
-        if kind=="completion"&&session.completion_generation.load(Ordering::Relaxed)!=completion_generation{return Err("忽略过期的补全结果".into());}
         if session.document.lock().map_err(|_|"文档状态不可用")?.version!=version{return Err("忽略旧版本的语言服务结果".into());}
         self.session(id)?;
         if kind=="rename"{
@@ -75,7 +98,6 @@ impl Services {
             if document.version!=version{return Err("源码已改变，请重新查找引用".into());}
             return crate::lsp_document::references(&response,&session.uri,prefix,&document.text);
         }
-        if kind=="completion"&&session.completion_resolve{session.completion_cache.lock().map_err(|_|"补全缓存不可用")?.remember(&mut response,version,completion_generation);}
         crate::lsp_document::response(kind,&mut response,prefix);
         if kind=="definition"{
             crate::lsp_document::definition(&mut response,&session.uri,prefix);
@@ -90,6 +112,11 @@ impl Services {
         Ok(response)
     }
 
+    pub fn cancel_completion_through(&self,id:u64,sequence:u64)->Result<()>{
+        let session=self.session(id)?;
+        let result=session.completion_requests.lock().map_err(|_|"补全请求状态不可用")?.cancel_through(sequence);
+        result
+    }
     pub fn resolve_completion(&self,id:u64,version:u32,token:u64)->Result<Value>{
         let session=self.session(id)?;
         if !session.completion_resolve{return Err("语言服务不支持补全解析".into());}
@@ -221,7 +248,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let roots=launch.roots;
         let started_uri=uri.clone();
-        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,completion_resolve,completion_trigger_characters:completion_trigger_characters.clone(),completion_generation:AtomicU64::new(0),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,completion_resolve,completion_trigger_characters:completion_trigger_characters.clone(),completion_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
