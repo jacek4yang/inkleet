@@ -60,7 +60,7 @@ test("normalizing imports never mutates caller-owned additional edits",()=>{
 });
 
 test("mode defaults to asIs and explicit mode2 uses only indentation before cursor",()=>{
- const state=EditorState.create({doc:"\t\t\t\t\tfoo"}),prepared=prepareSnippet("call("+D+"{1:x}+")\n\t"+D+"1\n"+D+"0");
+ const state=EditorState.create({doc:"\t\t\t\t\tfoo"}),prepared=prepareSnippet("call("+D+"{1:x})\n\t"+D+"1\n"+D+"0");
  assert.equal(layoutSnippet(prepared,state,2).prepared.text,"call(x)\n\tx\n");
  const layout=layoutSnippet(prepared,state,2,2);assert.equal(layout.indent,"\t\t");assert.equal(layout.prepared.text,"call(x)\n\t\t\tx\n\t\t");
  for(const f of layout.prepared.fields.filter(f=>f.group==="t:1"))assert.equal(layout.prepared.text.slice(f.from,f.to),"x");
@@ -90,7 +90,7 @@ test("mode2 refuses multiline fields choices derived text and oversized expansio
 });
 test("laid out snippet plus literal import remains one atomic edit",()=>{
  let s=EditorState.create({doc:"  token",extensions:[history(),snippetSession]});
- const layout=layoutSnippet(prepareSnippet("f("+D+"{1:x}+")\n"+D+"0"),s,7,2);
+ const layout=layoutSnippet(prepareSnippet("f("+D+"{1:x})\n"+D+"0"),s,7,2);
  const spec=snippetInsertion(s,layout.prepared,2,7,[{from:0,to:0,insert:"use x;\n"}]);assert.ok(spec);s=s.update(spec).state;
  assert.equal(s.doc.toString(),"use x;\n  f(x)\n  ");
  const target={get state(){return s;},dispatch:(tr:any)=>{s=tr.state;}};assert.equal(undo(target as any),true);assert.equal(s.doc.toString(),"  token");
