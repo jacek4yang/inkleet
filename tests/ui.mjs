@@ -2570,6 +2570,26 @@ try {
   await staleChoice.evaluate(button=>button.click());
   assert.equal(await snippetCode.innerText(),"name = name; value","detached choice cannot change a replacement session");
   await snippetPage.screenshot({path:"evidence/snippet-flat-session.png"});
+  await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest;
+    s.insertNested=()=>{
+      const v=s.view(),d="$",prepared=s.api.prepareSnippet(d+"{1:a"+d+"{2:b}c} / "+d+"1 / "+d+"2"+d+"0");
+      const spec=s.api.snippetInsertion(v.state,prepared,0,v.state.doc.length);if(!spec)throw Error("Nested snippet refused");
+      v.dispatch(spec);v.setTabFocusMode(false);v.focus();
+    };s.insertNested();
+  });
+  await snippetCode.press("Tab");await snippetPage.keyboard.insertText("nested");
+  assert.equal(await snippetCode.innerText(),"anestedc / anestedc / nested");
+  await snippetCode.press("Control+z");assert.equal(await snippetCode.innerText(),"abc / abc / b","nested mirrors undo atomically");
+  await snippetCode.press("Control+y");assert.equal(await snippetCode.innerText(),"anestedc / anestedc / nested");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertNested());
+  await snippetPage.keyboard.insertText("Z");
+  assert.equal(await snippetCode.innerText(),"Z / Z / b","replacing parent prunes contained children only");
+  await snippetCode.press("Tab");await snippetPage.keyboard.insertText("Q");
+  assert.equal(await snippetCode.innerText(),"Z / Z / Q","external child survivor remains reachable by Tab");
+  await snippetPage.screenshot({path:"evidence/snippet-nested-session.png"});
+  await writeFile("evidence/SNIPPET_NESTED_SESSION_RESULT.txt","PASS: actual CodeEditor Tab child navigation, nested mirror typing, atomic undo/redo, whole-parent replacement and external-child survivor navigation. Plain nested placeholders only; nested transforms and native IME remain unverified.\n");
+
   await snippetPage.evaluate(async()=>{
     const s=window.__snippetSessionTest;
     s.insertDerived=async(catastrophic=false)=>{
@@ -2681,16 +2701,22 @@ try {
     };
   });
   for(const keys of [["Control+s","Control+Shift+i"],["Control+Shift+i","Control+s"],["Control+s","Control+s"],["Control+s","Tab"]]){
-    await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;await s.insertDerived();s.holdEvaluation=true;s.releaseEvaluation=null;});
+    await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;await s.insertDerived();s.view().setTabFocusMode(false);s.holdEvaluation=true;s.releaseEvaluation=null;});
     await snippetPage.keyboard.insertText("mixed");
     const before=await snippetPage.evaluate(()=>({saves:window.__snippetSessionTest.saves.length,formats:window.__snippetSessionTest.formats.length}));
     await snippetCode.press(keys[0]);
     await snippetPage.waitForFunction(()=>typeof window.__snippetSessionTest.releaseEvaluation==="function");
     await snippetCode.press(keys[1]);
     await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;s.releaseEvaluation();});
-    await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);
+    try{await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);}catch(error){
+      await writeFile("evidence/snippet-mixed-intent-failure.json",JSON.stringify({keys,before,state:await snippetPage.evaluate(()=>{
+        const s=window.__snippetSessionTest,v=s.view(),f=v.state.field(s.api.snippetSessionState);
+        return {saves:s.saves,formats:s.formats,errors:s.errors,text:v.state.doc.toString(),selection:v.state.selection.toJSON(),focused:v.hasFocus,session:f};
+      })},null,2));throw error;
+    }
     assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.at(-1)),"mixed -> MIXED; tail");
     assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.formats.length),before.formats+1,"mixed intent settles and formats once");
+    if(keys[1]==="Tab")assert.equal(await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"tail","pending save preserves requested field navigation");
   }
   await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;await s.insertDerived();s.holdEvaluation=true;s.releaseEvaluation=null;});
   await snippetPage.keyboard.insertText("canceled");
