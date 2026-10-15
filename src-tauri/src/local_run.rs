@@ -3,19 +3,41 @@ use serde::{Deserialize,Serialize};
 use serde_json::Value;
 use std::{fs,io::Read,path::PathBuf,process::Command,sync::{Arc,Mutex,atomic::{AtomicBool,AtomicU64,Ordering}},time::Duration};
 use tauri::Manager as _;
-#[derive(Clone,Deserialize)]
+use crate::local_run_request::{Request,Record};
+#[derive(Clone,Deserialize,Serialize,PartialEq)]
 #[serde(rename_all="camelCase")]
 pub struct Snapshot{pub code:String,pub input:String,pub metadata:String,pub title:String,pub language:String}
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct View{pub id:u64,pub phase:String,pub title:String,pub stdout:String,pub stderr:String,pub results:Vec<String>,pub exit_code:Option<i32>,pub timed_out:bool,pub canceled:bool,pub truncated:bool,pub elapsed_ms:u128,pub error:String}
-struct Job{view:Mutex<View>,cancel:Arc<AtomicBool>}
+pub struct View{pub id:u64,pub document_key:Option<String>,pub client_request_id:Option<String>,pub phase:String,pub title:String,pub stdout:String,pub stderr:String,pub results:Vec<String>,pub exit_code:Option<i32>,pub timed_out:bool,pub canceled:bool,pub truncated:bool,pub elapsed_ms:u128,pub error:String}
+struct Job{record:Record,view:Mutex<View>,cancel:Arc<AtomicBool>}
 pub struct Runner{root:PathBuf,next:AtomicU64,active:Mutex<Option<Arc<Job>>>}
 impl Runner{
     pub fn new(root:PathBuf)->Self{Self{root,next:AtomicU64::new(1),active:Mutex::new(None)}}
+    fn admit(&self,record:Record)->Result<(Arc<Job>,bool),String>{
+        let mut active=self.active.lock().map_err(|_|"运行状态不可用")?;
+        if let Some(previous)=active.as_ref(){
+            let view=previous.view.lock().map_err(|_|"运行状态不可用")?;
+            if record.client_request_id.is_some()&&record.client_request_id==previous.record.client_request_id{
+                if record==previous.record{return Ok((previous.clone(),false));}
+                return Err("相同运行请求标识不能对应不同快照".into());
+            }
+            if matches!(view.phase.as_str(),"queued"|"compiling"|"running"|"canceling"){return Err("已有本地运行任务，请停止后再试".into());}
+        }
+        let id=self.next.fetch_add(1,Ordering::Relaxed);
+        let job=Arc::new(Job{record:record.clone(),cancel:Arc::new(AtomicBool::new(false)),view:Mutex::new(View{id,document_key:record.document_key.clone(),client_request_id:record.client_request_id.clone(),phase:"queued".into(),title:record.snapshot.title.clone(),stdout:String::new(),stderr:String::new(),results:Vec::new(),exit_code:None,timed_out:false,canceled:false,truncated:false,elapsed_ms:0,error:String::new()})});
+        *active=Some(job.clone());Ok((job,true))
+    }
     pub fn status(&self)->Result<Option<View>,String>{
         let job=self.active.lock().map_err(|_|"运行状态不可用")?.clone();
         job.map(|job|job.view.lock().map(|v|v.clone()).map_err(|_|"运行状态不可用".into())).transpose()
+    }
+    pub fn record(&self,id:u64)->Result<Option<Record>,String>{
+        let job=self.active.lock().map_err(|_|"运行状态不可用")?.clone();
+        match job{
+            Some(job)=>{let current=job.view.lock().map_err(|_|"运行状态不可用")?.id;Ok((current==id).then(||job.record.clone()))},
+            None=>Ok(None),
+        }
     }
     pub fn cancel(&self,id:u64)->Result<(),String>{
         if let Some(job)=self.active.lock().map_err(|_|"运行状态不可用")?.as_ref(){
@@ -26,22 +48,17 @@ impl Runner{
         }Ok(())
     }
 }
-pub async fn start(app:tauri::AppHandle,snapshot:Snapshot)->Result<u64,String>{
+pub async fn start(app:tauri::AppHandle,request:Request)->Result<u64,String>{
+    let record=request.prepare()?;
+    let snapshot=record.snapshot.clone();
     if !matches!(snapshot.language.as_str(),"python3"|"golang"|"cpp"|"c"|"rust"|"java"){return Err("此版本本地运行支持 Python、Go、C、C++、Rust 和 Java；其他语言可使用力扣运行".into());}
     if snapshot.code.len()>2*1024*1024||snapshot.title.len()>512{return Err("运行快照超过大小限制".into());}
     harness::configuration(&snapshot.metadata,&snapshot.input)?;
     let state=app.state::<Runner>();
-    let job={
-        let mut active=state.active.lock().map_err(|_|"运行状态不可用")?;
-        if let Some(previous)=active.as_ref(){
-            if matches!(previous.view.lock().map_err(|_|"运行状态不可用")?.phase.as_str(),"queued"|"compiling"|"running"|"canceling"){return Err("已有本地运行任务，请停止后再试".into());}
-        }
-        let id=state.next.fetch_add(1,Ordering::Relaxed);
-        let job=Arc::new(Job{cancel:Arc::new(AtomicBool::new(false)),view:Mutex::new(View{id,phase:"queued".into(),title:snapshot.title.clone(),stdout:String::new(),stderr:String::new(),results:Vec::new(),exit_code:None,timed_out:false,canceled:false,truncated:false,elapsed_ms:0,error:String::new()})});
-        *active=Some(job.clone());job
-    };
+    let (job,fresh)=state.admit(record)?;
     let id=job.view.lock().map_err(|_|"运行状态不可用")?.id;
     drop(state);
+    if !fresh{return Ok(id);}
     tauri::async_runtime::spawn_blocking(move||{
         let execute=||->Result<(process::Output,Vec<String>),String>{
             let state=app.state::<Runner>();let tools=app.state::<crate::managed::Environments>();
@@ -129,4 +146,30 @@ pub async fn start(app:tauri::AppHandle,snapshot:Snapshot)->Result<u64,String>{
         };
     });
     Ok(id)
+}
+
+#[cfg(test)]
+mod provenance_tests{
+    use super::*;
+    fn record(id:&str)->Record{
+        serde_json::from_value::<Request>(serde_json::json!({
+            "code":"authored","input":"[1]","metadata":r#"{"name":"solve","params":[{"name":"values","type":"integer[]"}]}"#,
+            "title":"fixture","language":"python3","documentKey":"local/problem","clientRequestId":id
+        })).unwrap().prepare().unwrap()
+    }
+    #[test]fn admission_deduplicates_only_identical_current_requests(){
+        let runner=Runner::new(PathBuf::new());let original=record("a");
+        let (job,fresh)=runner.admit(original.clone()).unwrap();assert!(fresh);
+        let id=job.view.lock().unwrap().id;
+        let (same,fresh)=runner.admit(original.clone()).unwrap();assert!(!fresh);assert_eq!(same.view.lock().unwrap().id,id);
+        let mut changed=original.clone();changed.snapshot.code="different".into();
+        assert!(runner.admit(changed).is_err());assert!(runner.admit(record("b")).is_err());
+        assert!(runner.record(id+1).unwrap().is_none());assert!(runner.record(id).unwrap().unwrap()==original);
+        runner.cancel(id+1).unwrap();assert!(!job.cancel.load(Ordering::Acquire));
+        runner.cancel(id).unwrap();assert!(job.cancel.load(Ordering::Acquire));
+        job.view.lock().unwrap().phase="finished".into();
+        assert!(!runner.admit(original).unwrap().1);
+        assert!(runner.admit(record("b")).unwrap().1);
+        assert!(runner.record(id).unwrap().is_none());
+    }
 }

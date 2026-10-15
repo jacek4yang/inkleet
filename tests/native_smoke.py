@@ -940,10 +940,12 @@ try:
             cmd("POST",f"/element/{category}/click",{})
             check=element(".format-switch input")
             selected=cmd("GET",f"/element/{check}/selected")
-            if bool(selected)!=enabled: cmd("POST",f"/element/{check}/click",{})
+            if bool(selected)!=enabled: click_debug_action(".format-switch input")
+            wait_for(lambda:bool(cmd("GET",f"/element/{element('.format-switch input')}/selected"))==enabled,"format preference checkbox changed")
             click_debug_action(".format-settings .settings-form-actions button")
             wait_for(lambda:json.loads(editor_config.read_text())["formatOnSave"]==enabled,"native format preference saved")
-            click('[aria-label="关闭设置"]')
+            click_debug_action('[aria-label="关闭设置"]')
+            wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="关闭设置"]'}),"settings closed after format preference")
         set_auto_format(True)
         formatter_sources={
             "python3":("py","def solve(values):\n return sum(values)"),

@@ -911,9 +911,15 @@ try {
         return {};
       }
       if (command === "local_run_status") return state.result ? JSON.parse(JSON.stringify(state.result)) : null;
+      if(command==="local_run_record")return state.records?.[args.id]&&state.result?.id===args.id?JSON.parse(JSON.stringify(state.records[args.id])):null;
       if (command === "start_local_run") {
         state.starts.push(JSON.parse(JSON.stringify(args.snapshot)));
-        state.result = { id: state.starts.length, phase: "running", title: args.snapshot.title, stdout: "", stderr: "", results: [], exitCode: null, timedOut: false, canceled: false, truncated: false, elapsedMs: 0, error: "" };
+        const plan=args.snapshot,casePlans=plan.cases??[{id:"selected",name:"用例",input:plan.input,expectation:null}];
+        const invocations=[];const parameterCount=JSON.parse(plan.metadata).params.length;
+        casePlans.forEach((c,caseIndex)=>{const groups=Math.max(1,Math.floor(c.input.split("\n").filter(x=>x.trim()).length/parameterCount));for(let groupIndex=0;groupIndex<groups;groupIndex++)invocations.push({caseIndex,groupIndex,caseNumber:invocations.length+1});});
+        state.records??={};state.records[state.starts.length]={documentKey:plan.documentKey,clientRequestId:plan.clientRequestId,snapshot:{code:plan.code,input:casePlans.map(c=>c.input).join("\n"),metadata:plan.metadata,title:plan.title,language:plan.language},cases:casePlans,invocations};
+
+        state.result = { id: state.starts.length, documentKey:args.snapshot.documentKey,clientRequestId:args.snapshot.clientRequestId,phase: "running", title: args.snapshot.title, stdout: "", stderr: "", results: [], exitCode: null, timedOut: false, canceled: false, truncated: false, elapsedMs: 0, error: "" };
         return new Promise(resolve => state.pending.push(() => resolve(state.result.id)));
       }
       if (command === "cancel_local_run") { state.result.phase = "finished"; state.result.canceled = true; return; }
@@ -1224,6 +1230,11 @@ try {
   // Exact expected-result comparison freezes the selected policy with the run.
   await runPanel.locator(".case-expectation summary").click();
   await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("9007199254740992");
+  assert.equal(await runPanel.evaluate(panel=>{
+    const button=panel.querySelector('[data-action="local-execute"]'),b=button.getBoundingClientRect(),p=panel.getBoundingClientRect();
+    return b.top>=p.top&&b.bottom<=p.bottom&&document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.closest("button")===button;
+  }),true,"run control stays visible and clickable with expanded expected input");
+
   await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
   await runPage.waitForFunction(()=>window.__runTest.starts.length===9);
   await runPage.evaluate(()=>window.__runTest.pending[8]());
@@ -1274,6 +1285,17 @@ try {
   await runPanel.getByText("运行未完成，未比较",{exact:true}).waitFor();
   await runPage.evaluate(()=>Object.assign(window.__runTest.result,{timedOut:false,exitCode:0}));
   await runPanel.getByText("多组输入未比较",{exact:true}).waitFor();
+  // A remounted panel restores backend-owned provenance rather than relabeling global output.
+  const captureLanguage=await runPage.getByRole("combobox",{name:"编程语言"}).inputValue();
+  const foreignLanguage=captureLanguage==="python3"?"java":"python3";
+  await runPage.getByRole("combobox",{name:"编程语言"}).selectOption(foreignLanguage);
+  if(await runPanel.count()===0)await runPage.getByRole("button",{name:"本地",exact:true}).click();
+  await runPanel.getByText("其他解答的运行结果",{exact:true}).waitFor();
+  assert.equal(await runPanel.getByText("符合预期",{exact:true}).count(),0);
+  await runPage.getByRole("combobox",{name:"编程语言"}).selectOption(captureLanguage);
+  if(await runPanel.count()===0)await runPage.getByRole("button",{name:"本地",exact:true}).click();
+  await runPanel.getByText("多组输入未比较",{exact:true}).waitFor();
+  assert.equal(await runPage.evaluate(()=>window.__runTest.starts.length),12,"remount must never replay start");
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");
