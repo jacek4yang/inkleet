@@ -1,0 +1,58 @@
+name: Diagnose native expected-input interaction
+on:
+  push:
+    branches: [test/native-case-interaction]
+    paths: ['tests/native_case_probe.py', 'tests/native_smoke.py', '.github/workflows/native-case-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: native-case-probe
+  cancel-in-progress: true
+jobs:
+  case-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate targeted harness
+        run: python3 -m py_compile tests/native_case_probe.py tests/native_smoke.py
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          github-token: ${{ github.token }}
+          run-id: 38726846061
+          name: native-ubuntu-24.04
+          path: preview
+      - name: Install pinned preview and testing prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+          test "$(cat preview/evidence/install/SOURCE_COMMIT.txt)" = 3d469e8ea8ab9ac931fdd537d229c39ee32f6560
+          mapfile -d '' packages < <(find preview/src-tauri/target/release/bundle/deb -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          echo "f1881e30dcd4f5688976e94ac8ef2c06b6350aa3eddb53b3c19bfa0bf652568d  ${packages[0]}" | sha256sum -c -
+          sudo apt-get install -y "$(realpath "${packages[0]}")"
+          echo 'dd8f05240e79bc64ca68fb9041c60b2ac2d9844d9f86585a7e8c30e36fb2f49e  /usr/bin/inkleet' | sha256sum -c -
+      - name: Observe real expected-input interaction
+        run: |
+          mkdir -p evidence/case-probe
+          git rev-parse HEAD > evidence/case-probe/HARNESS_SOURCE.txt
+          printf '3d469e8ea8ab9ac931fdd537d229c39ee32f6560\n' > evidence/case-probe/BINARY_SOURCE.txt
+          sha256sum /usr/bin/inkleet > evidence/case-probe/BINARY_SHA256.txt
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY=/usr/bin/inkleet
+          xvfb-run -a dbus-run-session -- python3 tests/native_case_probe.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-case-probe
+          path: evidence/case-probe/
+          if-no-files-found: warn
+          retention-days: 7
