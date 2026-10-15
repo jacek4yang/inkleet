@@ -12,7 +12,7 @@ import { EditorState, StateEffect, Prec, Compartment } from "@codemirror/state";
 import { EditorView, keymap, tooltips, panels } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { indentMore, indentLess, undo, redo, selectAll } from "@codemirror/commands";
-import { acceptCompletion, closeCompletion } from "@codemirror/autocomplete";
+import { acceptCompletion, closeCompletion, completionStatus } from "@codemirror/autocomplete";
 import { indentUnit } from "@codemirror/language";
 import { rust } from "@codemirror/lang-rust";
 import { python } from "@codemirror/lang-python";
@@ -104,7 +104,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
       // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。
-      Prec.high(keymap.of([{ key: "Tab", run: view => vimNormal(view)||acceptCompletion(view)||moveSnippetField(view,1)||indentMore(view), shift:view=>vimNormal(view)||moveSnippetField(view,-1)||indentLess(view) }])),
+      Prec.high(keymap.of([{ key: "Tab", run: view => vimNormal(view)||acceptCompletion(view)||completionStatus(view.state)==="active"||moveSnippetField(view,1)||indentMore(view), shift:view=>vimNormal(view)||moveSnippetField(view,-1)||indentLess(view) }])),
       // 脱离面板的 overflow / stacking context；CM 自动同步主题并在销毁时移除容器。
       keymap.of([{key:"Mod-m",run:view=>{view.setTabFocusMode(2000);return true;}}]),
       tooltips({ parent: document.body, position: "fixed" }),

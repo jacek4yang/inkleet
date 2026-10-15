@@ -2510,6 +2510,19 @@ try {
   await snippetCode.press("ArrowRight");await snippetCode.press("Control+Space");
   await snippetPage.getByRole("option",{name:"nameComplete",exact:true}).waitFor();
   await snippetCode.press("Tab");
+  const fastSnippetTab=await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest,v=s.view(),session=v.state.field(s.api.snippetSessionState);
+    return {text:v.state.doc.toString(),head:v.state.selection.main.head,group:session?.fields.find(f=>f.id===session.active)?.group,completion:s.api.completionStatus(v.state)};
+  });
+  await writeFile("evidence/snippet-fast-tab.json",JSON.stringify(fastSnippetTab,null,2));
+  if(fastSnippetTab.text!=="nameComplete = nameComplete; value"){
+    assert.equal(fastSnippetTab.text,"name = name; value","fast popup Tab must not insert indentation");
+    assert.equal(fastSnippetTab.group,"t:1","fast popup Tab must not advance snippet");
+    assert.equal(fastSnippetTab.head,4);
+    assert.equal(fastSnippetTab.completion,"active","unaccepted completion remains available during CM interaction delay");
+    await snippetPage.waitForTimeout(100);
+    await snippetCode.press("Tab");
+  }
   await snippetPage.waitForFunction(()=>window.__snippetSessionTest.value==="nameComplete = nameComplete; value");
   assert.equal(await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState);return s.fields.find(f=>f.id===s.active).group;}),"t:1","popup Tab accepts completion without also advancing snippet");
   await snippetCode.press("Tab");
