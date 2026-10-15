@@ -8,9 +8,14 @@ pub(crate) fn snippet_validation_enabled()->bool{
     cfg!(all(feature="native-snippet-validation",debug_assertions,target_os="linux"))
 }
 // Roll out only on the language/platform combination covered by real WebView tests.
-// The validation feature controls diagnostics, never expands advertised capabilities.
+// native-snippet-validation controls diagnostics only. The separate clang experiment
+// is explicitly debug-only until its own native acceptance is qualified.
+pub(crate) fn clang_snippet_validation_enabled()->bool{
+    cfg!(all(feature="native-clang-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64"))
+}
 pub(crate) fn snippet_support_enabled(language:&str)->bool{
-    cfg!(all(target_os="linux",target_arch="x86_64"))&&matches!(language,"golang"|"rust")
+    (cfg!(all(target_os="linux",target_arch="x86_64"))&&matches!(language,"golang"|"rust"))
+        ||(clang_snippet_validation_enabled()&&matches!(language,"c"|"cpp"))
 }
 pub(crate) fn completion_capabilities(language:&str)->Value{
     let enabled=snippet_support_enabled(language);
@@ -126,9 +131,15 @@ mod snippet_validation_tests{
         if !cfg!(feature="native-snippet-validation"){assert!(!snippet_validation_enabled());}
     }
     #[test]
+    fn clang_experiment_is_explicit_debug_linux_x86_64_only(){
+        assert_eq!(clang_snippet_validation_enabled(),cfg!(all(feature="native-clang-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64")));
+        if !cfg!(feature="native-clang-snippet-validation"){assert!(!clang_snippet_validation_enabled());}
+    }
+    #[test]
     fn rollout_is_language_and_platform_scoped(){
         for language in ["rust","golang"]{assert_eq!(snippet_support_enabled(language),cfg!(all(target_os="linux",target_arch="x86_64")));}
-        for language in ["python3","java","c","cpp","unknown"]{assert!(!snippet_support_enabled(language));}
+        for language in ["python3","java","unknown"]{assert!(!snippet_support_enabled(language));}
+        for language in ["c","cpp"]{assert_eq!(snippet_support_enabled(language),clang_snippet_validation_enabled());}
     }
     #[test]
     fn completion_profile_preserves_resolve_and_indentation_scope(){
@@ -142,7 +153,8 @@ mod snippet_validation_tests{
         for language in ["python3","golang","java","c","cpp"]{
             let profile=completion_capabilities(language);
             assert_eq!(profile["completionItem"]["snippetSupport"],json!(snippet_support_enabled(language)));
-            if language!="golang"{assert!(!snippet_support_enabled(language));assert!(profile.get("insertTextMode").is_none());}
+            if !snippet_support_enabled(language){assert!(profile.get("insertTextMode").is_none());}
+            else{assert_eq!(profile["insertTextMode"],json!(1));assert_eq!(profile["completionItem"]["insertTextModeSupport"]["valueSet"],json!([1]));}
             assert!(profile["completionItem"].get("resolveSupport").is_none());
             assert!(profile["completionItem"].get("insertReplaceSupport").is_none());
         }

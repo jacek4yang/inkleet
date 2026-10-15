@@ -5,7 +5,7 @@ static RECORDS:Mutex<VecDeque<Value>>=Mutex::new(VecDeque::new());
 
 fn item(value:&Value)->Option<Value>{
     let label=value.get("label")?.as_str()?.trim_start();
-    if label.len()>512||!["push","WriteString","HashMap"].iter().any(|name|label==*name||label.strip_prefix(*name).is_some_and(|tail|tail.starts_with('(')||tail.starts_with('<'))){return None;}
+    if label.len()>512||!["push","WriteString","HashMap","inkleet_add"].iter().any(|name|label==*name||label.strip_prefix(*name).is_some_and(|tail|tail.starts_with('(')||tail.starts_with('<'))){return None;}
     let source=value.pointer("/textEdit/newText").or_else(||value.get("insertText")).and_then(Value::as_str).map(|text|text.chars().take(512).collect::<String>());
     Some(json!({"label":label,"format":value.get("insertTextFormat").map(|v|v.as_u64()).unwrap_or(Some(1)),
         "mode":value.get("insertTextMode").map(|v|v.as_u64()).unwrap_or(Some(1)),

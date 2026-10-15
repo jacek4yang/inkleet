@@ -4,8 +4,10 @@ version = "0.0.1"
 edition = "2021"
 
 [features]
-# Opt-in validation only; release and non-Linux builds remain disabled.
+# Opt-in diagnostic tracing; release and non-Linux tracing remain disabled.
 native-snippet-validation = []
+# Temporary C/C++ acceptance experiment, debug Linux x86_64 only.
+native-clang-snippet-validation = ["native-snippet-validation"]
 
 [lib]
 name = "inkleet_lib"

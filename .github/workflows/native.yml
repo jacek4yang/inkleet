@@ -1,7 +1,7 @@
 name: Native Linux
 on:
   push:
-    branches: [main, feat/first-workbench, feat/editor-p0-reliability, feat/workbench-minimal-ui, feat/real-question-workspace, feat/download-proxy-inputs, feat/debugger-workspace, feat/named-solutions, feat/language-adapter-contract, feat/lsp-p1-recovery, feat/workbench-visual-polish, feat/format-on-save, feat/debugger-precision-dock, feat/lsp-semantic-analysis, feat/ide-command-routing, feat/editor-input-reliability, feat/explicit-save, feat/polished-linux-preview, feat/vim-status-cursor, feat/real-use-hardening, feat/completion-integration, feat/completion-request-ownership, feat/completion-issuer-order, feat/lsp-status-ownership, perf/runner-rendering, perf/reading-panes, fix/in-place-results, feat/case-expectations, feat/case-run-context, feat/named-case-batches, feat/owned-lsp-cancellation, perf/diagnostics-dedup, perf/live-source-boundary, fix/judge-terminal-verdict, test/native-snippet-validation, feat/validated-linux-snippets]
+    branches: [main, feat/first-workbench, feat/editor-p0-reliability, feat/workbench-minimal-ui, feat/real-question-workspace, feat/download-proxy-inputs, feat/debugger-workspace, feat/named-solutions, feat/language-adapter-contract, feat/lsp-p1-recovery, feat/workbench-visual-polish, feat/format-on-save, feat/debugger-precision-dock, feat/lsp-semantic-analysis, feat/ide-command-routing, feat/editor-input-reliability, feat/explicit-save, feat/polished-linux-preview, feat/vim-status-cursor, feat/real-use-hardening, feat/completion-integration, feat/completion-request-ownership, feat/completion-issuer-order, feat/lsp-status-ownership, perf/runner-rendering, perf/reading-panes, fix/in-place-results, feat/case-expectations, feat/case-run-context, feat/named-case-batches, feat/owned-lsp-cancellation, perf/diagnostics-dedup, perf/live-source-boundary, fix/judge-terminal-verdict, test/native-snippet-validation, feat/validated-linux-snippets, test/native-clang-snippets]
     paths: ['src/**', 'src-tauri/**', 'crates/managed-env/src/**', 'crates/managed-env/packages.json', 'crates/managed-env/Cargo.toml', 'crates/managed-env/Cargo.lock', 'package*.json', 'tests/native_smoke.py', '.github/workflows/native.yml']
   workflow_dispatch:
     inputs:
@@ -17,7 +17,8 @@ concurrency:
 jobs:
   native-smoke:
     env:
-      INKLEET_NATIVE_SNIPPETS: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test/native-snippet-validation' || github.ref == 'refs/heads/feat/validated-linux-snippets')) || inputs.snippets == true }}
+      INKLEET_NATIVE_SNIPPETS: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test/native-snippet-validation' || github.ref == 'refs/heads/feat/validated-linux-snippets' || github.ref == 'refs/heads/test/native-clang-snippets')) || inputs.snippets == true }}
+      INKLEET_NATIVE_SNIPPET_FEATURE: ${{ github.ref == 'refs/heads/test/native-clang-snippets' && 'native-clang-snippet-validation' || 'native-snippet-validation' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -45,10 +46,10 @@ jobs:
           cargo test --locked --manifest-path src-tauri/Cargo.toml
           mkdir -p evidence/native
           git rev-parse HEAD > evidence/native/BUILD_COMMIT.txt
-          printf 'debug-linux-no-bundle; snippet-validation=%s\n' "$INKLEET_NATIVE_SNIPPETS" > evidence/native/BUILD_PROFILE.txt
+          printf 'debug-linux-no-bundle; snippet-validation=%s; feature=%s\n' "$INKLEET_NATIVE_SNIPPETS" "$INKLEET_NATIVE_SNIPPET_FEATURE" > evidence/native/BUILD_PROFILE.txt
           if [ "$INKLEET_NATIVE_SNIPPETS" = "true" ]; then
-            cargo test --locked --manifest-path src-tauri/Cargo.toml --features native-snippet-validation
-            npm run tauri -- build --debug --no-bundle --features native-snippet-validation
+            cargo test --locked --manifest-path src-tauri/Cargo.toml --features "$INKLEET_NATIVE_SNIPPET_FEATURE"
+            npm run tauri -- build --debug --no-bundle --features "$INKLEET_NATIVE_SNIPPET_FEATURE"
           else
             npm run tauri -- build --debug --no-bundle
           fi
@@ -66,6 +67,7 @@ jobs:
       - name: Verify native storage through the actual GUI
         env:
           INKLEET_MANAGED_ENV: "1"
+          INKLEET_CLANG_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPET_FEATURE == 'native-clang-snippet-validation' && '1' || '0' }}
           INKLEET_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPETS == 'true' && '1' || '0' }}
           INKLEET_LIVE_CN: ${{ steps.public-probe.outcome == 'success' && '1' || '0' }}
         run: |
