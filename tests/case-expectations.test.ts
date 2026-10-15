@@ -41,3 +41,14 @@ test("invocation count comes from submitted input, not produced result rows",()=
  assert.throws(()=>invocationCount("",1));
  assert.throws(()=>invocationCount("[1]",0));
 });
+
+test("execution counting does not inherit comparison node or exponent limits",()=>{
+ const large="["+Array(10000).fill("1").join(",")+"]";
+ assert.equal(invocationCount(large,1),1);
+ assert.throws(()=>canonicalJson(large));
+ assert.equal(invocationCount("1e999999999",1),1);
+ assert.equal(invocationCount('"a,] \\"x\\""\n[1,{"x":[2]}]',2),1);
+ assert.throws(()=>invocationCount("[1}]",1));
+ assert.throws(()=>invocationCount("[".repeat(129)+"0"+"]".repeat(129),1));
+ assert.throws(()=>invocationCount("true\n".repeat(101),1));
+});

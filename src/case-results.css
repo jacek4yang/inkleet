@@ -1,2 +1,7 @@
 .case-argument{margin:8px 0}.case-argument>span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.case-argument>.local-result{margin:0}
 .case-expectation{margin:8px 0}.case-expectation>summary{cursor:pointer;color:var(--muted);font-size:12px}.case-expectation[open]>.case-inputs{margin-top:8px}
+.batch-summary{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0;color:var(--muted);font-size:11px}
+.local-runner.resizable-panel>[data-runner-pane="run"]:not([hidden]){display:grid;grid-template-columns:minmax(160px,.8fr) minmax(0,1.2fr);min-height:0;overflow:hidden;padding:0}
+.case-editor,.case-output{min-width:0;min-height:0;overflow:auto;padding:10px 12px;scroll-padding-block:8px}.case-editor{border-right:1px solid var(--line)}
+@media(max-width:700px){.local-runner.resizable-panel>[data-runner-pane="run"]:not([hidden]){grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}.case-editor{border-right:0;border-bottom:1px solid var(--line)}}
+.case-expectation select{width:100%;min-width:0;font:inherit;color:var(--ink);background:var(--field-bg);border:1px solid var(--field-border);border-radius:4px;padding:5px 7px}

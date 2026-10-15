@@ -1,9 +1,10 @@
 import {validateCases,type LocalCase} from "./test-cases.ts";
 import type {Language} from "./domain";
 export type RunSource={code:string;input:string;metadata:string;title:string;language:Language};
-export type RunContext={documentKey:string;clientRequestId:string;snapshot:RunSource;cases:LocalCase[];invocations:{caseIndex:number;groupIndex:number;caseNumber:number}[]};
+export type RunContext={mode?:"selected"|"all"|"failed";documentKey:string;clientRequestId:string;snapshot:RunSource;cases:LocalCase[];invocations:{caseIndex:number;groupIndex:number;caseNumber:number}[]};
 export function validateRunContext(value:unknown,documentKey:string,clientRequestId:string):RunContext{
  const r=value as RunContext,s=r?.snapshot;
+ const mode=r?.mode??"selected";if(!["selected","all","failed"].includes(mode))throw Error("运行模式无效");
  if(!r||r.documentKey!==documentKey||r.clientRequestId!==clientRequestId||!s||
     typeof s.code!=="string"||s.code.length>2*1024*1024||typeof s.input!=="string"||s.input.length>1024*1024||
     typeof s.metadata!=="string"||s.metadata.length>65536||typeof s.title!=="string"||s.title.length>512||
@@ -18,7 +19,7 @@ export function validateRunContext(value:unknown,documentKey:string,clientReques
   counts[v.caseIndex]++;previous=v.caseIndex;
  }
  if(counts.some(n=>!n)||cases.map(c=>c.input).join("\n")!==s.input)throw Error("运行用例内容不一致");
- return {documentKey,clientRequestId,snapshot:{code:s.code,input:s.input,metadata:s.metadata,title:s.title,language:s.language},cases,invocations:r.invocations.map(v=>({...v}))};
+ return {mode,documentKey,clientRequestId,snapshot:{code:s.code,input:s.input,metadata:s.metadata,title:s.title,language:s.language},cases,invocations:r.invocations.map(v=>({...v}))};
 }
 // Polls may allocate fresh arrays even when nothing changed. Preserve React state
 // only when every observed field is unchanged; unknown fields are not silently ignored.

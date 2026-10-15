@@ -59,3 +59,11 @@ test("v1 cases migrate without changing identity or inputs and v2 expectations s
  assert.throws(()=>validateCases({...next,cases:[{...next.cases[0],expectation:{mode:"guess",value:"1"}}]}));
  assert.throws(()=>validateCases({...old,cases:[{...old.cases[0],id:""}]}));
 });
+
+test("empty runtime errors remain failures eligible for explicit rerun",()=>{
+ for(const error of [""," \n\t"]){
+  const r=displayResult(JSON.stringify({case:1,ok:false,error}),0);
+  assert.equal(r.error,"执行失败");
+  assert.equal(r.raw,false);
+ }
+});

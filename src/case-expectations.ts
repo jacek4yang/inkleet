@@ -68,8 +68,39 @@ function canonicalValues(text:string,multiple:boolean):string[]{
 export function canonicalJson(text:string):string{return canonicalValues(text,false)[0];}
 export function invocationCount(input:string,parameterCount:number):number{
  if(!Number.isSafeInteger(parameterCount)||parameterCount<1||parameterCount>32)throw Error("函数参数信息不可用");
- const values=canonicalValues(input,true).length;
- if(values%parameterCount!==0||values/parameterCount>100)throw Error("用例参数数量不匹配或超过限制");
+ if(new TextEncoder().encode(input).length>1024*1024)throw Error("运行输入超过 1 MiB");
+ let at=0,values=0;
+ const number=/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+ const fail=():never=>{throw Error("用例须为连续 JSON 值，每个参数一个值");};
+ while(at<input.length){
+  while(/[ \t\r\n]/.test(input[at]??"")&&at<input.length)at++;
+  if(at===input.length)break;
+  const start=at,c=input[at];
+  if(c==="["||c==="{"){
+   let depth=0,quoted=false,escaped=false;
+   for(;at<input.length;at++){
+    const ch=input[at];
+    if(quoted){if(!escaped&&ch==='"')quoted=false;if(ch==="\\"&&!escaped)escaped=true;else escaped=false;continue;}
+    if(ch==='"'){quoted=true;continue;}
+    if(ch==="["||ch==="{"){if(++depth>128)throw Error("运行输入嵌套超过限制");}
+    else if(ch==="]"||ch==="}"){if(--depth===0){at++;break;}}
+   }
+   if(depth!==0||quoted)return fail();
+  }else if(c==='"'){
+   at++;let escaped=false,closed=false;
+   for(;at<input.length;at++){const ch=input[at];if(!escaped&&ch==='"'){at++;closed=true;break;}if(ch==="\\"&&!escaped)escaped=true;else escaped=false;}
+   if(!closed)return fail();
+  }else{
+   const literal=["true","false","null"].find(value=>input.startsWith(value,at));
+   if(literal)at+=literal.length;
+   else{number.lastIndex=at;if(!number.exec(input))return fail();at=number.lastIndex;}
+  }
+  // Validation only: original input bytes are retained for the backend. Parsed
+  // numeric values are never used for comparison, serialization or execution.
+  try{JSON.parse(input.slice(start,at));}catch{return fail();}
+  if(++values>parameterCount*100)throw Error("一批运行最多 100 组函数调用");
+ }
+ if(!values||values%parameterCount!==0)throw Error("用例参数数量不匹配");
  return values/parameterCount;
 }
 export function compareJson(actual:string,expected:string):"match"|"mismatch"{
