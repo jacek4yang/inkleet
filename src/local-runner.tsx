@@ -1,3 +1,4 @@
+import {runResultNotice} from "./run-result-notice";
 import {useCodeMismatch,type LiveCode} from "./live-code";
 import {localResultReport,type OutputRow} from "./local-result-model";
 import {validateRunContext,sameRunStatus,type RunContext} from "./run-context";
@@ -65,10 +66,7 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
   const report=useMemo(()=>result?localResultReport(result,activeRecord):null,[result,activeRecord]);
   const currentPlans=useMemo(()=>cases.map(item=>({...item,expectation:item.expectation?.value.trim()?item.expectation:null})),[cases]);
   const codeMismatch=useCodeMismatch(codeSource,activeRecord?.snapshot.code);
-  const stale=!!activeRecord&&(codeMismatch||activeRecord.snapshot.language!==language||activeRecord.snapshot.metadata!==metadata||activeRecord.snapshot.title!==title||
-    (activeRecord.mode==="all"?JSON.stringify(activeRecord.cases)!==JSON.stringify(currentPlans):
-      activeRecord.cases.some(item=>JSON.stringify(item)!==JSON.stringify(currentPlans.find(current=>current.id===item.id)))||
-      ((activeRecord.mode??"selected")==="selected"&&activeRecord.cases.length===1&&activeRecord.cases[0].id!==selected)));
+  const resultNotice=runResultNotice(activeRecord,{codeMismatch,language,metadata,title,cases:currentPlans,selected});
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const guard = useRef(false), alive = useRef(true), sequence = useRef(0);
@@ -157,7 +155,7 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
     </div><div className="case-output">
     <div className="local-actions"><span role="status" hidden={!result}>{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : result.phase === "compiling" ? "编译中…" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过时限，已终止" : result.phase === "error" || result.error ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
     {result?.documentKey&&result.documentKey!==documentKey&&<p className="cache-warning">其他解答的运行结果</p>}
-    {stale && <p className="cache-warning">结果已过期</p>}
+    {resultNotice && <p className="cache-warning" aria-label="结果对应内容">{resultNotice}</p>}
     {!activeRecord && result && <p className="muted">上次运行</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
     {result?.truncated && <p role="alert">输出达到上限，已截断并终止进程。</p>}

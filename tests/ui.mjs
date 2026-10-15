@@ -967,7 +967,7 @@ try {
   await runPage.evaluate(() => window.__runTest.pending[0]());
   await runPanel.getByRole("button", { name: "停止", exact: true }).waitFor();
   await runPage.getByRole("textbox", { name: "代码编辑器", exact: true }).fill("def solve(values): return sum(values)");
-  await runPanel.getByText("结果已过期", { exact: true }).waitFor();
+  await runPanel.getByText("代码已修改 · 重新运行以更新结果",{exact:true}).waitFor();
   await runPanel.getByRole("button", { name: "收起", exact: true }).click();
   await runPage.getByRole("button", { name: "本地", exact: true }).click();
   await runPanel.getByRole("button", { name: "停止", exact: true }).click();
@@ -1280,7 +1280,7 @@ try {
   }),true,"desktop inputs and results have independent visible columns");
   await runPage.screenshot({path:"evidence/expected-result-mismatch.png"});
   await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("9007199254740993");
-  await runPanel.getByText("结果已过期",{exact:true}).waitFor();
+  await runPanel.getByText("预期结果已修改 · 重新运行以更新结果",{exact:true}).waitFor();
   await runPanel.getByText("与预期不符",{exact:true}).waitFor();
   await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
   await runPage.waitForFunction(()=>window.__runTest.starts.length===10);
@@ -1366,7 +1366,7 @@ try {
   await summary.getByText("符合 1",{exact:true}).waitFor();
   await summary.getByText("不符 1",{exact:true}).waitFor();
   await summary.getByText("错误 1",{exact:true}).waitFor();
-  await runPanel.getByText("结果已过期",{exact:true}).waitFor();
+  await runPanel.getByText("输入、预期结果已修改 · 重新运行以更新结果",{exact:true}).waitFor();
   assert.deepEqual(await runPage.evaluate(()=>window.__runTest.starts[12].cases.map(c=>c.input)),["[1]","[2]","[3]"]);
   await runPage.screenshot({path:"evidence/named-batch-results.png"});
   await runPanel.getByRole("button",{name:"重跑失败用例",exact:true}).click();
