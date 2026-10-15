@@ -2444,6 +2444,99 @@ try {
   assert.equal(snippetWorkerEvidence.bounded,true);
   await snippetWorkerPage.close();
 
+
+  const snippetPage=await browser.newPage();
+  await snippetPage.route("**/snippet-session-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor' style='height:500px'></div></body></html>"}));
+  await snippetPage.goto("http://127.0.0.1:5173/snippet-session-test");
+  await snippetPage.evaluate(async()=>{
+    const api=await import("/tests/snippet-session-harness.tsx");
+    const s=window.__snippetSessionTest={api,value:"",edits:[],statuses:[],version:1};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:97,version:1,server:"snippet-fixture",uri:"file:///solution.py",completionResolve:false};
+      if(command==="update_language_document"){s.version=args.version;return;}
+      if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
+      if(command==="language_request")return args.kind==="completion"?[{label:"nameComplete"}]:null;
+      if(command==="language_cancel_completion"||command==="stop_language_service")return;
+      throw Error(command);
+    }};
+    s.mount=api.mountSnippetEditor(document.querySelector("#editor"),s);
+    s.view=()=>api.EditorView.findFromDOM(document.querySelector(".cm-editor"));
+    s.insert=()=>{
+      const v=s.view(),d="$",prepared=api.prepareSnippet(d+"{1:name} = "+d+"1; "+d+"{2:value}"+d+"0");
+      const spec=api.snippetInsertion(v.state,prepared,0,v.state.doc.length);
+      if(!spec)throw Error("Snippet refused");v.dispatch(spec);v.focus();
+    };
+  });
+  const snippetCode=snippetPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await snippetCode.waitFor();
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.statuses.some(text=>text.includes("已连接")));
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
+  await snippetCode.press("ArrowRight");await snippetCode.press("X");
+  assert.equal(await snippetCode.innerText(),"nameX = nameX; value","narrowing selection does not break mirrors");
+  await snippetCode.press("Tab");
+  await snippetCode.press("4");await snippetCode.press("2");
+  assert.equal(await snippetCode.innerText(),"nameX = nameX; 42");
+  await snippetCode.press("Shift+Tab");
+  const selectedSnippet=await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);});
+  assert.equal(selectedSnippet,"nameX","Shift-Tab navigates rather than outdents");
+  await snippetCode.press("Escape");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.selection.main.head),5,"Escape collapses the existing selection at its end");
+  await snippetCode.press("Y");
+  assert.equal(await snippetCode.innerText(),"nameXY = nameX; 42","Escape cancels linkage without removing text");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setVim(true));
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.api.vimNormal(window.__snippetSessionTest.view()));
+  await snippetCode.press("i");
+  await snippetPage.waitForFunction(()=>!window.__snippetSessionTest.api.vimNormal(window.__snippetSessionTest.view()));
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
+  await snippetCode.press("Escape");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.api.vimNormal(window.__snippetSessionTest.view())),true,"snippet Escape does not swallow Vim normal transition");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null);
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setVim(false));
+  await snippetPage.waitForFunction(()=>!window.__snippetSessionTest.api.getCM(window.__snippetSessionTest.view()));
+  await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest;s.insert();
+    s.view().contentDOM.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true,data:"中"}));
+  });
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null,"composition boundary cancels partial session without consuming input");
+  await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest;s.insert();s.mount.destroy();
+    s.mount=s.api.mountSnippetEditor(document.querySelector("#editor"),s);
+  });
+  await snippetCode.waitFor();
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null,"cached EditorState cannot revive disposed snippet ownership");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
+  await snippetCode.press("ArrowRight");await snippetCode.press("Control+Space");
+  await snippetPage.getByRole("option",{name:"nameComplete",exact:true}).waitFor();
+  await snippetCode.press("Tab");
+  const fastSnippetTab=await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest,v=s.view(),session=v.state.field(s.api.snippetSessionState);
+    return {text:v.state.doc.toString(),head:v.state.selection.main.head,group:session?.fields.find(f=>f.id===session.active)?.group,completion:s.api.completionStatus(v.state)};
+  });
+  await writeFile("evidence/snippet-fast-tab.json",JSON.stringify(fastSnippetTab,null,2));
+  if(fastSnippetTab.text!=="nameComplete = nameComplete; value"){
+    assert.equal(fastSnippetTab.text,"name = name; value","fast popup Tab must not insert indentation");
+    assert.equal(fastSnippetTab.group,"t:1","fast popup Tab must not advance snippet");
+    assert.equal(fastSnippetTab.head,4);
+    assert.equal(fastSnippetTab.completion,"active","unaccepted completion remains available during CM interaction delay");
+    await snippetPage.waitForTimeout(100);
+    await snippetCode.press("Tab");
+  }
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.value==="nameComplete = nameComplete; value");
+  assert.equal(await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState);return s.fields.find(f=>f.id===s.active).group;}),"t:1","popup Tab accepts completion without also advancing snippet");
+  await snippetCode.press("Tab");
+  assert.equal(await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"value");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
+  await snippetCode.press("ArrowRight");await snippetCode.press("X");await snippetCode.press("Control+z");
+  assert.equal(await snippetCode.innerText(),"name = name; value","keyboard undo restores source and mirror together");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null);
+  await snippetCode.press("Control+y");
+  assert.equal(await snippetCode.innerText(),"nameX = nameX; value","keyboard redo restores linked text without reactivating session");
+  await snippetPage.screenshot({path:"evidence/snippet-flat-session.png"});
+  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Partial flat session only; nesting/choices/transforms and real IME/native acceptance remain unavailable.\n");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
+
   const providerPage=await browser.newPage();
   await providerPage.route("**/provider-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
   await providerPage.goto("http://127.0.0.1:5173/provider-test");
