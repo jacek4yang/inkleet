@@ -1241,6 +1241,10 @@ try {
   await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:0,results:['{"case":1,"ok":true,"value":9007199254740993}']}));
   await runPanel.getByText("与预期不符",{exact:true}).waitFor();
   await runPanel.locator(".case-expected pre").getByText("9007199254740992",{exact:true}).waitFor();
+  assert.equal(await runPanel.evaluate(panel=>{
+    const input=panel.querySelector(".case-editor").getBoundingClientRect(),output=panel.querySelector(".case-output").getBoundingClientRect();
+    return output.left>=input.right-1&&input.height>0&&output.height>0&&output.width>100;
+  }),true,"desktop inputs and results have independent visible columns");
   await runPage.screenshot({path:"evidence/expected-result-mismatch.png"});
   await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("9007199254740993");
   await runPanel.getByText("结果已过期",{exact:true}).waitFor();

@@ -1059,6 +1059,12 @@ try:
             click_debug_action('[data-action="local-execute"]')
             wait_for(lambda:json.loads(text('pre[aria-label="调用后 values"]'))==[3,2,1],"real void call displays mutated array",seconds=30)
             assert len(cmd("POST","/elements",{"using":"css selector","value":".case-argument"}))==1
+            input_bounds=cmd("GET",f"/element/{element('.case-editor')}/rect")
+            output_bounds=cmd("GET",f"/element/{element('.case-output')}/rect")
+            value_node=element('pre[aria-label="调用后 values"]')
+            value_bounds=cmd("GET",f"/element/{value_node}/rect")
+            assert output_bounds["x"]>=input_bounds["x"]+input_bounds["width"]-1,"native result column is independently visible"
+            assert value_bounds["y"]>=output_bounds["y"] and value_bounds["y"]+value_bounds["height"]<=output_bounds["y"]+output_bounds["height"],"native mutation value is visible without opening raw JSON"
             screenshot("in-place-result-native.png")
             click('.case-expectation summary')
             click('select[aria-label="预期结果比较目标"] option[value="argument:0"]')

@@ -148,10 +148,11 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
       {caseError&&<span role="alert">{caseError}</span>}
     </div>
     <div data-runner-pane="run" hidden={pane !== "run"}>
-    <div className="case-inputs">
+    <div className="case-editor"><div className="case-inputs">
     {parts?parts.map((value,index)=><label key={index}><span>{names[index]}</span><textarea rows={2} aria-label={parts.length===1?"本地测试输入":"参数 "+names[index]} value={value} onChange={e=>{const next=[...parts];next[index]=compactCaseValue(e.target.value);setInput(next.join("\n"));}} spellCheck={false}/></label>):<label><span>输入</span><textarea aria-label="本地测试输入" value={input} onChange={e=>setInput(e.target.value)} spellCheck={false}/></label>}
     </div>
     <details className="case-expectation"><summary>预期结果</summary><div className="case-inputs"><label><span>比较目标</span><select aria-label="预期结果比较目标" value={currentCase.expectation?.target.kind==="argument"?"argument:"+currentCase.expectation.target.index:"return"} onChange={e=>setExpectation(currentCase.expectation?.value??"",e.target.value==="return"?{kind:"return"}:{kind:"argument",index:Number(e.target.value.slice(9))})}><option value="return">返回值</option>{names.map((name,index)=><option key={index} value={"argument:"+index}>调用后 {name}</option>)}</select></label><label><span>预期</span><textarea rows={2} aria-label="预期结果" placeholder="未设置" value={currentCase.expectation?.value??""} onChange={e=>setExpectation(e.target.value)} spellCheck={false}/></label></div></details>
+    </div><div className="case-output">
     <div className="local-actions"><span role="status" hidden={!result}>{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : result.phase === "compiling" ? "编译中…" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过时限，已终止" : result.phase === "error" || result.error ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
     {result?.documentKey&&result.documentKey!==documentKey&&<p className="cache-warning">其他解答的运行结果</p>}
     {stale && <p className="cache-warning">结果已过期</p>}
@@ -164,7 +165,7 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
 
     {result && !busy(result) && result.exitCode!==null&&result.exitCode!==0 && <small className="exit-code">退出码 {result.exitCode}</small>}
-    </div>
+    </div></div>
     <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel onReveal={()=>{setPane("debug");onReveal?.();}} snapshot={{ documentKey, code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
   </section>;
 }
