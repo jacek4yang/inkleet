@@ -1228,8 +1228,15 @@ try {
   await runPanel.getByText("已停止",{exact:true}).waitFor();
 
   // Exact expected-result comparison freezes the selected policy with the run.
+  await runPage.setViewportSize({width:1200,height:800});
   await runPanel.locator(".case-expectation summary").click();
   await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("9007199254740992");
+  assert.equal(await runPanel.evaluate(panel=>{
+    const field=panel.querySelector('[aria-label="预期结果"]'),r=field.getBoundingClientRect(),p=field.closest(".case-editor").getBoundingClientRect();
+    const x=r.x+r.width/2,y=r.y+r.height/2;
+    return x>=p.left&&x<=p.right&&y>=p.top&&y<=p.bottom&&document.elementFromPoint(x,y)===field;
+  }),true,"compact expected field center is inside its native-sized scrollport");
+
   assert.equal(await runPanel.evaluate(panel=>{
     const button=panel.querySelector('[data-action="local-execute"]'),b=button.getBoundingClientRect(),p=panel.getBoundingClientRect();
     return b.top>=p.top&&b.bottom<=p.bottom&&document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.closest("button")===button;
