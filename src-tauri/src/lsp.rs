@@ -82,7 +82,7 @@ impl Services {
             // section, preventing a superseded response from publishing tokens.
             if session.completion_resolve{session.completion_cache.lock().map_err(|_|"补全缓存不可用")?.remember(&mut response,version,sequence);}
             crate::lsp_document::response(kind,&mut response,prefix);
-            crate::snippet_validation::completion(&self.root,id,version,sequence,&session.language,&response);
+            crate::snippet_validation::completion(&self.root,id,version,sequence,&session.language,json!({"line":line,"character":character,"prefix":prefix}),&response);
             return Ok(response);
         }
         if completion_sequence.is_some(){return Err("此请求不接受补全序号".into());}

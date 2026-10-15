@@ -2752,13 +2752,19 @@ try {
     const s=window.__snippetLspTest={api,value:"call",edits:[],statuses:[],saves:[],errors:[],version:1,source:"call("+d+"{1:value}, "+d+"1)"+d+"0",format:2,mode:1,indented:false,deferResolve:false,resolveReply:null,holdPreparation:false,preparedReply:null};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
-      if(command==="start_language_service")return {id:109,version:1,server:"snippet-lsp-fixture",uri:"file:///solution.py",completionResolve:true};
+      if(command==="start_language_service"){s.starts=(s.starts??0)+1;return {id:109,version:1,server:"snippet-lsp-fixture",uri:"file:///solution.py",completionResolve:true};}
       if(command==="update_language_document"){s.version=args.version;return;}
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
       if(command==="language_request"){
         if(args.kind!=="completion")return null;
+        (s.requests??=[]).push({...args});
+        if(s.retryProbe&&args.completionContext?.triggerKind===1&&s.noiseServed<2){
+          s.noiseServed++;
+          return [{label:s.noiseServed===1?"call":"unrelated",insertTextFormat:1,textEdit:{range:{start:{line:0,character:0},end:{line:0,character:s.noiseServed===1?0:4}},newText:"bad"},_inkleetCompletion:1}];
+        }
         const start=s.indented?2:0;
         s.item={label:"call",insertTextFormat:s.format,insertTextMode:s.mode,textEdit:{range:{start:{line:0,character:start},end:{line:0,character:start+4}},newText:s.source},_inkleetCompletion:1};
+        if(s.labelOnly){delete s.item.textEdit;s.item.insertText=s.source;}
         return [s.item];
       }
       if(command==="language_completion_resolve"){
@@ -2774,7 +2780,7 @@ try {
     s.mount=api.mountSnippetEditor(document.querySelector("#editor"),s);
     s.view=()=>api.EditorView.findFromDOM(document.querySelector(".cm-editor"));
     s.reset=(source="call("+d+"{1:value}, "+d+"1)"+d+"0",indented=false,mode=1,format=2)=>{
-      s.source=source;s.indented=indented;s.mode=mode;s.format=format;s.omitImports=false;s.deferResolve=false;s.resolveReply=null;s.holdPreparation=false;s.preparedReply=null;
+      s.requests=[];s.retryProbe=false;s.noiseServed=0;s.labelOnly=false;s.source=source;s.indented=indented;s.mode=mode;s.format=format;s.omitImports=false;s.deferResolve=false;s.resolveReply=null;s.holdPreparation=false;s.preparedReply=null;
       const v=s.view(),text=indented?"  call":"call";v.dispatch({changes:{from:0,to:v.state.doc.length,insert:text},selection:{anchor:text.length}});v.setTabFocusMode(false);v.focus();
     };
     const prototype=api.SnippetPreparationService.prototype,original=prototype.prepare;
@@ -2793,6 +2799,70 @@ try {
     await snippetLspPage.getByRole("option",{name:"call",exact:true}).waitFor();
     await snippetLspPage.waitForTimeout(150);await snippetLspCode.press("Enter");
   };
+
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.retryProbe=true;});
+  await acceptLspSnippet();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value, value)");
+  assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.noiseServed),2,"explicit completion retries nonempty invalid and unmatched candidates");
+  const readinessRequests=await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return {starts:s.starts,requests:s.requests.filter(r=>r.completionContext?.triggerKind===1)};});
+  assert.equal(readinessRequests.starts,1,"readiness retries never restart the server");
+  assert.equal(readinessRequests.requests.length,3);
+  for(let i=1;i<readinessRequests.requests.length;i++){
+    const a=readinessRequests.requests[0],b=readinessRequests.requests[i];
+    for(const key of ["id","version","line","character"])assert.equal(b[key],a[key],"readiness retries retain "+key);
+    assert.ok(b.completionSequence>readinessRequests.requests[i-1].completionSequence);
+  }
+  for(const boundary of ["Escape","blur"]){
+    await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.retryProbe=true;});
+    await snippetLspCode.press("Control+Space");
+    await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.noiseServed===1);
+    if(boundary==="Escape")await snippetLspCode.press("Escape");
+    else await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.blur());
+    await snippetLspPage.waitForTimeout(500);
+    assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.noiseServed),1,boundary+" stops backoff requests");
+    assert.equal(await snippetLspCode.innerText(),"call");
+    assert.equal(await snippetLspPage.getByRole("option",{name:"call",exact:true}).count(),0);
+  }
+  for(const reverse of [false,true]){
+    await snippetLspPage.evaluate(reverse=>{
+      const s=window.__snippetLspTest;s.reset("wrap($TM_SELECTED_TEXT, ${1:value})$0");
+      const v=s.view();v.dispatch({selection:{anchor:reverse?4:0,head:reverse?0:4}});v.focus();
+    },reverse);
+    await acceptLspSnippet();
+    await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\nwrap(call, value)");
+    assert.equal(await snippetLspPage.evaluate(()=>{const v=window.__snippetLspTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"value");
+    await snippetLspCode.press("Control+z");
+    assert.equal(await snippetLspCode.innerText(),"call","selected completion and import share one undo");
+  }
+  await snippetLspPage.evaluate(()=>{
+    const s=window.__snippetLspTest;s.reset("wrap($TM_SELECTED_TEXT, ${1:value})$0");s.labelOnly=true;
+    const v=s.view(),text="prefix$1";v.dispatch({changes:{from:0,to:v.state.doc.length,insert:text},selection:{anchor:6,head:8}});v.focus();
+  });
+  await acceptLspSnippet();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\nprefixwrap($1, value)");
+  await snippetLspCode.press("Control+z");assert.equal(await snippetLspCode.innerText(),"prefix$1","fallback replaces only the selection and never parses selected dollars");
+  await snippetLspPage.evaluate(()=>{
+    const s=window.__snippetLspTest;s.reset("plain",false,1,1);const v=s.view();v.dispatch({selection:{anchor:0,head:4}});v.focus();
+  });
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\nplain");
+  await snippetLspCode.press("Control+z");assert.equal(await snippetLspCode.innerText(),"call");
+  for(const stage of ["resolve","prepare"])for(const restore of [false,true]){
+    await snippetLspPage.evaluate(stage=>{
+      const s=window.__snippetLspTest;s.reset();s.deferResolve=stage==="resolve";s.holdPreparation=stage==="prepare";
+      const v=s.view();v.dispatch({selection:{anchor:0,head:4}});v.focus();s.selectedUndoDepth=s.api.undoDepth(v.state);
+    },stage);
+    await acceptLspSnippet();
+    await snippetLspPage.waitForFunction(stage=>typeof window.__snippetLspTest[stage==="resolve"?"resolveReply":"preparedReply"]==="function",stage);
+    await snippetLspPage.evaluate(({stage,restore})=>{
+      const s=window.__snippetLspTest,v=s.view();v.dispatch({selection:{anchor:1,head:4}});
+      if(restore)v.dispatch({selection:{anchor:0,head:4}});
+      s[stage==="resolve"?"resolveReply":"preparedReply"]();
+    },{stage,restore});
+    await snippetLspPage.waitForTimeout(150);
+    assert.equal(await snippetLspCode.innerText(),"call",stage+" anchor-only movement invalidates selected completion");
+    assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return s.api.undoDepth(v.state)===s.selectedUndoDepth&&v.state.field(s.api.snippetSessionState)===null;}),true,"stale selected completion adds neither history nor session");
+  }
+  await writeFile("evidence/SELECTED_COMPLETION_RESULT.txt","PASS: forward/reverse selected-text format2 completion, literal selected dollars, label-only exact selection replacement without prefix filtering, plain selected replacement, atomic imports/undo, anchor-only and ABA invalidation during resolve and preparation. Actual CodeEditor/public keyboard path with installed autocomplete; mocked LSP.\n");
   await snippetLspPage.evaluate(()=>window.__snippetLspTest.reset());
   await acceptLspSnippet();
   await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value, value)");
@@ -2835,6 +2905,16 @@ try {
   await snippetLspCode.press("Tab");
   assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return v.state.selection.main.head===v.state.doc.length;}),true,"mode2 final stop maps after generated indentation");
   await snippetLspPage.screenshot({path:"evidence/snippet-lsp-application.png"});
+
+  await snippetLspPage.evaluate(()=>{window.__snippetLspTest.reset("call(${0:pass})");});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(pass)");
+  assert.equal(await snippetLspPage.evaluate(()=>{const v=window.__snippetLspTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"pass","final-only default is selected for replacement");
+  await snippetLspPage.keyboard.insertText("value");
+  assert.equal(await snippetLspCode.innerText(),"import helper\ncall(value)");
+  await snippetLspPage.evaluate(()=>{window.__snippetLspTest.reset("call(${1:value}) ${0:tail}");});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value) tail");
+  await snippetLspCode.press("Tab");await snippetLspPage.keyboard.insertText("done");
+  assert.equal(await snippetLspCode.innerText(),"import helper\ncall(value) done","Tab final default is replaced, never prefixed");
   await snippetLspPage.evaluate(()=>{window.__snippetLspTest.reset("call($1)",false,1,1);});
   await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall($1)");
   assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view().state.field(s.api.snippetSessionState);}),null,"plain format never parses dollar syntax");
