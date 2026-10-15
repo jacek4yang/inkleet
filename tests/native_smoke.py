@@ -256,6 +256,86 @@ def fill_once(css, value):
         lines=cmd("POST",f"/element/{current}/elements",{"using":"css selector","value":".cm-line"})
         return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else cmd("GET",f"/element/{current}/property/value")
     wait_for(lambda: editor_text()==value,"GUI paste exactly preserves source")
+
+def snippet_trace():
+    paths=list(data.rglob("native-snippet-validation.json"))
+    if not paths: return []
+    assert len(paths)==1,"native snippet trace has one application-owned source"
+    return json.loads(paths[0].read_text())
+
+def snippet_selection():
+    return cmd("POST","/execute/sync",{"script":r"""
+      const content=document.querySelector('.code-pane .cm-content'),selection=window.getSelection();
+      let offset=null;
+      if(content&&selection?.focusNode&&content.contains(selection.focusNode)){
+        const range=document.createRange();range.selectNodeContents(content);range.setEnd(selection.focusNode,selection.focusOffset);offset=range.toString().length;
+      }
+      return {text:String(selection??""),offset,focus:document.activeElement?.getAttribute("aria-label"),activeFields:document.querySelectorAll(".code-pane .cm-snippet-field-active").length};
+    ""","args":[]})
+
+def native_snippet_case(group,code):
+    if group=="rust":
+        source="fn example() { let mut values = Vec::<i32>::new(); values.pu }"
+        member="push";replacement="7"
+        expected="fn example() { let mut values = Vec::<i32>::new(); values.push(7) }"
+    else:
+        source='import "strings"; func example() { var builder strings.Builder; builder.Wri }'
+        member="WriteString";replacement='"inkleet"'
+        expected='import "strings"; func example() { var builder strings.Builder; builder.WriteString("inkleet") }'
+    observations=[]
+    for phase in ("history","navigation"):
+        fill(code,source)
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End","Left","Left","ctrl+space"],check=True)
+        wait_for(lambda:member in text(".cm-tooltip-autocomplete"),group+" snippet candidates",seconds=90)
+        def matching_options():
+            rows=cmd("POST","/elements",{"using":"css selector","value":".cm-tooltip-autocomplete li"})
+            matches=[]
+            for row in rows:
+                labels=cmd("POST",f"/element/{row[EID]}/elements",{"using":"css selector","value":".cm-completionLabel"})
+                if not labels: continue
+                label=cmd("GET",f"/element/{labels[0][EID]}/property/textContent").lstrip()
+                if label==member or label.startswith(member+"("):
+                    matches.append({"node":row[EID],"label":label})
+            return matches
+        matches=wait_for(matching_options,group+" exact snippet option")
+        assert len(matches)==1,group+" snippet option is unambiguous"
+        choice=matches[0]
+        records=snippet_trace()
+        responses=[r for r in records if r.get("kind")=="completion" and r.get("language")==group and any(i["label"]==choice["label"] for i in r.get("items",[]))]
+        responses.sort(key=lambda r:(r["id"],r["version"],r["sequence"]),reverse=True)
+        response=responses[0] if responses else None
+        wire={"session":{"id":response["id"],"snippets":response["snippets"]},"response":response,"item":[i for i in response["items"] if i["label"]==choice["label"]]} if response else None
+        assert wire and wire["session"]["snippets"] is True,group+" launched binary negotiated experimental snippet support"
+        assert len(wire["item"])==1 and wire["item"][0]["format"]==2,group+" actual server item is format2"
+        time.sleep(.15)
+        cmd("POST",f"/element/{choice['node']}/click",{})
+        wait_for(lambda:snippet_selection()["activeFields"]>0,group+" real active argument field",seconds=20)
+        selected=snippet_selection()
+        assert selected["focus"]=="代码编辑器" and selected["text"],group+" argument selection owns keyboard focus"
+        accepted=source_text(code)
+        assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
+        observation={"phase":phase,"wire":wire,"accepted":accepted,"selection":selected}
+        if phase=="history":
+            subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+            wait_for(lambda:source_text(code)==source,group+" one undo removes the entire accepted snippet")
+            subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
+            wait_for(lambda:source_text(code)==accepted,group+" redo restores exact accepted snippet")
+        else:
+            # No pointer refocus here: it would invalidate the active parameter.
+            subprocess.run(["xdotool","type","--clearmodifiers","--delay","25",replacement],check=True)
+            wait_for(lambda:source_text(code)==expected,group+" selected argument replacement")
+            subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
+            wait_for(lambda:snippet_selection()["activeFields"]==0,group+" final snippet stop")
+            final=snippet_selection()
+            assert final["focus"]=="代码编辑器" and final["text"]=="" and final["offset"]==len(expected)-2,group+" final caret follows completed call"
+            observation["final"]=final
+            screenshot(group+"-snippet-native.png")
+        observations.append(observation)
+    (evidence/(group.upper()+"_SNIPPET_NATIVE_EVIDENCE.json")).write_text(json.dumps(observations,ensure_ascii=False,indent=2))
+    (evidence/(group.upper()+"_SNIPPET_NATIVE_RESULT.txt")).write_text("PASS: real Linux WebView and application-owned language server format2 item, worker application, selected argument replacement, Tab final caret, isolated undo/redo. Experimental debug-only capability; not production or cross-platform qualification.\n")
+
+
 def screenshot(name):
     try:
         (evidence / name).write_bytes(base64.b64decode(cmd("GET","/screenshot")))
@@ -879,7 +959,10 @@ try:
             wait_for(lambda: element("dialog.environments"), "environment dialog")
             environment_group="cpp" if group=="c" else group
             click(f'select[aria-label="开发环境语言"] option[value="{environment_group}"]')
-            click(".environment-summary button")
+            required_tools={"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview","zig","codelldb"],"cpp":["zig","clangd","codelldb"],"c":["zig","clangd","codelldb"]}[group]
+            # Shared C/C++ tools can already be installed; preserve every readiness assertion.
+            if not all("已安装" in text(f'[data-tool="{tool}"]') for tool in required_tools):
+                click(".environment-summary button")
             if group=="golang":
                 # Closing before Go finishes must not discard the queued gopls build.
                 click("dialog.environments header button")
@@ -910,6 +993,8 @@ try:
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
+            if os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1" and group in ("golang","rust"):
+                native_snippet_case(group,code)
             if group=="rust":
                 hash_source="fn example() {\n    let _map = \n}\n"
                 fill(code,hash_source)
@@ -1282,6 +1367,11 @@ except Exception:
         except Exception: pass
     raise
 finally:
+    if os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1":
+        try:
+            (evidence/"SNIPPET_NATIVE_WIRE.json").write_text(json.dumps(snippet_trace(),ensure_ascii=False,indent=2))
+        except Exception as trace_error:
+            (evidence/"SNIPPET_TRACE_ERROR.txt").write_text(str(trace_error))
     stop()
     driver.terminate()
     driver.wait(timeout=10)

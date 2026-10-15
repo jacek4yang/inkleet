@@ -3,6 +3,10 @@ name = "inkleet"
 version = "0.0.1"
 edition = "2021"
 
+[features]
+# Opt-in validation only; release and non-Linux builds remain disabled.
+native-snippet-validation = []
+
 [lib]
 name = "inkleet_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
