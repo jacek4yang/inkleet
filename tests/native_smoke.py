@@ -140,7 +140,7 @@ def click(css):
         click_debug_action(css)
         wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":css}),"settings closed")
         return
-    if css in (".pane-heading .actions button", '.pane-heading .actions button[aria-label="本地"]', '[data-action="local-execute"]', '[data-action="open-settings"]'):
+    if css in ('[data-local-tab="run"]', '[data-local-tab="debug"]', ".pane-heading .actions button", '.pane-heading .actions button[aria-label="本地"]', '[data-action="local-execute"]', '[data-action="open-settings"]'):
         return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:

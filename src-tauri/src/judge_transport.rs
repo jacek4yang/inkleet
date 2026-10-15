@@ -85,7 +85,7 @@ fn verdict_code(value:&Value)->Option<u64>{
     value.get("status_code").and_then(Value::as_u64).filter(|code|*code>0&&*code<=9_007_199_254_740_991)
 }
 fn verdict_message(value:&Value)->Option<&str>{
-    value.get("status_msg").and_then(Value::as_str).map(str::trim).filter(|message|!message.is_empty()&&message.len()<=1024)
+    value.get("status_msg").and_then(Value::as_str).map(|text|text.trim_matches(|ch:char|ch.is_whitespace()||ch=='\u{feff}')).filter(|message|!message.is_empty()&&message.len()<=1024&&!message.chars().any(char::is_control))
 }
 fn parse_check(value: Value) -> Result<CheckResult, String> {
     match value.get("state").and_then(Value::as_str) {
@@ -271,6 +271,10 @@ mod tests {
             assert!(parse_check(json!({"state":"SUCCESS","status_code":code})).is_err());
         }
         assert!(parse_check(json!({"state":"SUCCESS","status_msg":"x".repeat(1025)})).is_err());
+        for message in ["\u{feff}"," \u{feff} ","\0","Acc\0epted","Runtime\nError"]{
+            assert!(parse_check(json!({"state":"SUCCESS","status_msg":message})).is_err());
+        }
+
         let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_code":10,"status_msg":{"invalid":true}})).unwrap()else{panic!("numeric verdict rejected")};
         assert_eq!(result["status_code"],10);assert!(result.get("status_msg").is_none());
         let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_code":null,"status_msg":"Accepted"})).unwrap()else{panic!("message verdict rejected")};
@@ -280,7 +284,7 @@ mod tests {
     }
     #[test]
     fn padded_verdict_is_normalized_before_output_budgeting(){
-        for message in [" Accepted ".to_owned(),format!("{}Accepted{}", " ".repeat(300000)," ".repeat(1000))]{
+        for message in [" Accepted ".to_owned(),"\u{feff}Accepted\u{feff}".to_owned(),format!("{}Accepted{}", " ".repeat(300000)," ".repeat(1000))]{
             let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_msg":message,"code_answer":["actual"],"expected_code_answer":["expected"]})).unwrap()else{panic!("valid padded verdict rejected")};
             assert_eq!(result["status_msg"],"Accepted");
             assert_eq!(result["code_answer"],json!(["actual"]));
