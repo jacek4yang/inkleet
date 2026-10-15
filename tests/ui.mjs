@@ -2600,6 +2600,25 @@ try {
   await snippetCode.press("Control+s");
   await snippetPage.waitForFunction(()=>window.__snippetSessionTest.saves.at(-1)==="saved -> SAVED; tail");
   assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.formats.at(-1)),"saved -> SAVED; tail","formatter sees settled transform text");
+
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
+  await snippetPage.keyboard.insertText("button");
+  await snippetPage.evaluate(()=>{
+    const button=document.createElement("button");button.id="snippet-save-button";button.textContent="Save fixture";
+    button.onclick=()=>window.__snippetSessionTest.save?.();document.body.appendChild(button);
+  });
+  await snippetPage.locator("#snippet-save-button").click();
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.saves.at(-1)==="button -> BUTTON; tail");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setVim(true));
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.api.vimNormal(window.__snippetSessionTest.view()));
+  await snippetCode.press("i");await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
+  await snippetPage.keyboard.insertText("vim");
+  await snippetCode.press("Escape");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.dormant),true);
+  await snippetCode.press(":");await snippetPage.keyboard.type("w");await snippetPage.keyboard.press("Enter");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.saves.at(-1)==="vim -> VIM; tail");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setVim(false));
+  await snippetPage.waitForFunction(()=>!window.__snippetSessionTest.api.getCM(window.__snippetSessionTest.view()));
   await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
   await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
   await snippetCode.press("Tab");
@@ -2622,7 +2641,7 @@ try {
   await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor();
   assert.ok((await snippetCode.innerText()).endsWith("! / x; tail"),"worker timeout preserves user source and previous derived value");
   await snippetCode.press("Escape");
-  await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, save/formatter settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; nested sessions and native/real-IME acceptance remain unverified.\n");
+  await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; nested sessions and native/real-IME acceptance remain unverified.\n");
 
   await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested sessions and real IME/native acceptance remain unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();

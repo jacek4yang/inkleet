@@ -196,3 +196,43 @@ test("derived output before its source is never selected and maps caret on settl
  s=s.update(snippetTransformCommit(s,current.owner,current.revision,evaluateSnippetTransforms(snippetTransformSnapshot(s)!),0)!).state;
  assert.equal(s.doc.toString(),"longera aa");assert.equal(s.selection.main.head,10);
 });
+
+test("save settlement preserves source-relative caret beside an empty derived insertion",()=>{
+ const source=S+"{1/^(a)?b$/"+S+"{1:+X}/}"+S+"{1:b}"+S+"0";
+ let s=EditorState.create({extensions:[snippetSession]});
+ s=s.update(snippetInsertion(s,evaluateSnippetTransforms(prepareSnippet(source)),0,0)!).state;
+ s=s.update({changes:{from:0,to:1,insert:"ab"},selection:{anchor:0},userEvent:"input.type"}).state;
+ const current=s.field(snippetSessionState)!;
+ s=s.update(snippetTransformCommit(s,current.owner,current.revision,evaluateSnippetTransforms(snippetTransformSnapshot(s)!),0)!).state;
+ assert.equal(s.doc.toString(),"Xab");assert.equal(s.selection.main.head,1);
+ assert.equal(s.field(snippetSessionState)!.fields.find(f=>f.id===current.active)!.from,1);
+});
+test("backward transform navigation selects the current choice rather than resetting it",()=>{
+ const source=S+"{1|one,two|} "+S+"{2:a} "+S+"{2/a/A/}"+S+"0";
+ let s=EditorState.create({extensions:[snippetSession]});
+ s=s.update(snippetInsertion(s,evaluateSnippetTransforms(prepareSnippet(source)),0,0)!).state;
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ chooseSnippetValue(view as any,1,true);
+ const selected=s.selection.main;
+ s=s.update({changes:{from:selected.from,to:selected.to,insert:"aa"},selection:{anchor:selected.from+2},userEvent:"input.type"}).state;
+ const current=s.field(snippetSessionState)!;
+ s=s.update(snippetTransformCommit(s,current.owner,current.revision,evaluateSnippetTransforms(snippetTransformSnapshot(s)!),-1)!).state;
+ assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"two");
+ assert.equal(s.field(snippetSessionState)!.choiceIndex,1);
+});
+
+test("ending navigation preserves dirty transforms only until explicit save or another edit",()=>{
+ const source=S+"{1:a} "+S+"{1/a/b/}"+S+"0";
+ let s=EditorState.create({extensions:[snippetSession]});
+ const insert=()=>{s=s.update(snippetInsertion(s,evaluateSnippetTransforms(prepareSnippet(source)),0,s.doc.length)!).state;};
+ insert();s=s.update({changes:{from:0,to:1,insert:"aa"},selection:{anchor:2},userEvent:"input.type"}).state;
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(endSnippet(view as any),true);
+ const dormant=s.field(snippetSessionState)!;assert.equal(dormant.dormant,true);assert.equal(moveSnippetField(view as any,1),false);
+ const spec=snippetTransformCommit(s,dormant.owner,dormant.revision,evaluateSnippetTransforms(snippetTransformSnapshot(s)!),0)!;
+ s=s.update(spec).state;assert.equal(s.doc.toString(),"aa ba");assert.equal(s.field(snippetSessionState),null);
+ insert();s=s.update({changes:{from:0,to:1,insert:"aa"},selection:{anchor:2},userEvent:"input.type"}).state;endSnippet(view as any);
+ s=s.update({changes:{from:0,insert:"x"},selection:{anchor:1},userEvent:"input.type"}).state;
+ assert.equal(s.field(snippetSessionState),null,"later edits discard dormant transform authority");
+ assert.equal(s.doc.toString(),"xaa b","no hidden transform rewrite follows new user editing");
+});

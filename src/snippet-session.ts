@@ -270,7 +270,7 @@ class SnippetTransformRuntime {
   if(this.active&&(update.docChanged||update.selectionSet&&!update.state.selection.eq(this.active.selection)||session?.owner!==this.active.owner||session.revision!==this.active.revision))this.cancel();
   if(this.active&&update.focusChanged&&!this.view.hasFocus&&!this.active.after){
    const owner=this.active.owner;this.cancel();
-   queueMicrotask(()=>{const current=this.view.state.field(snippetSessionState,false);if(!this.closed&&!this.active&&current?.owner===owner)this.view.dispatch({effects:setSession.of({...current,waiting:false})});});
+   queueMicrotask(()=>{if(this.closed||this.active)return;const current=this.view.state.field(snippetSessionState,false);if(current?.owner===owner)this.view.dispatch({effects:setSession.of({...current,waiting:false})});});
   }
  }
  private cancel(){this.active=null;this.service.cancel();}
