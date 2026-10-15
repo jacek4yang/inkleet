@@ -1,4 +1,4 @@
-name: Linux named-case regression preview
+name: Linux editor responsiveness preview
 on:
   push:
     branches: [build/case-suite-preview]
@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 1e8de8cf6f074f3fbd7ba70e25caf3900fd431a0
+          ref: 4894a7c5e23d4e9034bd3ab3bdb8d3e358a1c1d9
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
@@ -34,7 +34,7 @@ jobs:
       - name: Prepare frontend and icon
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = 1e8de8cf6f074f3fbd7ba70e25caf3900fd431a0
+          test "$(git rev-parse HEAD)" = 4894a7c5e23d4e9034bd3ab3bdb8d3e358a1c1d9
           npm ci --ignore-scripts
           python3 -m py_compile tests/native_smoke.py
           npm run typecheck
