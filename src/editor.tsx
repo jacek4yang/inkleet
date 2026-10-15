@@ -116,7 +116,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
         blur(_event,view){endSnippet(view);},
         keydown(event, view) {
           // 即使 Escape 被补全/选区消耗，也保留显式移出编辑器的键盘通道。
-          if (event.key === "Escape") {endSnippet(view);if(getCM(view)){closeCompletion(view);view.setTabFocusMode(false);}else view.setTabFocusMode(2000);}
+          if (event.key === "Escape") {endSnippet(view,true);if(getCM(view)){closeCompletion(view);view.setTabFocusMode(false);}else view.setTabFocusMode(2000);}
         },
       }), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),

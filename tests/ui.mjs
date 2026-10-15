@@ -2685,9 +2685,17 @@ try {
   assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),dormantSaveCount,"canceled dormant save never runs after worker deadline");
   await snippetCode.press("Control+s");
   await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor();
+  const failedSnapshot=await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest,v=s.view();return {text:v.state.doc.toString(),undo:s.api.undoDepth(v.state)};});
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.view().contentDOM.blur());
+  await snippetCode.focus();
   await snippetCode.press("Escape");
   await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor({state:"hidden"});
+  assert.deepEqual(await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest,v=s.view();return {text:v.state.doc.toString(),undo:s.api.undoDepth(v.state)};}),failedSnapshot,"explicit failure exit preserves text and undo history");
+  assert.equal(await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest;return s.view().state.field(s.api.snippetSessionState);}),null,"explicit Escape after failure relinquishes transform authority");
   assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),dormantSaveCount,"failed dormant settlement never saves");
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,dormantSaveCount);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.at(-1)),failedSnapshot.text,"after explicit failure exit the user can save exactly the visible text");
   // Hold delivery after a real worker has produced a valid result. This tests
   // runtime intent arbitration and ignored-cancellation replies without timers
   // or production hooks; worker computation itself is exercised above.
@@ -2796,6 +2804,30 @@ try {
   await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(abc, abc)");
   await snippetLspCode.press("Tab");await snippetLspPage.keyboard.insertText("Q");
   assert.equal(await snippetLspCode.innerText(),"import helper\ncall(aQc, aQc)","nested format2 candidate reaches the actual session");
+
+  await snippetLspPage.evaluate(()=>{
+    const s=window.__snippetLspTest,d="$";
+    s.nestedDerivedSource="call("+d+"{1:a"+d+"{2:b}-"+d+"{2/(.*)/"+d+"{1:/upcase}/}}, "+d+"1, "+d+"{3:tail})"+d+"0";
+    s.reset(s.nestedDerivedSource);
+  });
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(ab-B, ab-B, tail)");
+  await snippetLspCode.press("Tab");await snippetLspPage.keyboard.insertText("bee");
+  assert.equal(await snippetLspCode.innerText(),"import helper\ncall(abee-B, abee-B, tail)");
+  await snippetLspCode.press("Tab");
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(abee-BEE, abee-BEE, tail)");
+  assert.equal(await snippetLspPage.evaluate(()=>{const v=window.__snippetLspTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"tail");
+  await snippetLspPage.screenshot({path:"evidence/snippet-nested-derived.png"});
+  await snippetLspCode.press("Control+z");assert.equal(await snippetLspCode.innerText(),"import helper\ncall(abee-B, abee-B, tail)","nested derived commit has separate keyboard undo");
+  await snippetLspCode.press("Control+y");assert.equal(await snippetLspCode.innerText(),"import helper\ncall(abee-BEE, abee-BEE, tail)");
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset(s.nestedDerivedSource);});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(ab-B, ab-B, tail)");
+  await snippetLspCode.press("Tab");await snippetLspPage.keyboard.insertText("q");await snippetLspCode.press("Control+s");
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.saves.at(-1)==="import helper\ncall(aq-Q, aq-Q, tail)");
+  await snippetLspCode.press("Shift+Tab");await snippetLspPage.keyboard.insertText("Z");
+  assert.equal(await snippetLspCode.innerText(),"import helper\ncall(Z, Z, tail)","nested targets are pruned when their parent is replaced");
+  await snippetLspCode.press("Tab");
+  assert.equal(await snippetLspPage.evaluate(()=>{const v=window.__snippetLspTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"tail");
+  await writeFile("evidence/NESTED_DERIVED_SNIPPET_RESULT.txt","PASS: actual format2 completion, owned worker nested transforms on Tab and Ctrl+S, child/parent mirrors, selected next field, separate undo/redo, subsequent parent pruning. Mocked LSP; native/real-IME and mode2 derived indentation remain unverified.\n");
   await snippetLspPage.evaluate(()=>{const d="$";window.__snippetLspTest.reset("call("+d+"TM_FILENAME, "+d+"{1:value})"+d+"0");});
   await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(solution.py, value)");
   await snippetLspPage.evaluate(()=>{const d="$";window.__snippetLspTest.reset("call("+d+"{1:value})\r\n"+d+"0",true,2);});

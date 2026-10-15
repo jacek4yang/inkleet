@@ -12,3 +12,5 @@ export function mountSnippetEditor(parent:HTMLElement,state:{value:string;edits:
 }
 export {completionStatus} from "@codemirror/autocomplete";
 export {SnippetPreparationService} from "../src/snippet-service";
+
+export {undoDepth} from "@codemirror/commands";

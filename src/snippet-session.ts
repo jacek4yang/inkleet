@@ -1,11 +1,12 @@
+import {encodeSnippetSnapshot,restoreSnippetFields,retainLiveTransforms} from "./snippet-transform-identity.ts";
 import {normalizeSnippetEol} from "./snippet-layout.ts";
-import {initializeNestedFields,planNestedEdit,type NestedField} from "./snippet-nested.ts";
+import {initializeNestedFields,planNestedEdit,validateNestedFields,type NestedField} from "./snippet-nested.ts";
 import {SnippetPreparationService} from "./snippet-service.ts";
 import {ChangeSet,EditorSelection,EditorState,StateEffect,StateField,Transaction,type Extension,type TransactionSpec} from "@codemirror/state";
 import {EditorView,Decoration,showTooltip,ViewPlugin,type ViewUpdate,type Tooltip,type DecorationSet} from "@codemirror/view";
 import {isolateHistory} from "@codemirror/commands";
 import {validatePreparedSnippet} from "./snippet-validation.ts";
-import {snippetLimits,snippetParserIdentity} from "./snippet-budget.ts";
+import {snippetLimits} from "./snippet-budget.ts";
 import type {PreparedSnippet,PreparedTransform,SnippetField} from "./snippet-prepare.ts";
 type Session={owner:object;nested:boolean;dormant:boolean;revision:number;from:number;to:number;transforms:PreparedTransform[];dirty:boolean;waiting:boolean;error:string|null;fields:SnippetField[];navigation:string[];active:number;choicesOpen:boolean;choiceIndex:number};
 const setSession=StateEffect.define<Session|null>({map:(value,mapping)=>{
@@ -61,10 +62,12 @@ function EditorStateTransactionFilter():Extension{
   tr.changes.iterChangedRanges((from,to)=>{if(changes.length<33)changes.push({from,to});});
   if(changes.length>32||session.revision>=Number.MAX_SAFE_INTEGER)return [tr,cancelSpec];
   if(session.nested){
-   const plan=planNestedEdit(session.fields as NestedField[],session.active,tr);
+   const plan=planNestedEdit(session.fields as NestedField[],session.active,tr,{},session.transforms);
    if(!plan)return [tr,cancelSpec];
-   const groups=new Set(plan.fields.filter(f=>!f.derived).map(f=>f.group));
-   return [tr,{sequential:true,changes:plan.changes,selection:plan.selection,effects:setSession.of({...session,fields:plan.fields,navigation:session.navigation.filter(g=>groups.has(g)),revision:session.revision+1,from:plan.changes.mapPos(tr.changes.mapPos(session.from,-1),-1),to:plan.changes.mapPos(tr.changes.mapPos(session.to,1),1),choicesOpen:false,waiting:false,error:null})}];
+   const live=retainLiveTransforms(plan.fields,session.transforms);
+   if(live.fields.length!==plan.fields.length&&!validateNestedFields(live.fields,plan.changes.apply(tr.newDoc),live.transforms))return [tr,cancelSpec];
+   const groups=new Set(live.fields.filter(f=>!f.derived).map(f=>f.group));
+   return [tr,{sequential:true,changes:plan.changes,selection:plan.selection,effects:setSession.of({...session,fields:live.fields,transforms:live.transforms,dirty:live.transforms.length>0,navigation:session.navigation.filter(g=>groups.has(g)),revision:session.revision+1,from:plan.changes.mapPos(tr.changes.mapPos(session.from,-1),-1),to:plan.changes.mapPos(tr.changes.mapPos(session.to,1),1),choicesOpen:false,waiting:false,error:null})}];
   }
   const contains=(f:SnippetField)=>!f.final&&!f.derived&&changes.every(c=>c.from>=f.from&&c.to<=f.to);
   const active=session.fields.find(f=>f.id===session.active);
@@ -118,10 +121,12 @@ export const snippetSession:Extension=[
   ".cm-snippet-choices button[aria-selected=true]":{backgroundColor:"var(--selection, #80808033)"}
  })
 ];
-export function endSnippet(view:EditorView):boolean{
- const session=view.state.field(snippetSessionState,false);if(!session||session.dormant&&!session.waiting&&!session.error)return false;
+export function endSnippet(view:EditorView,explicit=false):boolean{
+ const session=view.state.field(snippetSessionState,false);if(!session)return false;
+ if(explicit&&session.error){view.dispatch({effects:setSession.of(null)});return true;}
+ if(session.dormant&&!session.waiting&&!session.error)return false;
  // A dormant save still owns a worker and callback. Escape invalidates both.
- view.dispatch({effects:setSession.of(session.dirty?{...session,owner:{},dormant:true,waiting:false,error:null,choicesOpen:false}:null)});return true;
+ view.dispatch({effects:setSession.of(session.dirty?{...session,owner:{},dormant:true,waiting:false,error:session.error,choicesOpen:false}:null)});return true;
 }
 export function moveSnippetField(view:EditorView,direction:1|-1):boolean{
  const session=view.state.field(snippetSessionState,false);if(!session||session.dormant||view.composing)return false;
@@ -139,14 +144,14 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
  let result:PreparedSnippet;try{result=normalizeSnippetEol(prepared);}catch{return null;}
  // Intermediate flat-session checkpoint. Unsupported structures never insert
  // partially. Production LSP advertisement stays disabled until all gates pass.
- const nested=result.fields.some(f=>f.parent!==null);
- if(result.needsTransformEvaluation||nested&&result.transforms.length>0||state.selection.ranges.length!==1)return null;
- const fields=result.fields;
+ if(result.needsTransformEvaluation||state.selection.ranges.length!==1)return null;
+ const live=retainLiveTransforms(result.fields,result.transforms),fields=live.fields;
+ const nested=fields.some(f=>f.parent!==null);
  const defaults=new Map<string,string>();
  for(const f of fields){if(f.final||f.derived)continue;const value=result.text.slice(f.from,f.to);if(defaults.has(f.group)&&defaults.get(f.group)!==value)return null;defaults.set(f.group,value);}
  if(!nested)for(let i=0;i<fields.length;i++)for(let j=0;j<i;j++){
   const a=fields[i],b=fields[j];
-  if(a.from<b.to&&b.from<a.to||a.group===b.group&&a.from===a.to&&b.from===b.to&&a.from===b.from)return null;
+  if(a.from<b.to&&b.from<a.to||!a.derived&&!b.derived&&a.group===b.group&&a.from===a.to&&b.from===b.to&&a.from===b.from)return null;
  }
  if(!Array.isArray(additional)||additional.length>20)return null;
  const main:Edit={from,to,insert:result.text},edits=[main,...additional.map(edit=>({...edit}))];
@@ -160,11 +165,11 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
  const start=from+edits.filter(e=>e!==main&&(e.from<from||e.from===from&&e.to===e.from)).reduce((n,e)=>n+e.insert.length-(e.to-e.from),0);
  let absolute:SnippetField[]=fields.map(f=>({...f,from:f.from+start,to:f.to+start,choices:f.choices?[...f.choices]:undefined}));
  if(nested){
-  const initialized=initializeNestedFields(absolute,ChangeSet.of(edits,state.doc.length).apply(state.doc));
+  const initialized=initializeNestedFields(absolute,ChangeSet.of(edits,state.doc.length).apply(state.doc),{},live.transforms);
   if(!initialized)return null;absolute=initialized;
  }
  const first=absolute.find(f=>f.group===result.navigation[0]&&!f.derived);
- const session=first&&!first.final?{owner:{},nested,dormant:false,revision:0,from:start,to:start+result.text.length,transforms:result.transforms,dirty:false,waiting:false,error:null,fields:absolute,navigation:[...result.navigation],active:first.id,choicesOpen:!!first.choices?.length,choiceIndex:0}:null;
+ const session=first&&!first.final?{owner:{},nested,dormant:false,revision:0,from:start,to:start+result.text.length,transforms:live.transforms,dirty:false,waiting:false,error:null,fields:absolute,navigation:[...result.navigation],active:first.id,choicesOpen:!!first.choices?.length,choiceIndex:0}:null;
  return {changes:edits,selection:EditorSelection.single(first?.from??start+result.text.length,first&&!first.final?first.to:first?.from??start+result.text.length),effects:setSession.of(session),annotations:isolateHistory.of("full"),userEvent:"input.complete",scrollIntoView:true};
 }
 
@@ -241,11 +246,9 @@ export function acceptSnippetChoice(view:EditorView,advance=false):boolean{
 export function snippetTransformSnapshot(state:EditorState):PreparedSnippet|null{
  const session=state.field(snippetSessionState,false);if(!session||!session.dirty)return null;
  if(session.to-session.from>snippetLimits.output||session.from<0||session.to>state.doc.length)throw Error("Snippet transform region limit");
- return validatePreparedSnippet({schemaVersion:1,parserIdentity:snippetParserIdentity,
-  text:state.doc.sliceString(session.from,session.to),
-  fields:session.fields.map(f=>({...f,from:f.from-session.from,to:f.to-session.from})),
-  navigation:session.navigation,transforms:session.transforms,
-  needsTransformEvaluation:session.transforms.length>0,transformState:session.transforms.length?"pending":"resolved"});
+ return encodeSnippetSnapshot(state.doc.sliceString(session.from,session.to),
+  session.fields.map(f=>({...f,from:f.from-session.from,to:f.to-session.from})),
+  session.navigation,session.transforms).prepared;
 }
 function sameTransforms(a:PreparedTransform[],b:PreparedTransform[]):boolean{
  return a.length===b.length&&a.every((t,i)=>{
@@ -256,31 +259,62 @@ function sameTransforms(a:PreparedTransform[],b:PreparedTransform[]):boolean{
  });
 }
 export function snippetTransformCommit(state:EditorState,owner:object,revision:number,prepared:PreparedSnippet,direction:1|-1|0):TransactionSpec|null{
- const session=state.field(snippetSessionState,false);if(!session||session.owner!==owner||session.revision!==revision||!session.dirty)return null;
- let result:PreparedSnippet;try{result=validatePreparedSnippet(prepared);}catch{return null;}
- if(result.needsTransformEvaluation||result.fields.length!==session.fields.length||!sameTransforms(result.transforms,session.transforms))return null;
+ const session=state.field(snippetSessionState,false);
+ if(!session||session.owner!==owner||session.revision!==revision||!session.dirty||revision>=Number.MAX_SAFE_INTEGER)return null;
+ let result:PreparedSnippet,encoded:ReturnType<typeof encodeSnippetSnapshot>;
+ try{
+  result=validatePreparedSnippet(prepared);
+  encoded=encodeSnippetSnapshot(state.doc.sliceString(session.from,session.to),session.fields.map(f=>({...f,from:f.from-session.from,to:f.to-session.from})),session.navigation,session.transforms);
+ }catch{return null;}
+ if(result.needsTransformEvaluation||!sameTransforms(result.transforms,encoded.prepared.transforms)||result.navigation.length!==session.navigation.length||result.navigation.some((g,i)=>g!==session.navigation[i]))return null;
  if(result.text.includes("\r")||result.fields.some(f=>f.choices?.some(value=>value.includes("\r"))))return null;
- const fields=result.fields.map(f=>({...f,from:f.from+session.from,to:f.to+session.from}));
+ const fields=restoreSnippetFields(result,session.fields,encoded.wireToStable,session.from);if(!fields)return null;
  const edits:{from:number;to:number;insert:string;id:number}[]=[];
  for(let i=0;i<fields.length;i++){
   const before=session.fields[i],after=fields[i];
-  if(before.id!==after.id||before.group!==after.group||before.parent!==after.parent||before.derived!==after.derived||before.final!==after.final||
-    (before.choices?.length??0)!==(after.choices?.length??0)||before.choices?.some((text,j)=>text!==after.choices?.[j]))return null;
-  const oldText=state.doc.sliceString(before.from,before.to),newText=result.text.slice(result.fields[i].from,result.fields[i].to);
-  if(before.derived){if(oldText!==newText)edits.push({from:before.from,to:before.to,insert:newText,id:before.id});}
-  else if(oldText!==newText)return null;
+  if(before.derived){
+   const oldText=state.doc.sliceString(before.from,before.to),newText=result.text.slice(after.from-session.from,after.to-session.from);
+   if(oldText!==newText)edits.push({from:before.from,to:before.to,insert:newText,id:before.id});
+  }
  }
  edits.sort((a,b)=>a.from-b.from||a.to-b.to||a.id-b.id);
  for(let i=1;i<edits.length;i++)if(edits[i].from<edits[i-1].to)return null;
- const changes=ChangeSet.of(edits,state.doc.length);
- if(changes.apply(state.doc).sliceString(session.from,session.from+result.text.length)!==result.text)return null;
+ const changes=ChangeSet.of(edits,state.doc.length),document=changes.apply(state.doc);
+ if(document.sliceString(session.from,session.from+result.text.length)!==result.text)return null;
+ const ordinals=new Map(session.fields.map((f,i)=>[f.id,i])),byId=new Map(session.fields.map(f=>[f.id,f]));
+ const ancestors=new Map<number,Set<number>>(),ranges=new Map<number,{from:number;to:number}>();let delta=0;
+ for(const edit of edits){
+  const from=edit.from+delta;ranges.set(edit.id,{from,to:from+edit.insert.length});delta+=edit.insert.length-(edit.to-edit.from);
+  const parents=new Set<number>();let parent=byId.get(edit.id)!.parent;
+  while(parent!==null){if(parents.has(parent)||parents.size>=snippetLimits.depth)return null;parents.add(parent);parent=byId.get(parent)?.parent??null;}
+  ancestors.set(edit.id,parents);
+ }
+ for(let i=0;i<fields.length;i++){
+  const before=session.fields[i],after=fields[i],replacement=ranges.get(before.id);
+  let from:number,to:number;
+  if(replacement){from=replacement.from;to=replacement.to;}
+  else{
+   from=changes.mapPos(before.from,-1);to=changes.mapPos(before.to,-1);
+   for(const edit of edits)if(edit.from===edit.to){
+    const preceding=ordinals.get(edit.id)!<i;
+    if(edit.from===before.from&&preceding)from+=edit.insert.length;
+    if(edit.from===before.to&&(preceding||ancestors.get(edit.id)!.has(before.id)))to+=edit.insert.length;
+   }
+  }
+  if(from!==after.from||to!==after.to)return null;
+  if(!before.derived&&!edits.some(edit=>ancestors.get(edit.id)!.has(before.id))&&
+    state.doc.sliceString(before.from,before.to)!==document.sliceString(after.from,after.to))return null;
+ }
+ if(session.nested&&!validateNestedFields(fields as NestedField[],document,session.transforms))return null;
  const current=fields.find(f=>f.id===session.active)!;
  const nextGroup=direction===0?current.group:session.navigation[Math.max(0,session.navigation.indexOf(current.group)+direction)];
  const next=fields.find(f=>f.group===nextGroup&&!f.derived);
  const nextSession=next&&!next.final&&!(direction===0&&session.dormant)?{...session,revision:session.revision+1,to:session.from+result.text.length,fields,active:next.id,dirty:false,waiting:false,error:null,choicesOpen:direction!==0&&!!next.choices?.length,choiceIndex:Math.max(0,next.choices?.indexOf(result.text.slice(next.from-session.from,next.to-session.from))??0)}:null;
  const previous=session.fields.find(f=>f.id===session.active)!,chosen=state.selection.main;
  const inside=state.selection.ranges.length===1&&chosen.from>=previous.from&&chosen.to<=previous.to;
- const settledSelection=inside?EditorSelection.single(current.from+chosen.anchor-previous.from,current.from+chosen.head-previous.from):state.selection.map(changes);
+ const unchanged=state.doc.sliceString(previous.from,previous.to)===document.sliceString(current.from,current.to);
+ const endpoint=(position:number)=>unchanged?current.from+position-previous.from:position===previous.from?current.from:position===previous.to?current.to:changes.mapPos(position,1);
+ const settledSelection=inside?EditorSelection.single(endpoint(chosen.anchor),endpoint(chosen.head)):state.selection.map(changes);
  const selection=direction===0?settledSelection:EditorSelection.single(next?.from??session.from+result.text.length,next&&!next.final?next.to:next?.from??session.from+result.text.length);
  return {changes,selection,effects:setSession.of(nextSession),annotations:isolateHistory.of("full"),userEvent:"input.snippet-transform",scrollIntoView:true};
 }
