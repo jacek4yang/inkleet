@@ -1206,6 +1206,7 @@ try {
       await edit.pressSequentially(" // runner performance 01234567890123456789",{delay:20});
       await runPage.waitForFunction(()=>window.__runTest.perfPolls-window.__runTest.perfPollStart>=4&&window.__runTest.perf.frames.length>=30);
       const sample=await runPage.evaluate(()=>{const s=window.__runTest;return {...s.perf,appCommits:window.__appCommits,checkpointEnqueues:window.__checkpointEnqueues,polls:s.perfPolls-s.perfPollStart,rawBytes:s.perfRaw.reduce((n,v)=>n+new TextEncoder().encode(v).length,0)};});
+      await writeFile("evidence/RUNNER_PERFORMANCE_PENDING.json",JSON.stringify({hidden,...sample},null,2));
       assert.equal(sample.parses,0,"unchanged result envelopes must not be reparsed during source edits or fresh-array polls");
       assert.ok(sample.appCommits<=3,"already-dirty code typing must not rerender App per character");
       assert.equal(sample.checkpointEnqueues," // runner performance 01234567890123456789".length,"every code edit retains its recovery checkpoint enqueue");
@@ -2262,6 +2263,30 @@ try {
   await ownerPage.close();
   await writeFile("evidence/LSP_STATUS_OWNERSHIP_UI_RESULT.txt","PASS: actual App CPP-to-C switch never displays previous ready state during deferred document load/start; completion unavailable until new session is ready, then succeeds. Mocked IPC; native verification separate.\\n");
 
+
+
+  const breakpointPage=await browser.newPage();
+  await breakpointPage.route("**/breakpoint-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
+  await breakpointPage.goto("http://127.0.0.1:5173/breakpoint-test");
+  await breakpointPage.evaluate(async()=>{
+    const {EditorView,EditorState,debugGutter,sameBreakpointLines}=await import("/tests/input-harness.ts");
+    const s=window.__breakpointTest={lines:[2],notifications:[]};
+    s.gutter=debugGutter(s.lines,lines=>{
+      if(sameBreakpointLines(s.lines,lines))return;
+      s.lines=lines;s.notifications.push([...lines]);
+    });
+    s.view=new EditorView({state:EditorState.create({doc:"first\nsecond",extensions:s.gutter.extensions}),parent:document.querySelector("#editor")});
+    s.view.focus();
+  });
+  await breakpointPage.keyboard.type("same line typing");
+  assert.deepEqual(await breakpointPage.evaluate(()=>window.__breakpointTest.notifications),[],"same-line typing preserves breakpoint array without App notification");
+  await breakpointPage.evaluate(()=>{const s=window.__breakpointTest;s.view.dispatch({changes:{from:0,insert:"\n"}});});
+  assert.deepEqual(await breakpointPage.evaluate(()=>window.__breakpointTest.notifications),[[3]],"newline remapping must publish changed breakpoint line");
+  await breakpointPage.evaluate(()=>{const s=window.__breakpointTest;s.view.dispatch({selection:{anchor:s.view.state.doc.line(3).from}});s.gutter.toggle(s.view);});
+  assert.deepEqual(await breakpointPage.evaluate(()=>window.__breakpointTest.notifications),[[3],[]],"explicit toggle must publish removal");
+  await breakpointPage.keyboard.type("typing without points");
+  assert.equal(await breakpointPage.evaluate(()=>window.__breakpointTest.notifications.length),2,"empty breakpoint set must not update App per key");
+  await breakpointPage.evaluate(()=>window.__breakpointTest.view.destroy());await breakpointPage.close();
 
   const diagnosticPage=await browser.newPage();
   await diagnosticPage.route("**/diagnostic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));

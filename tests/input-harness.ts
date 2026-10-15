@@ -9,3 +9,6 @@ export {indentGuides,indentationColumns} from "../src/indent-guides";
 export {languageIntelligence,completionChanges} from "../src/intelligence";
 
 export {setDiagnostics,setDiagnosticsEffect,diagnosticCount} from "@codemirror/lint";
+
+export {debugGutter} from "../src/debug-gutter";
+export {sameBreakpointLines} from "../src/breakpoint-lines";
