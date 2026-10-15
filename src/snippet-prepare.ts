@@ -56,8 +56,8 @@ export function prepareSnippet(source:string,variables:Record<string,VariableVal
    const resolved=Object.prototype.hasOwnProperty.call(variables,marker.name)?variables[marker.name]:null;
    if(opaque){if(resolved?.kind==="value")emit(resolved.value);else if(marker.children.length)push(marker.children,parent,depth+1,true);else if(!resolved)emit(marker.name);continue;}
    if(marker.transform){
-    if(!resolved)throw new Error("Unknown transformed variable: "+marker.name);
-    const value=resolved.kind==="value"?resolved.value:"";
+    // LSP variable transforms use empty input when the variable is unresolved.
+    const value=resolved?.kind==="value"?resolved.value:"";
     const current=field("variable-transform:"+fields.length,parent,true);
     transform(marker.transform,current,undefined,value);emit(value);current.to=length;continue;
    }

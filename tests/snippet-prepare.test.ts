@@ -59,7 +59,7 @@ test("transforms preserve descriptors but cannot execute or claim insertion-read
  assert.throws(()=>transform.resolve("a"),/evaluation worker/);
  const variable=prepareSnippet(S+"{FILE/(.*)/"+S+"{1:?yes:no}/}",{FILE:{kind:"value",value:"file"}});
  assert.equal(variable.transforms[0].sourceValue,"file");assert.equal(variable.transforms[0].format[0].kind,"capture");
- assert.throws(()=>prepareSnippet(S+"{UNKNOWN/a/b/}"),/Unknown transformed variable/);
+ const unknown=prepareSnippet(S+"{UNKNOWN/a/b/}");assert.equal(unknown.transforms[0].sourceValue,"");assert.equal(unknown.needsTransformEvaluation,true);
 });
 test("malformed constructs and unsafe identities fail as a whole",()=>{
  for(const source of [S+"{",S+"{1:x",S+"{V:x",S+"{1|a,b}",S+"{1/a/b/gg}",S+"{1/a/b/uv}",S+"9007199254740993"]){

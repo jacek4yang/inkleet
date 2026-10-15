@@ -1,3 +1,4 @@
+import {normalizeSnippetEol} from "./snippet-layout.ts";
 import {initializeNestedFields,planNestedEdit,type NestedField} from "./snippet-nested.ts";
 import {SnippetPreparationService} from "./snippet-service.ts";
 import {ChangeSet,EditorSelection,EditorState,StateEffect,StateField,Transaction,type Extension,type TransactionSpec} from "@codemirror/state";
@@ -135,7 +136,7 @@ export function moveSnippetField(view:EditorView,direction:1|-1):boolean{
 }
 type Edit={from:number;to:number;insert:string};
 export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from:number,to:number,additional:Edit[]=[]):TransactionSpec|null{
- let result:PreparedSnippet;try{result=validatePreparedSnippet(prepared);}catch{return null;}
+ let result:PreparedSnippet;try{result=normalizeSnippetEol(prepared);}catch{return null;}
  // Intermediate flat-session checkpoint. Unsupported structures never insert
  // partially. Production LSP advertisement stays disabled until all gates pass.
  const nested=result.fields.some(f=>f.parent!==null);
@@ -147,10 +148,11 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
   const a=fields[i],b=fields[j];
   if(a.from<b.to&&b.from<a.to||a.group===b.group&&a.from===a.to&&b.from===b.to&&a.from===b.from)return null;
  }
- if(!Array.isArray(additional))return null;
- const main:Edit={from,to,insert:result.text},edits=[main,...additional];
- if(additional.length>20||edits.some(e=>!e||!Number.isSafeInteger(e.from)||!Number.isSafeInteger(e.to)||e.from<0||e.from>e.to||e.to>state.doc.length||typeof e.insert!=="string"||e.insert.length>snippetLimits.output))return null;
+ if(!Array.isArray(additional)||additional.length>20)return null;
+ const main:Edit={from,to,insert:result.text},edits=[main,...additional.map(edit=>({...edit}))];
+ if(edits.some(e=>!e||!Number.isSafeInteger(e.from)||!Number.isSafeInteger(e.to)||e.from<0||e.from>e.to||e.to>state.doc.length||typeof e.insert!=="string"||e.insert.length>snippetLimits.output))return null;
  if(edits.reduce((sum,e)=>sum+e.insert.length,0)>snippetLimits.copies)return null;
+ for(const edit of edits)edit.insert=edit.insert.replace(/\r\n?/g,"\n");
  const boundary=(pos:number)=>{if(pos<=0||pos>=state.doc.length)return true;const pair=state.doc.sliceString(pos-1,pos+1);return !(/[\uD800-\uDBFF]/.test(pair[0])&&/[\uDC00-\uDFFF]/.test(pair[1]));};
  if(edits.some(e=>!boundary(e.from)||!boundary(e.to)))return null;
  edits.sort((a,b)=>a.from-b.from||a.to-b.to||Number(a===main)-Number(b===main));
@@ -257,6 +259,7 @@ export function snippetTransformCommit(state:EditorState,owner:object,revision:n
  const session=state.field(snippetSessionState,false);if(!session||session.owner!==owner||session.revision!==revision||!session.dirty)return null;
  let result:PreparedSnippet;try{result=validatePreparedSnippet(prepared);}catch{return null;}
  if(result.needsTransformEvaluation||result.fields.length!==session.fields.length||!sameTransforms(result.transforms,session.transforms))return null;
+ if(result.text.includes("\r")||result.fields.some(f=>f.choices?.some(value=>value.includes("\r"))))return null;
  const fields=result.fields.map(f=>({...f,from:f.from+session.from,to:f.to+session.from}));
  const edits:{from:number;to:number;insert:string;id:number}[]=[];
  for(let i=0;i<fields.length;i++){
