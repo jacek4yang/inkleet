@@ -258,10 +258,8 @@ def fill_once(css, value):
     wait_for(lambda: editor_text()==value,"GUI paste exactly preserves source")
 
 def snippet_trace():
-    paths=list(data.rglob("native-snippet-validation.json"))
-    if not paths: return []
-    assert len(paths)==1,"native snippet trace has one application-owned source"
-    return json.loads(paths[0].read_text())
+    path=data/"top.jacek.inkleet/language-workspaces/native-snippet-validation.json"
+    return json.loads(path.read_text()) if path.exists() else []
 
 def snippet_selection():
     return cmd("POST","/execute/sync",{"script":r"""
@@ -284,6 +282,7 @@ def native_snippet_case(group,code):
         expected='import "strings"; func example() { var builder strings.Builder; builder.WriteString("inkleet") }'
     observations=[]
     for phase in ("history","navigation"):
+        prior=max(((r["id"],r["version"],r["sequence"]) for r in snippet_trace() if r.get("kind")=="completion" and r.get("language")==group),default=(0,0,0))
         fill(code,source)
         focus_code_editor()
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End","Left","Left","ctrl+space"],check=True)
@@ -307,6 +306,7 @@ def native_snippet_case(group,code):
         response=responses[0] if responses else None
         wire={"session":{"id":response["id"],"snippets":response["snippets"]},"response":response,"item":[i for i in response["items"] if i["label"]==choice["label"]]} if response else None
         assert wire and wire["session"]["snippets"] is True,group+" launched binary negotiated experimental snippet support"
+        assert (response["id"],response["version"],response["sequence"])>prior,group+" candidate trace belongs to this fresh acceptance phase"
         assert len(wire["item"])==1 and wire["item"][0]["format"]==2,group+" actual server item is format2"
         time.sleep(.15)
         cmd("POST",f"/element/{choice['node']}/click",{})
@@ -315,7 +315,7 @@ def native_snippet_case(group,code):
         assert selected["focus"]=="代码编辑器" and selected["text"],group+" argument selection owns keyboard focus"
         accepted=source_text(code)
         assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
-        observation={"phase":phase,"wire":wire,"accepted":accepted,"selection":selected}
+        observation={"phase":phase,"freshAfter":prior,"wire":wire,"accepted":accepted,"selection":selected}
         if phase=="history":
             subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
             wait_for(lambda:source_text(code)==source,group+" one undo removes the entire accepted snippet")
@@ -323,6 +323,8 @@ def native_snippet_case(group,code):
             wait_for(lambda:source_text(code)==accepted,group+" redo restores exact accepted snippet")
         else:
             # No pointer refocus here: it would invalidate the active parameter.
+            subprocess.run(["xdotool","key","--clearmodifiers","shift+Tab"],check=True)
+            assert source_text(code)==accepted and snippet_selection()["text"]==selected["text"],group+" first-field Shift+Tab retains parameter selection"
             subprocess.run(["xdotool","type","--clearmodifiers","--delay","25",replacement],check=True)
             wait_for(lambda:source_text(code)==expected,group+" selected argument replacement")
             subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)

@@ -8,9 +8,13 @@ pub(crate) fn snippet_validation_enabled()->bool{
     cfg!(all(feature="native-snippet-validation",debug_assertions,target_os="linux"))
 }
 pub(crate) fn completion_capabilities(language:&str)->Value{
-    let mut item=json!({"snippetSupport":snippet_validation_enabled(),"insertTextModeSupport":{"valueSet":[1]}});
+    let enabled=snippet_validation_enabled();
+    let mut item=json!({"snippetSupport":enabled});
+    if enabled{item["insertTextModeSupport"]=json!({"valueSet":[1]});}
     if language=="rust"{item["resolveSupport"]=json!({"properties":["documentation","additionalTextEdits"]});}
-    json!({"contextSupport":true,"insertTextMode":1,"completionItem":item})
+    let mut profile=json!({"contextSupport":true,"completionItem":item});
+    if enabled{profile["insertTextMode"]=json!(1);}
+    profile
 }
 
 pub struct Launch{
@@ -121,8 +125,10 @@ mod snippet_validation_tests{
         let rust=completion_capabilities("rust");
         assert_eq!(rust["completionItem"]["snippetSupport"],json!(snippet_validation_enabled()));
         assert_eq!(rust["completionItem"]["resolveSupport"]["properties"],json!(["documentation","additionalTextEdits"]));
-        assert_eq!(rust["insertTextMode"],json!(1));
-        assert_eq!(rust["completionItem"]["insertTextModeSupport"]["valueSet"],json!([1]));
+        if snippet_validation_enabled(){
+            assert_eq!(rust["insertTextMode"],json!(1));
+            assert_eq!(rust["completionItem"]["insertTextModeSupport"]["valueSet"],json!([1]));
+        }else{assert!(rust.get("insertTextMode").is_none());assert!(rust["completionItem"].get("insertTextModeSupport").is_none());}
         for language in ["python3","golang","java","c","cpp"]{
             let profile=completion_capabilities(language);
             assert!(profile["completionItem"].get("resolveSupport").is_none());
