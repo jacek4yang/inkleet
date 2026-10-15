@@ -293,14 +293,28 @@ def snippet_selection():
     ""","args":[]})
 
 def native_snippet_case(group,code):
+    tail=2
+    selections=None
+    accepted_expected=None
     if group=="rust":
         source="fn example() { let mut values = Vec::<i32>::new(); values.pu }"
-        member="push";replacement="7"
+        member="push";replacements=["7"]
         expected="fn example() { let mut values = Vec::<i32>::new(); values.push(7); }"
-    else:
+    elif group=="golang":
         source='import "strings"; func example() { var builder strings.Builder; builder.Wri }'
-        member="WriteString";replacement='"inkleet"'
+        member="WriteString";replacements=['"inkleet"']
         expected='import "strings"; func example() { var builder strings.Builder; builder.WriteString("inkleet") }'
+    elif group in ("c","cpp"):
+        if group=="c":
+            prefix="int inkleet_add(int left, int right); void example(void) { "
+        else:
+            prefix="struct Counter { int inkleet_add(int left, int right); }; void example() { Counter counter; counter."
+        source=prefix+"inkleet_a; }"
+        member="inkleet_add";replacements=["7","9"];selections=["int left","int right"];tail=3
+        accepted_expected=prefix+"inkleet_add(int left, int right); }"
+        expected=prefix+"inkleet_add(7, 9); }"
+    else: raise AssertionError("unsupported native snippet fixture")
+    argument_sources=[expected] if group not in ("c","cpp") else [prefix+"inkleet_add(7, int right); }",expected]
     observations=[]
     def persist_observations():
         (evidence/(group.upper()+"_SNIPPET_NATIVE_EVIDENCE.json")).write_text(json.dumps(observations,ensure_ascii=False,indent=2))
@@ -308,7 +322,7 @@ def native_snippet_case(group,code):
         prior=max(((r["id"],r["version"],r["sequence"]) for r in snippet_trace() if r.get("kind")=="completion" and r.get("language")==group),default=(0,0,0))
         fill(code,source)
         focus_code_editor()
-        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End","Left","Left","ctrl+space"],check=True)
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End",*(["Left"]*tail),"ctrl+space"],check=True)
         wait_for(lambda:member in text(".cm-tooltip-autocomplete"),group+" snippet candidates",seconds=90)
         def matching_options():
             rows=cmd("POST","/elements",{"using":"css selector","value":".cm-tooltip-autocomplete li"})
@@ -331,16 +345,27 @@ def native_snippet_case(group,code):
         assert wire and wire["session"]["snippets"] is True,group+" launched binary negotiated snippet support"
         assert (response["id"],response["version"],response["sequence"])>prior,group+" candidate trace belongs to this fresh acceptance phase"
         assert len(wire["item"])==1 and wire["item"][0]["format"]==2,group+" actual server item is format2"
+        assert wire["item"][0]["mode"]==1,group+" actual server item uses supported asIs mode"
+        if group in ("c","cpp"):
+            assert wire["item"][0]["source"]=="inkleet_add(${1:int left}, ${2:int right})",group+" pinned clangd two-argument snippet"
+            assert response["request"]["character"]==len(source)-tail,group+" exact editable completion cursor"
         time.sleep(.15)
         cmd("POST",f"/element/{choice['node']}/click",{})
         wait_for(lambda:snippet_selection()["activeFields"]>0,group+" real active argument field",seconds=20)
         selected=snippet_selection()
-        assert selected["focus"]=="代码编辑器" and selected["text"],group+" argument selection owns keyboard focus"
         accepted=source_text(code)
-        assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
         observation={"phase":phase,"freshAfter":prior,"wire":wire,"accepted":accepted,"selection":selected,"expectedAfterArgument":expected}
         observations.append(observation)
         persist_observations()
+        assert selected["focus"]=="代码编辑器" and selected["text"],group+" argument selection owns keyboard focus"
+        if accepted_expected is not None:
+            assert accepted==accepted_expected,group+" exact two-argument rendered snippet"
+            assert selected["text"]==selections[0],group+" exact first placeholder selection"
+            assert response["request"]["line"]==0,group+" editable source position excludes virtual scaffold"
+        assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
+        def record_navigation(label):
+            observation.setdefault("navigation",[]).append({"label":label,"source":source_text(code),"selection":snippet_selection()})
+            persist_observations()
         if phase=="history":
             subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
             wait_for(lambda:source_text(code)==source,group+" one undo removes the entire accepted snippet")
@@ -350,7 +375,26 @@ def native_snippet_case(group,code):
             # No pointer refocus here: it would invalidate the active parameter.
             subprocess.run(["xdotool","key","--clearmodifiers","shift+Tab"],check=True)
             assert source_text(code)==accepted and snippet_selection()["text"]==selected["text"],group+" first-field Shift+Tab retains parameter selection"
-            subprocess.run(["xdotool","type","--clearmodifiers","--delay","25",replacement],check=True)
+            for index,replacement in enumerate(replacements):
+                if index:
+                    subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
+                    wait_for(lambda:snippet_selection()["text"]==selections[index],group+" next argument selection")
+                    record_navigation("next")
+                    subprocess.run(["xdotool","key","--clearmodifiers","shift+Tab"],check=True)
+                    wait_for(lambda:snippet_selection()["text"]==replacements[index-1],group+" previous edited argument selection")
+                    record_navigation("previous")
+                    subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
+                    wait_for(lambda:snippet_selection()["text"]==selections[index],group+" restored next argument selection")
+                    record_navigation("next-restored")
+                subprocess.run(["xdotool","type","--clearmodifiers","--delay","25",replacement],check=True)
+                def argument_step_matches():
+                    step={"index":index,"source":source_text(code),"selection":snippet_selection()}
+                    steps=observation.setdefault("argumentSteps",[])
+                    if len(steps)==index: steps.append(step)
+                    else: steps[index]=step
+                    persist_observations()
+                    return step["source"]==argument_sources[index]
+                wait_for(argument_step_matches,group+" exact argument step source")
             def argument_matches():
                 observation["afterArgument"]=source_text(code)
                 observation["afterArgumentSelection"]=snippet_selection()
@@ -360,11 +404,12 @@ def native_snippet_case(group,code):
             subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
             wait_for(lambda:snippet_selection()["activeFields"]==0,group+" final snippet stop")
             final=snippet_selection()
-            assert final["focus"]=="代码编辑器" and final["text"]=="" and final["offset"]==len(expected)-2,group+" final caret follows completed call"
+            assert final["focus"]=="代码编辑器" and final["text"]=="" and final["offset"]==len(expected)-tail,group+" final caret follows completed call"
             observation["final"]=final
             screenshot(group+"-snippet-native.png")
         persist_observations()
-    (evidence/(group.upper()+"_SNIPPET_NATIVE_RESULT.txt")).write_text("PASS: real Linux WebView and application-owned language server format2 item, worker application, selected argument replacement, Tab final caret, isolated undo/redo. Linux x86_64 default capability with debug-only evidence tracing; not release-binary or cross-platform qualification.\n")
+    scope="debug-only C/C++ capability experiment" if group in ("c","cpp") else "Linux x86_64 default capability with debug-only evidence tracing"
+    (evidence/(group.upper()+"_SNIPPET_NATIVE_RESULT.txt")).write_text("PASS: real Linux WebView and application-owned language server format2 item, worker application, selected argument replacement, Tab final caret, isolated undo/redo. "+scope+"; not release-binary or cross-platform qualification.\n")
 
 
 def screenshot(name):
@@ -1024,7 +1069,7 @@ try:
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
-            if os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1" and group in ("golang","rust"):
+            if (os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1" and group in ("golang","rust")) or (os.environ.get("INKLEET_CLANG_SNIPPET_VALIDATION") == "1" and group in ("c","cpp")):
                 native_snippet_case(group,code)
             if group=="rust":
                 hash_source="fn example() {\n    let _map = \n}\n"
