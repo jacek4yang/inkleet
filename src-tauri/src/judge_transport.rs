@@ -95,6 +95,7 @@ fn parse_check(value: Value) -> Result<CheckResult, String> {
             let mut filtered = serde_json::Map::new();
             let mut remaining = 256 * 1024usize;
             let mut truncated = false;
+            let normalized_message=verdict_message(&value).map(|message|Value::String(message.to_owned()));
             for key in ["status_code", "status_msg", "run_success", "correct_answer", "compare_result", "total_correct",
                 "total_testcases", "status_runtime", "status_memory", "display_runtime", "memory",
                 "full_compile_error", "compile_error", "full_runtime_error", "runtime_error",
@@ -102,8 +103,8 @@ fn parse_check(value: Value) -> Result<CheckResult, String> {
                 // Malformed optional verdict fields must not consume the output
                 // budget or turn a valid alternate field into confusing UI text.
                 if key=="status_code"&&verdict_code(&value).is_none(){continue;}
-                if key=="status_msg"&&verdict_message(&value).is_none(){continue;}
-                if let Some(field) = value.get(key) {
+                if key=="status_msg"&&normalized_message.is_none(){continue;}
+                if let Some(field) = if key=="status_msg"{normalized_message.as_ref()}else{value.get(key)} {
                     let encoded = serde_json::to_string(field).map_err(|_| "判题字段编码失败")?;
                     if encoded.len() <= remaining {
                         remaining -= encoded.len(); filtered.insert(key.into(), field.clone());
@@ -276,6 +277,16 @@ mod tests {
         assert_eq!(result["status_msg"],"Accepted");assert!(result.get("status_code").is_none());
         let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_code":11,"status_msg":"x".repeat(300000),"code_answer":["actual"]})).unwrap()else{panic!("valid alternate verdict rejected")};
         assert_eq!(result["code_answer"],json!(["actual"]));assert!(result.get("status_msg").is_none());
+    }
+    #[test]
+    fn padded_verdict_is_normalized_before_output_budgeting(){
+        for message in [" Accepted ".to_owned(),format!("{}Accepted{}", " ".repeat(300000)," ".repeat(1000))]{
+            let CheckResult::Finished{result}=parse_check(json!({"state":"SUCCESS","status_msg":message,"code_answer":["actual"],"expected_code_answer":["expected"]})).unwrap()else{panic!("valid padded verdict rejected")};
+            assert_eq!(result["status_msg"],"Accepted");
+            assert_eq!(result["code_answer"],json!(["actual"]));
+            assert_eq!(result["expected_code_answer"],json!(["expected"]));
+            assert!(result.get("output_truncated").is_none());
+        }
     }
     #[test]
     fn malformed_check_preserves_waiting_id_and_duplicate_send_protection(){
