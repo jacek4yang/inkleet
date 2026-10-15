@@ -121,10 +121,12 @@ export const snippetSession:Extension=[
   ".cm-snippet-choices button[aria-selected=true]":{backgroundColor:"var(--selection, #80808033)"}
  })
 ];
-export function endSnippet(view:EditorView):boolean{
- const session=view.state.field(snippetSessionState,false);if(!session||session.dormant&&!session.waiting&&!session.error)return false;
+export function endSnippet(view:EditorView,explicit=false):boolean{
+ const session=view.state.field(snippetSessionState,false);if(!session)return false;
+ if(explicit&&session.error){view.dispatch({effects:setSession.of(null)});return true;}
+ if(session.dormant&&!session.waiting&&!session.error)return false;
  // A dormant save still owns a worker and callback. Escape invalidates both.
- view.dispatch({effects:setSession.of(session.dirty?{...session,owner:{},dormant:true,waiting:false,error:null,choicesOpen:false}:null)});return true;
+ view.dispatch({effects:setSession.of(session.dirty?{...session,owner:{},dormant:true,waiting:false,error:session.error,choicesOpen:false}:null)});return true;
 }
 export function moveSnippetField(view:EditorView,direction:1|-1):boolean{
  const session=view.state.field(snippetSessionState,false);if(!session||session.dormant||view.composing)return false;
@@ -149,7 +151,7 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
  for(const f of fields){if(f.final||f.derived)continue;const value=result.text.slice(f.from,f.to);if(defaults.has(f.group)&&defaults.get(f.group)!==value)return null;defaults.set(f.group,value);}
  if(!nested)for(let i=0;i<fields.length;i++)for(let j=0;j<i;j++){
   const a=fields[i],b=fields[j];
-  if(a.from<b.to&&b.from<a.to||a.group===b.group&&a.from===a.to&&b.from===b.to&&a.from===b.from)return null;
+  if(a.from<b.to&&b.from<a.to||!a.derived&&!b.derived&&a.group===b.group&&a.from===a.to&&b.from===b.to&&a.from===b.from)return null;
  }
  if(!Array.isArray(additional)||additional.length>20)return null;
  const main:Edit={from,to,insert:result.text},edits=[main,...additional.map(edit=>({...edit}))];

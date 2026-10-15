@@ -84,3 +84,22 @@ test("dense restoration rejects identity corruption and preserves original metad
  assert.equal(restoreSnippetFields(encoded.prepared,fields,encoded.wireToStable.map(()=>10)),null);
  assert.throws(()=>encodeSnippetSnapshot(prepared.text,[...fields,fields[0]],prepared.navigation,[]),/identity/);
 });
+
+test("unchanged empty derived siblings retain their own side of changed insertions",()=>{
+ for(const firstChanges of [true,false]){
+  const a=firstChanges?"A":"",b=firstChanges?"":"BC";
+  let s=start(D+"{1:b} "+D+"{1/^(a)?b$/"+D+"{1:+"+a+"}/}"+D+"{1/^(a)?b$/"+D+"{1:+"+b+"}/}"+D+"0");
+  s=edit(s,"ab");s=settle(s);
+  assert.equal(s.doc.toString(),"ab "+a+b);
+  assert.deepEqual(s.field(snippetSessionState)!.fields.filter(f=>f.derived).map(f=>[f.from,f.to]),firstChanges?[[3,4],[4,4]]:[[3,3],[3,5]]);
+ }
+});
+test("forged equal-text ranges and reordered navigation cannot acquire ownership",()=>{
+ let s=start(D+"{1:a} "+D+"{1/a/aa/} "+D+"{2:a}"+D+"0");s=edit(s,"aa");
+ const session=s.field(snippetSessionState)!,result=evaluateSnippetTransforms(snippetTransformSnapshot(s)!);
+ assert.equal(result.text,"aa aaa a");
+ const forged=structuredClone(result),field=forged.fields.find(f=>f.group==="t:2")!;field.from=3;field.to=4;
+ assert.equal(snippetTransformCommit(s,session.owner,session.revision,forged,0),null);
+ const reordered=structuredClone(result);reordered.navigation.reverse();
+ assert.equal(snippetTransformCommit(s,session.owner,session.revision,reordered,0),null);
+});
