@@ -1,14 +1,24 @@
 
 import {ChangeSet,EditorSelection,type Text,type Transaction} from "@codemirror/state";
-import type {SnippetField} from "./snippet-prepare.ts";
+import type {SnippetField,PreparedTransform} from "./snippet-prepare.ts";
 import {snippetLimits} from "./snippet-budget.ts";
 export type NestedField=SnippetField&{originPath:number[];sourceOrder:number};
 export type NestedPlan={changes:ChangeSet;fields:NestedField[];selection:EditorSelection};
 type Limits={copies:number;operations:number};
 class Refused extends Error{}
 class Budget{
- work=0;copies=0;readonly limits:Limits;
- constructor(limits:Partial<Limits>){this.limits={copies:snippetLimits.copies,operations:2000000,...limits};}
+ work=0;copies=0;readonly limits:Limits;readonly transforms:Map<number,PreparedTransform>;private signatures=new Map<number,string>();
+ constructor(limits:Partial<Limits>,transforms:PreparedTransform[]=[]){
+  this.limits={copies:snippetLimits.copies,operations:2000000,...limits};
+  if(transforms.length>snippetLimits.transforms)throw new Refused();
+  this.transforms=new Map(transforms.map(t=>[t.target,t]));if(this.transforms.size!==transforms.length)throw new Refused();
+ }
+ signature(id:number){
+  const cached=this.signatures.get(id);if(cached!==undefined)return cached;
+  const t=this.transforms.get(id);if(!t)throw new Refused();
+  const value=JSON.stringify({pattern:t.pattern,flags:t.flags,sourceGroup:t.sourceGroup,sourceValue:t.sourceValue,format:t.format});
+  this.step(value.length);this.signatures.set(id,value);return value;
+ }
  step(n=1){this.work+=n;if(this.work>this.limits.operations)throw new Refused();}
  copy(n:number){if(!Number.isSafeInteger(n)||n<0)throw new Refused();this.copies+=n;if(this.copies>this.limits.copies)throw new Refused();}
  slice(doc:Text,from:number,to:number){if(to<from||to-from>snippetLimits.output)throw new Refused();this.copy(to-from);return doc.sliceString(from,to);}
@@ -21,6 +31,10 @@ function choices(a:SnippetField,b:SnippetField,budget:Budget){
  if(a.choices.length!==b.choices.length)return false;
  return a.choices.every((s,i)=>{budget.step(1+Math.max(s.length,b.choices![i].length));return s===b.choices![i];});
 }
+function sameFieldKind(a:SnippetField,z:SnippetField,b:Budget){
+ if(a.derived!==z.derived||a.final!==z.final)return false;
+ return a.derived?b.signature(a.id)===b.signature(z.id):a.group===z.group;
+}
 function subtree(root:NestedField,index:Index,b:Budget){
  const result:NestedField[]=[],pending=[...(index.children.get(root.id)??[])];
  while(pending.length){b.step();const f=pending.pop()!;result.push(f);pending.push(...(index.children.get(f.id)??[]));if(result.length>snippetLimits.occurrences)throw new Refused();}
@@ -31,15 +45,15 @@ function indexFields(fields:NestedField[],length:number,b:Budget):Index{
  const byId=new Map<number,NestedField>(),children=new Map<number|null,NestedField[]>(),groups=new Map<string,NestedField[]>(),paths=new Set<string>(),ordinals=new Set<number>();
  for(const f of fields){
   b.step(1+f.originPath.length);
-  if(![f.id,f.sourceOrder,f.from,f.to,...f.originPath].every(n=>Number.isSafeInteger(n)&&n>=0)||f.from>f.to||f.to>length||f.derived||f.final&&f.parent!==null||!f.group||byId.has(f.id)||ordinals.has(f.sourceOrder)||!f.originPath.length||f.originPath.length>snippetLimits.depth)throw new Refused();
+  if(![f.id,f.sourceOrder,f.from,f.to,...f.originPath].every(n=>Number.isSafeInteger(n)&&n>=0)||f.from>f.to||f.to>length||f.derived&&!b.transforms.has(f.id)||f.final&&f.parent!==null||!f.group||byId.has(f.id)||ordinals.has(f.sourceOrder)||!f.originPath.length||f.originPath.length>snippetLimits.depth)throw new Refused();
   const path=f.originPath.join(".");if(paths.has(path))throw new Refused();paths.add(path);ordinals.add(f.sourceOrder);byId.set(f.id,f);
   const siblings=children.get(f.parent)??[];siblings.push(f);children.set(f.parent,siblings);
-  const occurrences=groups.get(f.group)??[];occurrences.push(f);groups.set(f.group,occurrences);
+  if(!f.derived){const occurrences=groups.get(f.group)??[];occurrences.push(f);groups.set(f.group,occurrences);}
  }
  if(groups.size>snippetLimits.groups)throw new Refused();
  for(const f of fields){
   b.step();if(f.parent===null){if(f.originPath.length!==1)throw new Refused();continue;}
-  const p=byId.get(f.parent);if(!p||f.from<p.from||f.to>p.to||f.originPath.length!==p.originPath.length+1||!descendant(f,p,b))throw new Refused();
+  const p=byId.get(f.parent);if(!p||p.derived||f.from<p.from||f.to>p.to||f.originPath.length!==p.originPath.length+1||!descendant(f,p,b))throw new Refused();
  }
  for(const siblings of children.values()){
   siblings.sort((a,z)=>a.sourceOrder-z.sourceOrder);
@@ -49,7 +63,7 @@ function indexFields(fields:NestedField[],length:number,b:Budget):Index{
  const parents=new Map<string,Set<string>>(),indegree=new Map<string,number>();
  for(const g of groups.keys()){parents.set(g,new Set());indegree.set(g,0);}
  for(const f of fields){
-  b.step();if(f.parent===null)continue;const p=byId.get(f.parent)!.group;if(p===f.group)throw new Refused();
+  b.step();if(f.parent===null||f.derived)continue;const p=byId.get(f.parent)!.group;if(p===f.group)throw new Refused();
   if(!parents.get(f.group)!.has(p)){parents.get(f.group)!.add(p);indegree.set(p,indegree.get(p)!+1);}
  }
  const queue=[...groups.keys()].filter(g=>indegree.get(g)===0),order:string[]=[];
@@ -65,16 +79,16 @@ function isomorphic(index:Index,b:Budget,doc?:Text){
    const paths=new Map(actual.map(f=>[relative(f,destination,b),f]));
    for(const f of template){
     b.step();const other=paths.get(relative(f,source,b));
-    if(!other||other.group!==f.group||other.final!==f.final||other.from-destination.from!==f.from-source.from||other.to-destination.from!==f.to-source.from||!choices(other,f,b))throw new Refused();
+    if(!other||!sameFieldKind(other,f,b)||other.from-destination.from!==f.from-source.from||other.to-destination.from!==f.to-source.from||!choices(other,f,b))throw new Refused();
    }
    if(doc&&b.slice(doc,destination.from,destination.to)!==value)throw new Refused();
   }
  }
 }
 /** Validated parser preorder becomes immutable occurrence paths once, not per edit. */
-export function initializeNestedFields(input:SnippetField[],doc:Text,limits:Partial<Limits>={}):NestedField[]|null{
+export function initializeNestedFields(input:SnippetField[],doc:Text,limits:Partial<Limits>={},transforms:PreparedTransform[]=[]):NestedField[]|null{
  try{
-  const b=new Budget(limits),fields:NestedField[]=[],byId=new Map<number,NestedField>(),slots=new Map<number|null,number>();
+  const b=new Budget(limits,transforms),fields:NestedField[]=[],byId=new Map<number,NestedField>(),slots=new Map<number|null,number>();
   if(input.length>snippetLimits.occurrences)throw new Refused();
   for(let i=0;i<input.length;i++){
    b.step();const f=input[i],p=f.parent===null?null:byId.get(f.parent);if(f.parent!==null&&!p||byId.has(f.id))throw new Refused();
@@ -105,7 +119,7 @@ function copyGroup(fields:NestedField[],doc:Text,group:string,editedId:number,b:
   replacements.set(e.root.id,{...e.root,from:e.outputFrom,to:e.outputFrom+value.length});
   for(const child of layout){
    b.step();const dest=paths.get(relative(child,source,b));
-   if(!dest||dest.group!==child.group||dest.final!==child.final||!choices(dest,child,b))throw new Refused();
+   if(!dest||!sameFieldKind(dest,child,b)||!choices(dest,child,b))throw new Refused();
    retained.add(dest.id);replacements.set(dest.id,{...dest,from:e.outputFrom+child.from-source.from,to:e.outputFrom+child.to-source.from});
   }
   for(const child of descendants){b.step();if(!retained.has(child.id))removed.add(child.id);}
@@ -127,11 +141,11 @@ function copyGroup(fields:NestedField[],doc:Text,group:string,editedId:number,b:
  return {fields:output,changes};
 }
 /** Speculate over persistent Text; commit only the complete bounded plan. */
-export function planNestedEdit(original:NestedField[],activeId:number,tr:Transaction,limits:Partial<Limits>={}):NestedPlan|null{
+export function planNestedEdit(original:NestedField[],activeId:number,tr:Transaction,limits:Partial<Limits>={},transforms:PreparedTransform[]=[]):NestedPlan|null{
  try{
-  const b=new Budget(limits);if(!tr.docChanged||tr.startState.selection.ranges.length!==1||tr.newSelection.ranges.length!==1)throw new Refused();
+  const b=new Budget(limits,transforms);if(!tr.docChanged||tr.startState.selection.ranges.length!==1||tr.newSelection.ranges.length!==1)throw new Refused();
   const initial=indexFields(original,tr.startState.doc.length,b),active=initial.byId.get(activeId),before=tr.startState.selection.main;
-  if(!active||active.final||before.from<active.from||before.to>active.to)throw new Refused();
+  if(!active||active.final||active.derived||before.from<active.from||before.to>active.to)throw new Refused();
   const ranges:{from:number;to:number}[]=[];
   tr.changes.iterChangedRanges((from,to)=>{b.step();if(ranges.length>=32||from<active.from||to>active.to)throw new Refused();ranges.push({from,to});},true);
   const whole=ranges.length===1&&ranges[0].from===active.from&&ranges[0].to===active.to;
@@ -159,4 +173,13 @@ export function planNestedEdit(original:NestedField[],activeId:number,tr:Transac
   const current=final.byId.get(activeId);if(!current||Math.max(anchor,head)>current.to-current.from)throw new Refused();
   return {changes:combined,fields,selection:EditorSelection.single(current.from+anchor,current.from+head)};
  }catch(error){if(error instanceof Refused)return null;throw error;}
+}
+
+/** Validate existing immutable paths after an owned transform commit. */
+export function validateNestedFields(fields:NestedField[],doc:Text,transforms:PreparedTransform[]):boolean{
+ try{
+  const b=new Budget({},transforms),index=indexFields(fields,doc.length,b);
+  if(transforms.some(t=>!index.byId.get(t.target)?.derived||t.sourceGroup!==undefined&&!index.groups.has(t.sourceGroup)))return false;
+  isomorphic(index,b,doc);return true;
+ }catch(error){if(error instanceof Refused)return false;throw error;}
 }

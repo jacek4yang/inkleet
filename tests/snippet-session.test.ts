@@ -278,10 +278,9 @@ test("nested cursor selection chooses the innermost editable occurrence",()=>{
  s=s.update({changes:{from:2,insert:"!"},selection:{anchor:3},userEvent:"input.type"}).state;
  assert.equal(s.doc.toString(),"ab!cd / ab!cd");
 });
-test("nested derived sessions remain refused after worker evaluation",()=>{
- const s=EditorState.create({extensions:[snippetSession]}),source=S+"{1:a"+S+"{2:b}} "+S+"{2/b/B/}";
- const prepared=evaluateSnippetTransforms(prepareSnippet(source));
- assert.equal(snippetInsertion(s,prepared,0,0),null);
+test("nested derived dependency cycles remain refused before insertion",()=>{
+ const source=S+"{1:a"+S+"{1/(.*)/x/}}";
+ assert.throws(()=>evaluateSnippetTransforms(prepareSnippet(source)),/Cyclic/);
 });
 
 test("nested explicit choice overflow leaves document and session untouched",()=>{
