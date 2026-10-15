@@ -69,7 +69,7 @@ test("unrelated transaction effects survive mirror propagation",()=>{
 });
 test("unsupported or invalid activation is all-or-nothing",()=>{
  const s=EditorState.create({doc:"token",extensions:[snippetSession]});
- for(const source of [S+"{1:"+S+"{2:x}}",S+"{1/a/b/}",S+"1"+S+"1"]){
+ for(const source of [S+"{1:"+S+"{2/a/b/}}",S+"{1/a/b/}",S+"1"+S+"1"]){
   assert.equal(snippetInsertion(s,prepareSnippet(source),0,5),null,source);
  }
  assert.equal(snippetInsertion(s,prepareSnippet(sample),0,5,[{from:2,to:2,insert:"bad"}]),null);
@@ -235,4 +235,60 @@ test("ending navigation preserves dirty transforms only until explicit save or a
  s=s.update({changes:{from:0,insert:"x"},selection:{anchor:1},userEvent:"input.type"}).state;
  assert.equal(s.field(snippetSessionState),null,"later edits discard dormant transform authority");
  assert.equal(s.doc.toString(),"xaa b","no hidden transform rewrite follows new user editing");
+});
+
+test("nested navigation edits every child and parent mirror in one undo event",()=>{
+ let s=start(S+"{1:a"+S+"{2:b}c} / "+S+"1 / "+S+"2");
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"abc");
+ assert.equal(moveSnippetField(view as any,1),true);
+ const range=s.selection.main;
+ assert.equal(s.sliceDoc(range.from,range.to),"b");
+ s=s.update({changes:{from:range.from,to:range.to,insert:"LONG"},selection:{anchor:range.from+4},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"aLONGc / aLONGc / LONG");
+ assert.equal(s.field(snippetSessionState)!.nested,true);
+ const target=()=>({state:s,dispatch:(tr:any)=>{s=tr.state;}});
+ assert.equal(undo(target() as any),true);assert.equal(s.doc.toString(),"abc / abc / b");assert.equal(s.field(snippetSessionState),null);
+ assert.equal(redo(target() as any),true);assert.equal(s.doc.toString(),"aLONGc / aLONGc / LONG");assert.equal(s.field(snippetSessionState),null);
+});
+test("replacing a nested parent preserves navigation to the external child survivor",()=>{
+ let s=start(S+"{1:a"+S+"{2:b}c} / "+S+"1 / "+S+"2");
+ const range=s.selection.main;
+ s=s.update({changes:{from:range.from,to:range.to,insert:"Z"},selection:{anchor:1},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"Z / Z / b");
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(moveSnippetField(view as any,1),true);assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"b");
+ const child=s.selection.main;
+ s=s.update({changes:{from:child.from,to:child.to,insert:"Q"},selection:{anchor:child.from+1},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"Z / Z / Q");
+ assert.equal(moveSnippetField(view as any,1),true);assert.equal(s.field(snippetSessionState),null);
+});
+test("nested activation with imports is atomic and boundary crossing retains only original edit",()=>{
+ let s=EditorState.create({doc:"token",extensions:[history(),snippetSession]});
+ const spec=snippetInsertion(s,prepareSnippet(S+"{1:a"+S+"{2:b}c} / "+S+"1"),0,5,[{from:0,to:0,insert:"import\n"}]);assert.ok(spec);
+ s=s.update(spec).state;assert.equal(s.doc.toString(),"import\nabc / abc");
+ const r=s.selection.main;
+ s=s.update({changes:{from:r.from,to:r.from+2,insert:"!"},selection:{anchor:r.from+1},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"import\n!c / abc");assert.equal(s.field(snippetSessionState),null);
+});
+test("nested cursor selection chooses the innermost editable occurrence",()=>{
+ let s=start(S+"{1:a"+S+"{2:bc}d} / "+S+"1");
+ s=s.update({selection:{anchor:2}}).state;
+ const session=s.field(snippetSessionState)!;assert.equal(session.fields.find(f=>f.id===session.active)!.group,"t:2");
+ s=s.update({changes:{from:2,insert:"!"},selection:{anchor:3},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"ab!cd / ab!cd");
+});
+test("nested derived sessions remain refused after worker evaluation",()=>{
+ const s=EditorState.create({extensions:[snippetSession]}),source=S+"{1:a"+S+"{2:b}} "+S+"{2/b/B/}";
+ const prepared=evaluateSnippetTransforms(prepareSnippet(source));
+ assert.equal(snippetInsertion(s,prepared,0,0),null);
+});
+
+test("nested explicit choice overflow leaves document and session untouched",()=>{
+ let s=start(S+"{1:"+S+"{2|x,"+"q".repeat(40000)+"|}-"+S+"2} / "+S+"1");
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=spec.state??s.update(spec).state;}};
+ moveSnippetField(view as any,1);
+ const before=s,owner=s.field(snippetSessionState)!.owner;
+ assert.equal(chooseSnippetValue(view as any,1,false),false);
+ assert.equal(s,before);assert.equal(s.doc.toString(),"x-x / x-x");assert.equal(s.field(snippetSessionState)!.owner,owner);
 });

@@ -2570,6 +2570,26 @@ try {
   await staleChoice.evaluate(button=>button.click());
   assert.equal(await snippetCode.innerText(),"name = name; value","detached choice cannot change a replacement session");
   await snippetPage.screenshot({path:"evidence/snippet-flat-session.png"});
+  await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest;
+    s.insertNested=()=>{
+      const v=s.view(),d="$",prepared=s.api.prepareSnippet(d+"{1:a"+d+"{2:b}c} / "+d+"1 / "+d+"2"+d+"0");
+      const spec=s.api.snippetInsertion(v.state,prepared,0,v.state.doc.length);if(!spec)throw Error("Nested snippet refused");
+      v.dispatch(spec);v.setTabFocusMode(false);v.focus();
+    };s.insertNested();
+  });
+  await snippetCode.press("Tab");await snippetPage.keyboard.insertText("nested");
+  assert.equal(await snippetCode.innerText(),"anestedc / anestedc / nested");
+  await snippetCode.press("Control+z");assert.equal(await snippetCode.innerText(),"abc / abc / b","nested mirrors undo atomically");
+  await snippetCode.press("Control+y");assert.equal(await snippetCode.innerText(),"anestedc / anestedc / nested");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertNested());
+  await snippetPage.keyboard.insertText("Z");
+  assert.equal(await snippetCode.innerText(),"Z / Z / b","replacing parent prunes contained children only");
+  await snippetCode.press("Tab");await snippetPage.keyboard.insertText("Q");
+  assert.equal(await snippetCode.innerText(),"Z / Z / Q","external child survivor remains reachable by Tab");
+  await snippetPage.screenshot({path:"evidence/snippet-nested-session.png"});
+  await writeFile("evidence/SNIPPET_NESTED_SESSION_RESULT.txt","PASS: actual CodeEditor Tab child navigation, nested mirror typing, atomic undo/redo, whole-parent replacement and external-child survivor navigation. Plain nested placeholders only; nested transforms and native IME remain unverified.\n");
+
   await snippetPage.evaluate(async()=>{
     const s=window.__snippetSessionTest;
     s.insertDerived=async(catastrophic=false)=>{
@@ -2709,9 +2729,9 @@ try {
   assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),staleSaveCount,"late valid worker reply cannot revive canceled save");
   assert.equal(await snippetCode.innerText(),"canceled -> HELLO; tail");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.restoreEvaluation());
-  await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; nested sessions and native/real-IME acceptance remain unverified.\n");
+  await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; plain nested sessions have a separate regression. Nested transforms and native/real-IME acceptance remain unverified.\n");
 
-  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested sessions and real IME/native acceptance remain unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
+  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; plain nested sessions have a separate regression. Real IME/native acceptance remains unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
 
   const providerPage=await browser.newPage();
