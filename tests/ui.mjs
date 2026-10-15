@@ -1200,6 +1200,13 @@ try {
   await runPanel.getByText("不可读取（值已移交）",{exact:true}).waitFor();
   assert.equal(await runPanel.locator(".case-argument").count(),2);
   assert.equal(await runPanel.locator(".case-result header span").last().innerText(),"调用后参数");
+  const capturedName=await runPage.evaluate(()=>JSON.parse(window.__runTest.starts.at(-1).metadata).params[0].name);
+  await runPanel.locator("pre[aria-label="+JSON.stringify("调用后 "+capturedName)+"]").getByText("[9007199254740993]",{exact:true}).waitFor();
+  await runPage.evaluate(()=>{const s=window.__runTest;s.savedResultId=s.result.id;s.result.id+=1000;});
+  await runPanel.locator('pre[aria-label="调用后 参数 1"]').getByText("[9007199254740993]",{exact:true}).waitFor();
+  assert.equal(await runPanel.locator("pre[aria-label="+JSON.stringify("调用后 "+capturedName)+"]").count(),0,"foreign result cannot inherit captured names");
+  await runPage.evaluate(()=>{window.__runTest.result.id=window.__runTest.savedResultId;});
+  await runPanel.locator("pre[aria-label="+JSON.stringify("调用后 "+capturedName)+"]").getByText("[9007199254740993]",{exact:true}).waitFor();
   await runPage.screenshot({path:"evidence/in-place-result.png"});
   await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":1,"ok":true,"value":null,"argumentsAfterCall":[[3,2,1],null]}'];});
   await runPanel.locator(".case-argument .local-result").getByText("[3,2,1]",{exact:true}).waitFor();
