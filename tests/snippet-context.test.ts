@@ -38,7 +38,7 @@ test("file URI context handles encoded Unicode Windows UNC roots and dotfiles",(
  ]){
   const v=snippetVariables(s,0,uri);assert.deepEqual(v.TM_FILEPATH,{kind:"value",value:path});assert.deepEqual(v.TM_FILENAME_BASE,{kind:"value",value:base});assert.deepEqual(v.TM_DIRECTORY,{kind:"value",value:dir});
  }
- for(const uri of ["https://example.com/code.rs","file:///bad%ZZ","file:///secret%00.rs","file:///work/code.rs?secret=x","not-a-uri"]){
+ for(const uri of ["https://example.com/code.rs","file:///bad%ZZ","file:///secret%00.rs","file:///work/code.rs?secret=x","file:///work/a%2Fb.rs","file:///C:/work/a%5Cb.rs","file://server/share/a%5Cb.rs","not-a-uri"]){
   assert.deepEqual(snippetVariables(s,0,uri).TM_FILEPATH,{kind:"unset"});
  }
 });
@@ -54,4 +54,12 @@ test("unresolved transformed variable evaluates empty input without creating a p
  const result=evaluateSnippetTransforms(prepared);assert.equal(result.text,"fallback");
  assert.deepEqual(result.navigation,[]);
  assert.equal(prepareSnippet(D+"UNKNOWN").text,"UNKNOWN","plain unknown variables stay editable");
+});
+
+test("context capture rejects split surrogate positions and selections",()=>{
+ const s=EditorState.create({doc:"😀"});
+ assert.throws(()=>snippetVariables(s,1),/UTF16 boundary/);
+ const selected=s.update({selection:{anchor:0,head:1}}).state;
+ assert.throws(()=>snippetVariables(selected,2),/UTF16 boundary/);
+ assert.deepEqual(snippetVariables(s,2).TM_CURRENT_LINE,{kind:"value",value:"😀"});
 });

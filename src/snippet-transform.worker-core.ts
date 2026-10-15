@@ -1,3 +1,4 @@
+import {normalizeSnippetEol} from "./snippet-layout.ts";
 import {ChangeSet} from "@codemirror/state";
 import {SnippetBudget,SnippetLimitError,snippetLimits} from "./snippet-budget.ts";
 import {validatePreparedSnippet} from "./snippet-validation.ts";
@@ -64,7 +65,7 @@ function applyTransform(input:string,transform:PreparedTransform,budget:SnippetB
  emit(input.slice(lastEnd));budget.copy(length);return chunks.join("");
 }
 export function evaluateSnippetTransforms(prepared:PreparedSnippet):PreparedSnippet{
- const original=validatePreparedSnippet(prepared);
+ const original=normalizeSnippetEol(prepared);
  if(!original.needsTransformEvaluation)return original;
  const budget=new SnippetBudget();
  let text=original.text,fields=original.fields;
@@ -84,7 +85,7 @@ export function evaluateSnippetTransforms(prepared:PreparedSnippet):PreparedSnip
   const transform=transforms[index],target=fields[transform.target];
   const source=sources[index]?fields[sources[index]!.id]:null;
   const input=transform.sourceValue??(source?text.slice(source.from,source.to):"");
-  const output=applyTransform(input,transform,budget),nextLength=text.length-(target.to-target.from)+output.length;
+  const output=applyTransform(input,transform,budget).replace(/\r\n?/g,"\n"),nextLength=text.length-(target.to-target.from)+output.length;
   if(nextLength>snippetLimits.output)throw new SnippetLimitError("Expanded snippet output limit");
   budget.copy(nextLength);
   const changes=ChangeSet.of({from:target.from,to:target.to,insert:output},text.length);

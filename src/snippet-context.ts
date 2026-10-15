@@ -6,7 +6,10 @@ import {validateSnippetVariables} from "./snippet-validation.ts";
 /** Capture only document-owned context. No filesystem, clipboard or network reads. */
 export function snippetVariables(state:EditorState,position:number,uri?:string):Record<string,VariableValue>{
  if(!Number.isSafeInteger(position)||position<0||position>state.doc.length||state.selection.ranges.length!==1)throw new SnippetLimitError("Invalid snippet context");
- const line=state.doc.lineAt(position),selection=state.selection.main;
+ const selection=state.selection.main;
+ const boundary=(pos:number)=>{if(pos===0||pos===state.doc.length)return true;const pair=state.doc.sliceString(pos-1,pos+1);return !(/[\uD800-\uDBFF]/.test(pair[0])&&/[\uDC00-\uDFFF]/.test(pair[1]));};
+ if(![position,selection.from,selection.to].every(boundary))throw new SnippetLimitError("Invalid snippet UTF16 boundary");
+ const line=state.doc.lineAt(position);
  if(line.length>snippetLimits.output||selection.to-selection.from>snippetLimits.output)throw new SnippetLimitError("Snippet context limit");
  const values:Record<string,VariableValue>=Object.create(null);
  const value=(name:string,text:string)=>{values[name]={kind:"value",value:text};};
@@ -23,6 +26,8 @@ export function snippetVariables(state:EditorState,position:number,uri?:string):
   try{
    const parsed=new URL(uri);
    if(parsed.protocol==="file:"&&!parsed.search&&!parsed.hash&&!parsed.username&&!parsed.password){
+    const windows=!!parsed.hostname&&parsed.hostname!=="localhost"||/^\/[A-Za-z]:\//.test(parsed.pathname);
+    if(/%2f/i.test(parsed.pathname)||windows&&/%5c/i.test(parsed.pathname))throw Error("Encoded path separator");
     path=decodeURIComponent(parsed.pathname);
     if(path.includes("\0"))path=null;
     else if(parsed.hostname&&parsed.hostname!=="localhost")path="//"+parsed.hostname+path;
