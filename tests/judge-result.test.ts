@@ -29,3 +29,31 @@ test("explicit online comparison distinguishes failed tests from execution compl
  assert.equal(resultSummary({status_msg:"Runtime Error",correct_answer:false},false).verdict,"运行错误");
  assert.equal(resultSummary({status_msg:"Accepted",correct_answer:false},true).verdict,"通过");
 });
+
+test("typed numeric verdicts have readable fallback without treating a run as AC",()=>{
+ for(const [status_code,verdict] of [[10,"通过"],[11,"答案错误"],[12,"超出内存限制"],[13,"超出输出限制"],[14,"超出时间限制"],[15,"运行错误"],[16,"评测服务错误"],[20,"编译错误"],[21,"未知评测错误"]] as const){
+  assert.equal(resultSummary({status_code},true).verdict,verdict);
+  assert.equal(resultSummary({status_code},true).accepted,status_code===10);
+ }
+ assert.equal(resultSummary({status_code:10},false).verdict,"运行完成");
+ assert.equal(resultSummary({status_code:10,correct_answer:false},false).verdict,"测试答案错误");
+ assert.equal(resultSummary({status_code:10,correct_answer:true},false).verdict,"测试通过");
+ assert.equal(resultSummary({status_code:10},false).accepted,false);
+ assert.equal(resultSummary({status_code:999},true).verdict,"未知评测状态（999）");
+ assert.equal(resultSummary({status_code:999},true).accepted,false);
+ for(const status_code of [null,"10",0,-1,10.5,Number.MAX_SAFE_INTEGER+1])
+  assert.equal(resultSummary({status_code},true).accepted,false);
+});
+test("trim textual verdicts and never claim acceptance for contradictory known verdicts",()=>{
+ assert.equal(resultSummary({status_msg:" Accepted "},true).verdict,"通过");
+ for(const result of [{status_code:11,status_msg:"Accepted"},{status_code:10,status_msg:"Runtime Error"}]){
+  const summary=resultSummary(result,true);assert.equal(summary.verdict,"评测状态不一致");assert.equal(summary.accepted,false);
+ }
+ assert.equal(resultSummary({status_code:999,status_msg:"Future server status"},true).verdict,"Future server status");
+});
+
+test("unknown textual status cannot resolve inherited object properties",()=>{
+ for(const status_msg of ["__proto__","constructor","toString","hasOwnProperty"]){
+  const summary=resultSummary({status_msg},true);assert.equal(summary.verdict,status_msg);assert.equal(summary.accepted,false);
+ }
+});

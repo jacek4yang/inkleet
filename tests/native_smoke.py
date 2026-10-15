@@ -133,14 +133,26 @@ def focus_code_editor():
         return cmd("GET",f"/element/{active}/attribute/aria-label")=="代码编辑器"
     wait_for(focused,"actual code editor keyboard focus")
 
+def native_pointer_ready(css):
+    # Read-only hit testing chooses an OS pointer action before any mutation.
+    # Off-screen/occluded targets retain WebDriver auto-scroll, never a blind click.
+    return bool(cmd("POST","/execute/sync",{"script":"""
+      const t=document.querySelector(arguments[0]);if(!t)return false;
+      if(!["BUTTON","INPUT","TEXTAREA","SUMMARY"].includes(t.tagName)&&!t.isContentEditable)return false;
+      const r=t.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;
+      if(r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;
+      const h=document.elementFromPoint(x,y);return t===h||t.contains(h);
+    ""","args":[css]}))
+
 def click(css):
-    # Only known visible transport-sensitive controls use one OS click.
-    # WebDriver retains auto-scroll for other controls and native options.
+    # Visible hit-tested buttons/fields/summaries use one prospective OS click.
+    # Keep native option semantics and WebDriver auto-scroll for other targets.
     if css == '[aria-label="关闭设置"]':
         click_debug_action(css)
         wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":css}),"settings closed")
         return
-    if css in (".pane-heading .actions button", '.pane-heading .actions button[aria-label="本地"]', '[data-action="local-execute"]', '[data-action="open-settings"]'):
+    if native_pointer_ready(css):
+        with (evidence/"native-pointer-actions.txt").open("a") as log:log.write(css+"\n")
         return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
@@ -217,8 +229,14 @@ def focus_case_control(css):
 
 def fill_once(css, value):
     node=wait_for(lambda:element(css),"input target available after document switch")
-    if css in ('[aria-label="预期结果"]','[aria-label="本地测试输入"]'):
+    if css == '[aria-label="代码编辑器"]':
+        # Choose the existing viewport-bounded OS focus path before any click.
+        focus_code_editor()
+        node=element(css)
+    elif css in ('[aria-label="预期结果"]','[aria-label="本地测试输入"]'):
         node=focus_case_control(css)
+    elif native_pointer_ready(css):
+        click_native_node(node)
     else:
         try:
             cmd("POST",f"/element/{node}/click",{})
