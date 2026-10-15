@@ -121,7 +121,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
     ];
     const cached = sessions.get(documentKey);
     // 外部正文变化时重新建状态，不能将另一个版本的撤销历史套上去。
-    const state = (cached ? snapshotText(cached.state.doc) : undefined) === value
+    const state = cached && snapshotText(cached.state.doc) === value
       ? cached.state.update({ effects: StateEffect.reconfigure.of(extensions) }).state
       : EditorState.create({ doc: value, extensions });
     const view = new EditorView({ state, parent: host.current! });
