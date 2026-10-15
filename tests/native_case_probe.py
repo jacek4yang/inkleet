@@ -14,7 +14,7 @@ def observe(stage):
     const info=node=>node?{tag:node.tagName,role:node.getAttribute('role'),label:node.getAttribute('aria-label'),rect:node.getBoundingClientRect().toJSON(),display:getComputedStyle(node).display,visibility:getComputedStyle(node).visibility,overflow:getComputedStyle(node).overflow,scrollTop:node.scrollTop,clientHeight:node.clientHeight,scrollHeight:node.scrollHeight}:null;
     const ancestors=[];for(let node=target;node;node=node.parentElement)ancestors.push(info(node));
     const r=target?.getBoundingClientRect();
-    return {active:info(document.activeElement),target:info(target),ancestors,detailsOpen:document.querySelector('.case-expectation')?.open,selected:document.querySelector('[aria-label="预期结果比较目标"]')?.value,hit:r?info(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)):null};
+    return {lspStatus:document.querySelector('.lsp-status')?.getAttribute('data-status'),active:info(document.activeElement),target:info(target),ancestors,detailsOpen:document.querySelector('.case-expectation')?.open,selected:document.querySelector('[aria-label="预期结果比较目标"]')?.value,hit:r?info(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)):null};
     """
     try:
         value=cmd("POST","/execute/sync",{"script":script,"args":[]})
@@ -36,14 +36,14 @@ driver=subprocess.Popen(["tauri-driver"],stdout=open(evidence/"driver.log","w"),
 try:
     wait_for(lambda:request("GET","/status"),"driver ready")
     start()
-    click('select[aria-label="编程语言"] option[value="python3"]')
     settings_action("语言与环境",'[data-action="open-environments"]')
     wait_for(lambda:element(".environment-summary button"),"environment manager")
     click(".environment-summary button")
     wait_for(lambda:all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]')=="已安装" for tool in ["python","node","pyright","debugpy"]),"private Python group installed",seconds=300)
     click(".environments header button")
-    wait_for(lambda:"Pyright 已连接" in text(".lsp-status"),"Pyright ready",seconds=60)
+    click('select[aria-label="编程语言"] option[value="python3"]')
     fill(code,"def solve(values):\n    values.reverse()")
+    wait_for(lambda:"Pyright 已连接" in text(".lsp-status"),"Pyright ready",seconds=60)
     click('.pane-heading .actions button[aria-label="本地"]')
     fill('[aria-label="本地测试输入"]',"[1,2,3]")
     click_debug_action('[data-action="local-execute"]')
