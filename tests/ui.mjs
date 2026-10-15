@@ -2357,6 +2357,66 @@ try {
   await writeFile("evidence/DIAGNOSTICS_DEDUP_RESULT.json",JSON.stringify({stable:stableDiagnostics,total:await diagnosticPage.evaluate(()=>({polls:window.__diagnosticTest.polls,applied:window.__diagnosticTest.applied,semanticCalls:window.__diagnosticTest.semanticCalls})),scope:"Actual CodeMirror with mocked IPC; deterministic transaction count, not native latency benchmark"},null,2));
   await diagnosticPage.evaluate(()=>window.__diagnosticTest.view.destroy());await diagnosticPage.close();
 
+
+  const serializationPage=await browser.newPage();
+  await serializationPage.route("**/serialization-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor' style='height:500px'></div></body></html>"}));
+  await serializationPage.route("**/src/snapshot-text.ts*",async route=>{
+    const response=await route.fetch();let body=await response.text();
+    const marker=/const text\s*=\s*doc\.toString\(\);/;
+    assert.ok(marker.test(body),"instrument actual production cache miss only");
+    body=body.replace(marker,'const text = doc.toString(); window.__serializationMisses.set(doc, (window.__serializationMisses.get(doc) ?? 0) + 1);');
+    await route.fulfill({response,body});
+  });
+  await serializationPage.goto("http://127.0.0.1:5173/serialization-test");
+  await serializationPage.evaluate(async()=>{
+    window.__serializationMisses=new Map();
+    const s=window.__serializationTest={edits:[],saves:[],statuses:[],errors:[],updates:[],formats:[],requests:0,version:1,defer:false,reply:null};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:93,version:1,server:"serialization",uri:"file:///solution.py",completionResolve:false};
+      if(command==="update_language_document"){s.updates.push(args.text);s.version=args.version;return;}
+      if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
+      if(command==="language_request"){if(args.kind==="completion"){s.requests++;return [{label:"value"}];}return null;}
+      if(command==="language_cancel_completion"||command==="stop_language_service")return;
+      if(command==="format_source"){s.formats.push(args.text);if(s.defer)return new Promise(resolve=>{s.reply=()=>resolve(args.text+"# stale");});return args.text;}
+      throw Error(command);
+    }};
+    const {mountSerializationEditor}=await import("/tests/serialization-harness.tsx");
+    s.unmount=mountSerializationEditor(document.querySelector("#editor"),s);
+  });
+  await serializationPage.waitForFunction(()=>window.__serializationTest.statuses.some(s=>s.includes("已连接")));
+  const serialCode=serializationPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  const serialText="# 中文😀\nvalue = 1\n";
+  await serialCode.fill(serialText);
+  await serialCode.press("Control+Space");
+  await serializationPage.waitForFunction(()=>window.__serializationTest.requests>0);
+  await serialCode.press("Escape");
+  await serialCode.press("Control+s");
+  await serializationPage.waitForFunction(()=>window.__serializationTest.saves.length===1);
+  const serialEvidence=await serializationPage.evaluate(async()=>{
+    const {EditorView}=await import("/tests/serialization-harness.tsx");
+    const doc=EditorView.findFromDOM(document.querySelector(".cm-editor")).state.doc,s=window.__serializationTest;
+    return {misses:window.__serializationMisses.get(doc),edits:s.edits,updates:s.updates,formats:s.formats,saves:s.saves};
+  });
+  await writeFile("evidence/DOCUMENT_SERIALIZATION_RESULT.json",JSON.stringify(serialEvidence,null,2));
+  assert.equal(serialEvidence.misses,1,"actual editor, LSP flush, format validation and save share one materialization");
+  assert.equal(serialEvidence.edits.at(-1),serialText);
+  assert.equal(serialEvidence.updates.at(-1),serialText);
+  assert.equal(serialEvidence.formats.at(-1),serialText);
+  assert.equal(serialEvidence.saves.at(-1),serialText);
+  await serializationPage.evaluate(()=>{window.__serializationTest.defer=true;});
+  await serialCode.fill("value = 2");
+  await serialCode.press("Control+s");
+  await serializationPage.waitForFunction(()=>typeof window.__serializationTest.reply==="function");
+  await serialCode.fill("value = 3");
+  await serializationPage.evaluate(()=>{window.__serializationTest.defer=false;window.__serializationTest.reply();});
+  await serializationPage.waitForTimeout(250);
+  assert.equal(await serialCode.innerText(),"value = 3","late format preserves latest owned source");
+  assert.deepEqual(await serializationPage.evaluate(()=>window.__serializationTest.saves),[serialText],"stale formatting cannot save");
+  assert.equal(await serializationPage.evaluate(()=>window.__serializationTest.edits.at(-1)),"value = 3");
+  await serializationPage.evaluate(()=>window.__serializationTest.unmount());
+  await serializationPage.close();
+
   const providerPage=await browser.newPage();
   await providerPage.route("**/provider-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
   await providerPage.goto("http://127.0.0.1:5173/provider-test");
