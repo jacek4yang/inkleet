@@ -155,29 +155,34 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     try {
       const deadline = Date.now() + (context.explicit ? 8000 : 1200);
       let items: unknown[] = [], isIncomplete=false;
+      const needle = word?.text.toLowerCase() ?? "";
+      const requiresResolve=session.completionResolve===true,snippets=context.state.field(snippetSessionState,false)!==undefined;
+      const admissible=(items:unknown[])=>items.slice(0,5000).filter((item):item is Record<string,any>=>
+        object(item)&&typeof item.label==="string"&&(!needle||String(item.filterText??item.label).toLowerCase().includes(needle))
+      ).sort((a,b)=>String(a.sortText??a.label).localeCompare(String(b.sortText??b.label))).slice(0,300).filter(item=>{
+        if(item.label.length>512||requiresResolve&&(!Number.isSafeInteger(item._inkleetCompletion)||item._inkleetCompletion<=0))return false;
+        const application=completionApplication(doc,item,word?.from??context.pos,context.pos,contextSelection.main);
+        return !!application&&(application.format!==2||snippets);
+      });
+      let candidates:Record<string,any>[]=[];
       for (let attempt = 0; ; attempt++) {
+        if(attempt>0&&Date.now()>=deadline)break;
         const result = await request("completion", context.pos, doc,undefined,trigger,current,ticket=>{attemptTicket=ticket;});
         if (!current()) return null;
         isIncomplete=object(result)&&result.isIncomplete===true;
         items = Array.isArray(result) ? result : object(result) && Array.isArray(result.items) ? result.items : [];
-        if (items.length || Date.now() >= deadline) break;
+        candidates=admissible(items);
+        if ((context.explicit?candidates.length:items.length) || Date.now() >= deadline) break;
         // initialize confirms transport readiness, not completed project indexing.
-        // Re-query only this unchanged completion context; never restart a server.
+        // Explicit requests also retry nonempty responses with no usable candidates.
+        // Preserve the automatic empty-response policy; never restart a server.
         if (context.explicit) status(serverName + " 正在准备补全…");
-        await new Promise(resolve => setTimeout(resolve, Math.min(200 * 2 ** attempt, 1200)));
+        await new Promise(resolve => setTimeout(resolve, Math.max(0,Math.min(200 * 2 ** attempt,1200,deadline-Date.now()))));
         if (!current()) return null;
       }
       incomplete=isIncomplete&&session?{doc,from:word?.from??context.pos,pos:context.pos,session:session.id}:null;
       const options: Completion[] = [];
-      const needle = word?.text.toLowerCase() ?? "";
-      // Filter before limiting: large standard libraries can put the desired member after item 300.
-      const candidates = items.slice(0, 5000).filter((item): item is Record<string, any> => object(item) && typeof item.label === "string" &&
-        (!needle || String(item.filterText ?? item.label).toLowerCase().includes(needle)));
-      candidates.sort((a, b) => String(a.sortText ?? a.label).localeCompare(String(b.sortText ?? b.label)));
-      for (const item of candidates.slice(0, 300)) {
-        if (!object(item) || typeof item.label !== "string" || item.label.length > 512) continue;
-        const result=completionApplication(doc,item,word?.from??context.pos,context.pos,contextSelection.main);
-        if(!result||result.format===2&&context.state.field(snippetSessionState,false)===undefined)continue;
+      for (const item of candidates) {
         const id=session?.id,askedVersion=version,resolve=session?.completionResolve===true,token=item._inkleetCompletion;
         if(resolve&&(!Number.isSafeInteger(token)||token<=0))continue;
         let resolution:Promise<unknown>|null=null;
