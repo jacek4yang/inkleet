@@ -217,7 +217,11 @@ def focus_case_control(css):
 
 def fill_once(css, value):
     node=wait_for(lambda:element(css),"input target available after document switch")
-    if css in ('[aria-label="预期结果"]','[aria-label="本地测试输入"]'):
+    if css == '[aria-label="代码编辑器"]':
+        # Choose the existing viewport-bounded OS focus path before any click.
+        focus_code_editor()
+        node=element(css)
+    elif css in ('[aria-label="预期结果"]','[aria-label="本地测试输入"]'):
         node=focus_case_control(css)
     else:
         try:
