@@ -1,3 +1,4 @@
+import {unchangedDiagnostics,type DiagnosticSnapshot} from "./diagnostic-snapshot";
 import {CompletionRequestOwner,type CompletionTicket} from "./completion-request-owner";
 import {advanceIncomplete,completionTrigger,identifierTail,type CompletionTrigger,type IncompleteContext} from "./completion-context";
 import { isolateHistory } from "@codemirror/commands";
@@ -281,6 +282,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if (!closed && session?.id === id && view.state.doc === doc) showSource({ ...source, line: Number.isInteger(location.start.line) ? location.start.line : 0 });
     } catch (e) { if (!closed) status(String(e)); }
   }
+  let appliedDiagnostics:DiagnosticSnapshot<Text>|null=null;
   async function poll() {
     if (!session || !view || closed) return;
     try {
@@ -295,7 +297,10 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           const span = range(doc, item.range); if (!span) continue;
           diagnostics.push({ ...span, severity: item.severity === 1 ? "error" : item.severity === 2 ? "warning" : "info", message: item.message.slice(0, 4000), source: serverName });
         }
-        view.dispatch(setDiagnostics(view.state, diagnostics));
+        if(!unchangedDiagnostics(appliedDiagnostics,doc,diagnostics)){
+          view.dispatch(setDiagnostics(view.state, diagnostics));
+          appliedDiagnostics={doc,items:diagnostics};
+        }
       }
     } catch (e) { if (!closed) status(String(e)); }
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
@@ -364,7 +369,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       return request;
     },
     async connect(target: EditorView) {
-      view = target;
+      view = target;appliedDiagnostics=null;
       target.dispatch({effects:setSemanticTokens.of([])});
       if (!isTauri()) { status("浏览器预览 · 语言服务需原生客户端"); return; }
       status(`正在连接 ${{ python3: "Python", java: "Java", golang: "Go", rust: "Rust", c: "C", cpp: "C++" }[language]} 语言服务…`);
@@ -383,7 +388,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     destroy() {
       references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
-      session = null; view = null;
+      appliedDiagnostics=null;session = null; view = null;
     },
   };
 }
