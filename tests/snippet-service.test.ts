@@ -97,3 +97,9 @@ test("worker factory failure does not consume global capacity",async()=>{
  const a=new FakeWorker(),b=new FakeWorker(),sa=new SnippetPreparationService(()=>a),sb=new SnippetPreparationService(()=>b);
  const pa=sa.prepare("a"),pb=sb.prepare("b");a.reply();b.reply();await pa;await pb;sa.destroy();sb.destroy();
 });
+
+test("runtime evaluation posts a validated owned snapshot and respects disposal",async()=>{
+ const w=new FakeWorker(),s=new SnippetPreparationService(()=>w),prepared=prepareSnippet("runtime");
+ const p=s.evaluate(prepared);assert.equal(w.sent[0].kind,"evaluate");assert.equal(w.sent[0].prepared.text,"runtime");
+ w.reply(prepared);assert.equal((await p).text,"runtime");s.destroy();await assert.rejects(s.evaluate(prepared),/disposed/);
+});

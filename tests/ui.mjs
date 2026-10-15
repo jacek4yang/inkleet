@@ -2459,9 +2459,10 @@ try {
   await snippetPage.goto("http://127.0.0.1:5173/snippet-session-test");
   await snippetPage.evaluate(async()=>{
     const api=await import("/tests/snippet-session-harness.tsx");
-    const s=window.__snippetSessionTest={api,value:"",edits:[],statuses:[],version:1};
+    const s=window.__snippetSessionTest={api,value:"",edits:[],statuses:[],saves:[],formats:[],errors:[],version:1};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="format_source"){s.formats.push(args.text);return args.text;}
       if(command==="start_language_service")return {id:97,version:1,server:"snippet-fixture",uri:"file:///solution.py",completionResolve:false};
       if(command==="update_language_document"){s.version=args.version;return;}
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
@@ -2569,7 +2570,61 @@ try {
   await staleChoice.evaluate(button=>button.click());
   assert.equal(await snippetCode.innerText(),"name = name; value","detached choice cannot change a replacement session");
   await snippetPage.screenshot({path:"evidence/snippet-flat-session.png"});
-  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested/derived live transformation editing and real IME/native acceptance remain unavailable.\n");
+  await snippetPage.evaluate(async()=>{
+    const s=window.__snippetSessionTest;
+    s.insertDerived=async(catastrophic=false)=>{
+      const d="$",source=catastrophic?d+"{1:a} / "+d+"{1/(a+)+$/x/}; "+d+"{2:tail}"+d+"0":
+        d+"{1:hello} -> "+d+"{1/(.*)/"+d+"{1:/upcase}/}; "+d+"{2:tail}"+d+"0";
+      const service=new s.api.SnippetPreparationService(),view=s.view(),doc=view.state.doc;
+      try{
+        const prepared=await service.prepare(source);if(view.state.doc!==doc)throw Error("Fixture source changed");
+        const spec=s.api.snippetInsertion(view.state,prepared,0,view.state.doc.length);if(!spec)throw Error("Derived snippet refused");
+        view.dispatch(spec);view.focus();
+      }finally{service.destroy();}
+    };
+    await s.insertDerived();
+  });
+  await snippetPage.keyboard.insertText("world");
+  assert.equal(await snippetCode.innerText(),"world -> HELLO; tail","placeholder transform waits for field-leave commit");
+  await snippetCode.press("Tab");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.value==="world -> WORLD; tail");
+  assert.equal(await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"tail");
+  await snippetPage.screenshot({path:"evidence/snippet-transform-session.png"});
+  await snippetCode.press("Control+z");
+  assert.equal(await snippetCode.innerText(),"world -> HELLO; tail","undo first reverses transform/navigation commit");
+  await snippetCode.press("Control+z");assert.equal(await snippetCode.innerText(),"hello -> HELLO; tail","next undo reverses typing");
+  await snippetCode.press("Control+y");await snippetCode.press("Control+y");
+  assert.equal(await snippetCode.innerText(),"world -> WORLD; tail","redo replays committed transform text without a new worker");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
+  await snippetPage.keyboard.insertText("saved");
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.saves.at(-1)==="saved -> SAVED; tail");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.formats.at(-1)),"saved -> SAVED; tail","formatter sees settled transform text");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
+  await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
+  await snippetCode.press("Tab");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.waiting===true);
+  await snippetCode.press("Control+z");
+  await snippetPage.waitForTimeout(200);
+  assert.equal(await snippetCode.innerText(),"a / x; tail","undo cancels pending transform ownership");
+  const savesBeforeCanceledTransform=await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length);
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
+  await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.waiting===true);
+  await snippetCode.press("x");
+  await snippetPage.waitForTimeout(200);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),savesBeforeCanceledTransform,"editing cancels pending save settlement, never saves stale derived output");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.waiting),false);
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
+  await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
+  await snippetCode.press("Tab");
+  await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor();
+  assert.ok((await snippetCode.innerText()).endsWith("! / x; tail"),"worker timeout preserves user source and previous derived value");
+  await snippetCode.press("Escape");
+  await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, save/formatter settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; nested sessions and native/real-IME acceptance remain unverified.\n");
+
+  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested sessions and real IME/native acceptance remain unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
 
   const providerPage=await browser.newPage();

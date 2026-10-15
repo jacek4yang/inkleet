@@ -1,8 +1,9 @@
+import {evaluateSnippetTransforms} from "../src/snippet-transform.worker-core.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {EditorState,StateEffect,StateField,Transaction} from "@codemirror/state";
 import {history,undo,redo} from "@codemirror/commands";
-import {snippetSession,snippetSessionState,snippetInsertion,moveSnippetField,endSnippet,moveSnippetChoice,chooseSnippetValue,snippetChoiceOpen} from "../src/snippet-session.ts";
+import {snippetSession,snippetSessionState,snippetInsertion,moveSnippetField,endSnippet,moveSnippetChoice,chooseSnippetValue,snippetChoiceOpen,snippetTransformSnapshot,snippetTransformCommit} from "../src/snippet-session.ts";
 import {prepareSnippet} from "../src/snippet-prepare.ts";
 const S="$",sample=S+"{1:abc}-"+S+"1-"+S+"0";
 function start(source=sample,doc=""){
@@ -145,4 +146,53 @@ test("same-value empty choices close picker without creating a text undo step",(
  const target={state:s,dispatch:(tr:any)=>{s=tr.state;}};assert.equal(undo(target as any),true);assert.equal(s.doc.toString(),"");
  s=start(S+"{1|,x|} / "+S+"1; "+S+"{2:z}"+S+"0");assert.equal(chooseSnippetValue(view as any,0,true),true);
  assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"z");
+});
+
+test("derived fields update only in an isolated transform-on-leave commit",()=>{
+ const source=S+"{1:hello} -> "+S+"{1/(.*)/"+S+"{1:/upcase}/}; "+S+"{2:tail}"+S+"0";
+ let s=EditorState.create({extensions:[history(),snippetSession]});
+ const prepared=evaluateSnippetTransforms(prepareSnippet(source));
+ s=s.update(snippetInsertion(s,prepared,0,0)!).state;
+ s=s.update({changes:{from:0,to:5,insert:"world"},selection:{anchor:5},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"world -> HELLO; tail","derived output stays committed until leaving field");
+ const session=s.field(snippetSessionState)!,snapshot=snippetTransformSnapshot(s)!;
+ const evaluated=evaluateSnippetTransforms(snapshot),spec=snippetTransformCommit(s,session.owner,session.revision,evaluated,1);
+ assert.ok(spec);s=s.update(spec).state;
+ assert.equal(s.doc.toString(),"world -> WORLD; tail");assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"tail");
+ const target=()=>({state:s,dispatch:(tr:any)=>{s=tr.state;}});
+ assert.equal(undo(target() as any),true);assert.equal(s.doc.toString(),"world -> HELLO; tail");assert.equal(s.field(snippetSessionState),null);
+ assert.equal(undo(target() as any),true);assert.equal(s.doc.toString(),"hello -> HELLO; tail");
+ assert.equal(redo(target() as any),true);assert.equal(redo(target() as any),true);assert.equal(s.doc.toString(),"world -> WORLD; tail");assert.equal(s.field(snippetSessionState),null);
+});
+test("transform commit rejects changed ownership revision or source contents",()=>{
+ const source=S+"{1:a} "+S+"{1/a/b/} "+S+"0";
+ let s=EditorState.create({extensions:[snippetSession]});
+ s=s.update(snippetInsertion(s,evaluateSnippetTransforms(prepareSnippet(source)),0,0)!).state;
+ s=s.update({changes:{from:0,to:1,insert:"aa"},selection:{anchor:2},userEvent:"input.type"}).state;
+ const session=s.field(snippetSessionState)!,evaluated=evaluateSnippetTransforms(snippetTransformSnapshot(s)!);
+ assert.equal(snippetTransformCommit(s,{},session.revision,evaluated,1),null);
+ assert.equal(snippetTransformCommit(s,session.owner,session.revision+1,evaluated,1),null);
+ const changed=structuredClone(evaluated);changed.text="z"+changed.text.slice(1);
+ assert.equal(snippetTransformCommit(s,session.owner,session.revision,changed,1),null);
+});
+test("save settlement maps caret but does not advance the active parameter",()=>{
+ const source=S+"{1:a} "+S+"{1/a/longer/} "+S+"{2:z}"+S+"0";
+ let s=EditorState.create({extensions:[snippetSession]});
+ s=s.update(snippetInsertion(s,evaluateSnippetTransforms(prepareSnippet(source)),0,0)!).state;
+ s=s.update({changes:{from:0,to:1,insert:"aa"},selection:{anchor:2},userEvent:"input.type"}).state;
+ const before=s.field(snippetSessionState)!;
+ s=s.update(snippetTransformCommit(s,before.owner,before.revision,evaluateSnippetTransforms(snippetTransformSnapshot(s)!),0)!).state;
+ assert.equal(s.doc.toString(),"aa longera z");assert.equal(s.selection.main.head,2);
+ const after=s.field(snippetSessionState)!;assert.equal(after.active,before.active);assert.equal(after.dirty,false);
+});
+
+test("derived output before its source is never selected and maps caret on settlement",()=>{
+ const source=S+"{1/a/longer/} "+S+"{1:a}"+S+"0";
+ let s=EditorState.create({extensions:[snippetSession]});
+ s=s.update(snippetInsertion(s,evaluateSnippetTransforms(prepareSnippet(source)),0,0)!).state;
+ assert.equal(s.doc.toString(),"longer a");assert.equal(s.selection.main.from,7);
+ s=s.update({changes:{from:7,to:8,insert:"aa"},selection:{anchor:9},userEvent:"input.type"}).state;
+ const current=s.field(snippetSessionState)!;
+ s=s.update(snippetTransformCommit(s,current.owner,current.revision,evaluateSnippetTransforms(snippetTransformSnapshot(s)!),0)!).state;
+ assert.equal(s.doc.toString(),"longera aa");assert.equal(s.selection.main.head,10);
 });
