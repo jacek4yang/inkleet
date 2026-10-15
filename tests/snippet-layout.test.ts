@@ -47,3 +47,14 @@ test("multiline variable values stay literal after logical EOL mapping",()=>{
  const r=normalizeSnippetEol(prepareSnippet(D+"VALUE "+D+"{1:end}"+D+"0",{VALUE:{kind:"value",value:D+"2\r\ntext"}}));
  assert.equal(r.text,D+"2\ntext end");assert.equal(r.text.slice(r.fields[0].from,r.fields[0].to),"end");
 });
+
+test("oversized additional edit arrays refuse before cloning or reading entries",()=>{
+ const state=EditorState.create(),additional=new Array(21);
+ Object.defineProperty(additional,"map",{get(){throw Error("Oversized collection was traversed");}});
+ assert.equal(snippetInsertion(state,prepareSnippet(D+"{1:x}"),0,0,additional),null);
+});
+test("normalizing imports never mutates caller-owned additional edits",()=>{
+ const state=EditorState.create({doc:"token"}),additional=[{from:0,to:0,insert:"use x;\r\n"}];
+ assert.ok(snippetInsertion(state,prepareSnippet(D+"{1:x}"),0,5,additional));
+ assert.equal(additional[0].insert,"use x;\r\n");
+});

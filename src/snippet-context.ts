@@ -26,9 +26,10 @@ export function snippetVariables(state:EditorState,position:number,uri?:string):
   try{
    const parsed=new URL(uri);
    if(parsed.protocol==="file:"&&!parsed.search&&!parsed.hash&&!parsed.username&&!parsed.password){
-    const windows=!!parsed.hostname&&parsed.hostname!=="localhost"||/^\/[A-Za-z]:\//.test(parsed.pathname);
+    const candidate=decodeURIComponent(parsed.pathname);
+    const windows=!!parsed.hostname&&parsed.hostname!=="localhost"||/^\/?[A-Za-z]:\//.test(candidate)||candidate.startsWith("//");
     if(/%2f/i.test(parsed.pathname)||windows&&/%5c/i.test(parsed.pathname))throw Error("Encoded path separator");
-    path=decodeURIComponent(parsed.pathname);
+    path=candidate;
     if(path.includes("\0"))path=null;
     else if(parsed.hostname&&parsed.hostname!=="localhost")path="//"+parsed.hostname+path;
     else if(/^\/[A-Za-z]:\//.test(path))path=path.slice(1);
