@@ -35,7 +35,7 @@ impl CompletionCache{
 }
 pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
     if !resolved.is_object(){return Err("补全解析结果无效".into());}
-    for key in ["label","filterText","sortText","insertText","insertTextFormat","textEdit"]{
+    for key in ["label","filterText","sortText","insertText","insertTextFormat","insertTextMode","textEdit"]{
         if original.get(key)!=resolved.get(key){return Err("补全解析改变了原始替换内容".into());}
     }
     if original.pointer("/data/imports").and_then(Value::as_array).is_some_and(|items|!items.is_empty()){
@@ -61,6 +61,13 @@ pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
         let original=json!({"label":"HashMap","insertText":"HashMap"});
         let mut resolved=original.clone();resolved["additionalTextEdits"]=json!([]);assert!(validate_resolved(&original,&resolved).is_ok());
         resolved["insertText"]=json!("other");assert!(validate_resolved(&original,&resolved).is_err());
+    }
+    #[test]fn resolve_cannot_change_or_introduce_indentation_mode(){
+        let original=json!({"label":"call","insertTextFormat":2,"insertTextMode":1,"insertText":"call($1)"});
+        let mut resolved=original.clone();resolved["insertTextMode"]=json!(2);assert!(validate_resolved(&original,&resolved).is_err());
+        resolved=original.clone();resolved.as_object_mut().unwrap().remove("insertTextMode");assert!(validate_resolved(&original,&resolved).is_err());
+        let absent=json!({"label":"call","insertText":"call"});let mut added=absent.clone();added["insertTextMode"]=json!(2);assert!(validate_resolved(&absent,&added).is_err());
+        assert!(validate_resolved(&original,&original).is_ok());
     }
     #[test]fn late_response_cannot_expire_newer_visible_candidates(){
         let mut cache=CompletionCache::default();let mut newest=json!([{"label":"new"}]);cache.remember(&mut newest,4,2);

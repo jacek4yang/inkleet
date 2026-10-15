@@ -1,3 +1,10 @@
+import {completionApplication,completionTextChanges,plainCompletionChanges as completionChanges} from "./completion-application";
+export {completionChanges};
+import {SnippetPreparationService} from "./snippet-service";
+import {snippetVariables} from "./snippet-context";
+import {layoutSnippet} from "./snippet-layout";
+import {snippetInsertion,snippetSessionState} from "./snippet-session";
+import {snippetParserIdentity} from "./snippet-budget";
 import {snapshotText} from "./snapshot-text";
 import {unchangedDiagnostics,type DiagnosticSnapshot} from "./diagnostic-snapshot";
 import {CompletionRequestOwner,type CompletionTicket} from "./completion-request-owner";
@@ -32,25 +39,6 @@ function range(doc: Text, value: unknown) {
   if (!object(value)) return null;
   const from = offset(doc, value.start), to = offset(doc, value.end);
   return from !== null && to !== null && from <= to ? { from, to } : null;
-}
-export function completionChanges(doc:Text,item:Record<string,any>,from:number,to:number){
-  if(item.insertTextFormat===2)return null;
-  const primary=object(item.textEdit)?item.textEdit:null;
-  const span=primary?range(doc,primary.range??primary.replace??primary.insert):{from,to};
-  const insert=primary?.newText??item.insertText??item.label;
-  if(!span||typeof insert!=="string"||insert.length>65536||span.from>to||span.to<from)return null;
-  const main={...span,insert},changes=[main];
-  if(item.additionalTextEdits!==undefined){
-    if(!Array.isArray(item.additionalTextEdits)||item.additionalTextEdits.length>20)return null;
-    for(const edit of item.additionalTextEdits){
-      const r=object(edit)?range(doc,edit.range):null;
-      if(!r||typeof edit.newText!=="string"||edit.newText.length>65536)return null;
-      changes.push({...r,insert:edit.newText});
-    }
-  }
-  changes.sort((a,b)=>a.from-b.from||a.to-b.to||Number(a===main)-Number(b===main));
-  for(let i=1;i<changes.length;i++)if(changes[i].from<changes[i-1].to)return null;
-  return {changes,anchor:span.from+insert.length+changes.filter(c=>c!==main&&(c.from<span.from||c.from===span.from&&c.to===c.from)).reduce((sum,c)=>sum+c.insert.length-(c.to-c.from),0)};
 }
 function content(value: unknown): string {
   if (typeof value === "string") return value.slice(0, 32768);
@@ -135,6 +123,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     }finally{if(ticket)completionOwner.finish(ticket);}
   }
   let completionApplyGeneration=0,activeCompletionResolves=0;
+  const snippetPreparation=new SnippetPreparationService();
+  function invalidateCompletionApplication(){snippetPreparation.cancel();return ++completionApplyGeneration;}
   let incomplete:IncompleteContext|null=null,typing:{doc:Text;pos:number}|null=null,completionRequestGeneration=0;
   function invokeCompletion(target:EditorView){
     if(closed||view!==target||!session||target.composing)return false;
@@ -181,9 +171,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         (!needle || String(item.filterText ?? item.label).toLowerCase().includes(needle)));
       candidates.sort((a, b) => String(a.sortText ?? a.label).localeCompare(String(b.sortText ?? b.label)));
       for (const item of candidates.slice(0, 300)) {
-        if (!object(item) || typeof item.label !== "string" || item.label.length > 512 || item.insertTextFormat === 2) continue;
-        const result=completionChanges(doc,item,word?.from??context.pos,context.pos);
-        if(!result)continue;
+        if (!object(item) || typeof item.label !== "string" || item.label.length > 512) continue;
+        const result=completionApplication(doc,item,word?.from??context.pos,context.pos);
+        if(!result||result.format===2&&context.state.field(snippetSessionState,false)===undefined)continue;
         const id=session?.id,askedVersion=version,resolve=session?.completionResolve===true,token=item._inkleetCompletion;
         if(resolve&&(!Number.isSafeInteger(token)||token<=0))continue;
         let resolution:Promise<unknown>|null=null;
@@ -207,15 +197,30 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
             }catch{return null;}
           } : content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
           apply(target) {
-            const ticket=++completionApplyGeneration;
+            const ticket=invalidateCompletionApplication(),state=target.state,uri=session?.uri;
             const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.main.head===context.pos&&target.state.selection.main.empty&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
             if(!current())return;
             void (async()=>{
               const resolved=await resolveItem();
               if(!current())return;
-              const applied=object(resolved)?completionChanges(doc,resolved,word?.from??context.pos,context.pos):null;
-              if(!applied)throw Error("补全或导入编辑无效，未修改源码");
-              target.dispatch({changes:applied.changes,selection:{anchor:applied.anchor},annotations:isolateHistory.of("full"),userEvent:"input.complete"});
+              const application=completionApplication(doc,resolved,word?.from??context.pos,context.pos);
+              if(!application)throw Error("补全或导入编辑无效，未修改源码");
+              const existingSnippet=target.state.field(snippetSessionState,false);
+              if(existingSnippet&&(application.format===2||application.additional.length))throw Error(existingSnippet.dirty?(existingSnippet.dormant?"请先保存当前参数修改，再应用此候选":"请先保存，再按 Esc 结束当前参数补全"):"请先按 Esc 结束当前参数补全，再应用此候选");
+              if(application.format===2){
+                const variables=snippetVariables(state,context.pos,uri);
+                const prepared=await snippetPreparation.prepare(application.primary.insert,variables);
+                if(!current())return;
+                const laid=layoutSnippet(prepared,state,context.pos,application.mode);
+                const transaction=snippetInsertion(target.state,laid.prepared,application.primary.from,application.primary.to,application.additional);
+                if(!transaction)throw Error("此参数补全结构暂不支持，未修改源码");
+                if(current())target.dispatch(transaction);
+              }else{
+                let insert=application.primary.insert;
+                if(application.mode===2)insert=layoutSnippet({schemaVersion:1,parserIdentity:snippetParserIdentity,text:insert,fields:[],navigation:[],transforms:[],needsTransformEvaluation:false,transformState:"resolved"},state,context.pos,2).prepared.text;
+                const applied=completionTextChanges(application,insert);if(!applied)throw Error("补全文本超出限制，未修改源码");
+                if(current())target.dispatch({changes:applied.changes,selection:{anchor:applied.anchor},annotations:isolateHistory.of("full"),userEvent:"input.complete"});
+              }
             })().catch(error=>{if(current())status("补全未应用 · "+String(error).slice(0,220));});
           },
         });
@@ -318,9 +323,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     // same reset boundary as commands. Disable the earlier basicSetup copy.
     Prec.highest(keymap.of(completionKeymap.map(binding=>binding.run===startCompletion?{...binding,run:invokeCompletion}:binding))),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}}}),
-    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, compositionstart(){++completionApplyGeneration;++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, mousedown(event, target) {
+    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
+    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}}}),
+    EditorView.domEventHandlers({ blur(){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, compositionstart(){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
@@ -336,7 +341,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         typing=!update.view.composing&&inserted&&inserted.from===inserted.to&&inserted.text&&update.transactions.some(transaction=>transaction.isUserEvent("input.type"))&&update.state.selection.main.empty&&update.state.selection.main.head===inserted.from+inserted.text.length?{doc:update.state.doc,pos:update.state.selection.main.head}:null;
       }else if(update.selectionSet){incomplete=null;typing=null;++completionRequestGeneration;completionOwner.cancelActive();}
 
-      if (update.docChanged || update.selectionSet) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); }
+      if (update.docChanged || update.selectionSet) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); }
       if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
       if (update.docChanged && !closed) {
         scheduleSemantic();
@@ -387,7 +392,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      snippetPreparation.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       appliedDiagnostics=null;session = null; view = null;
     },
