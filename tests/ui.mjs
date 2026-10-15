@@ -2450,7 +2450,16 @@ try {
   await snippetPage.goto("http://127.0.0.1:5173/snippet-session-test");
   await snippetPage.evaluate(async()=>{
     const api=await import("/tests/snippet-session-harness.tsx");
-    const s=window.__snippetSessionTest={api,value:"",edits:[]};
+    const s=window.__snippetSessionTest={api,value:"",edits:[],statuses:[],version:1};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:97,version:1,server:"snippet-fixture",uri:"file:///solution.py",completionResolve:false};
+      if(command==="update_language_document"){s.version=args.version;return;}
+      if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
+      if(command==="language_request")return args.kind==="completion"?[{label:"nameComplete"}]:null;
+      if(command==="language_cancel_completion"||command==="stop_language_service")return;
+      throw Error(command);
+    }};
     s.mount=api.mountSnippetEditor(document.querySelector("#editor"),s);
     s.view=()=>api.EditorView.findFromDOM(document.querySelector(".cm-editor"));
     s.insert=()=>{
@@ -2461,6 +2470,7 @@ try {
   });
   const snippetCode=snippetPage.getByRole("textbox",{name:"代码编辑器",exact:true});
   await snippetCode.waitFor();
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.statuses.some(text=>text.includes("已连接")));
   await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
   await snippetCode.press("ArrowRight");await snippetCode.press("X");
   assert.equal(await snippetCode.innerText(),"nameX = nameX; value","narrowing selection does not break mirrors");
@@ -2470,7 +2480,10 @@ try {
   await snippetCode.press("Shift+Tab");
   const selectedSnippet=await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);});
   assert.equal(selectedSnippet,"nameX","Shift-Tab navigates rather than outdents");
-  await snippetCode.press("Escape");await snippetCode.press("ArrowRight");await snippetCode.press("Y");
+  await snippetCode.press("Escape");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.selection.main.head),5,"Escape collapses the existing selection at its end");
+  await snippetCode.press("Y");
   assert.equal(await snippetCode.innerText(),"nameXY = nameX; 42","Escape cancels linkage without removing text");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setVim(true));
   await snippetPage.waitForFunction(()=>window.__snippetSessionTest.api.vimNormal(window.__snippetSessionTest.view()));
@@ -2493,8 +2506,22 @@ try {
   });
   await snippetCode.waitFor();
   assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null,"cached EditorState cannot revive disposed snippet ownership");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
+  await snippetCode.press("ArrowRight");await snippetCode.press("Control+Space");
+  await snippetPage.getByRole("option",{name:"nameComplete",exact:true}).waitFor();
+  await snippetCode.press("Tab");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.value==="nameComplete = nameComplete; value");
+  assert.equal(await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState);return s.fields.find(f=>f.id===s.active).group;}),"t:1","popup Tab accepts completion without also advancing snippet");
+  await snippetCode.press("Tab");
+  assert.equal(await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"value");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
+  await snippetCode.press("ArrowRight");await snippetCode.press("X");await snippetCode.press("Control+z");
+  assert.equal(await snippetCode.innerText(),"name = name; value","keyboard undo restores source and mirror together");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null);
+  await snippetCode.press("Control+y");
+  assert.equal(await snippetCode.innerText(),"nameX = nameX; value","keyboard redo restores linked text without reactivating session");
   await snippetPage.screenshot({path:"evidence/snippet-flat-session.png"});
-  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Partial flat session only; nesting/choices/transforms and real IME/native acceptance remain unavailable.\n");
+  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Partial flat session only; nesting/choices/transforms and real IME/native acceptance remain unavailable.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
 
   const providerPage=await browser.newPage();
