@@ -1,15 +1,20 @@
 //! A bounded JSON-RPC stdio client for trusted language servers.
 //! Reader/writer threads keep pipe I/O off the GUI and async executor threads.
-use crate::protocol::{read_message, write_message};
+use crate::protocol::read_message;
 use serde_json::{json, Value};
 use std::{collections::HashMap, io::{BufReader, Read, Write}, process::{Command, Stdio}, sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc}, time::Duration};
+#[path = "rpc_owned.rs"]
+mod owned;
+pub use owned::{OwnedRequest, RequestCanceller};
+use owned::Outgoing;
 type Reply = std::result::Result<Value, String>;
 struct Shared {
+    owned: Mutex<owned::Entries>,
     pending: Mutex<HashMap<u64,mpsc::SyncSender<Reply>>>,
     dead: AtomicBool,
 }
 pub struct Client {
-    child: Arc<crate::process::OwnedChild>, shared: Arc<Shared>, outgoing: mpsc::SyncSender<Value>, next: Arc<AtomicU64>, dap: bool, stopped: AtomicBool, stderr: Arc<Mutex<String>>, socket: Option<std::net::TcpStream>,
+    child: Arc<crate::process::OwnedChild>, shared: Arc<Shared>, outgoing: mpsc::SyncSender<Outgoing>, next: Arc<AtomicU64>, dap: bool, stopped: AtomicBool, stderr: Arc<Mutex<String>>, socket: Option<std::net::TcpStream>,
 }
 impl Client {
     pub fn spawn(command: Command, settings: Value, event: Arc<dyn Fn(Value)+Send+Sync>) -> Result<Self,String> {
@@ -68,13 +73,13 @@ impl Client {
         Self::from_io(child,Box::new(stdin),Box::new(stdout),Box::new(stderr),settings,event,dap,None)
     }
     fn from_io(child:Arc<crate::process::OwnedChild>,stdin:Box<dyn Write+Send>,stdout:Box<dyn Read+Send>,stderr:Box<dyn Read+Send>,settings:Value,event:Arc<dyn Fn(Value)+Send+Sync>,dap:bool,socket:Option<std::net::TcpStream>)->Result<Self,String>{
-        let shared=Arc::new(Shared{pending:Mutex::new(HashMap::new()),dead:AtomicBool::new(false)});
-        let (outgoing,rx)=mpsc::sync_channel::<Value>(64);
+        let shared=Arc::new(Shared{owned:Mutex::new(HashMap::new()),pending:Mutex::new(HashMap::new()),dead:AtomicBool::new(false)});
+        let (outgoing,rx)=mpsc::sync_channel::<Outgoing>(64);
         let writer_shared=shared.clone();
         std::thread::spawn(move || {
             let mut stdin=stdin;
             for value in rx {
-                if write_message(&mut stdin,&value).is_err(){break;}
+                if writer_shared.dead.load(Ordering::Acquire) || owned::dispatch(&writer_shared,&mut stdin,value).is_err(){break;}
             }
             fail_all(&writer_shared);
         });
@@ -100,7 +105,7 @@ impl Client {
                         Some("request")=>{
                             // No terminal, arbitrary process or command execution requested by an adapter.
                             let response=json!({"seq":reply_sequence.fetch_add(1,Ordering::Relaxed),"type":"response","request_seq":value.get("seq"),"command":value.get("command"),"success":false,"message":"Unsupported reverse request"});
-                            if writer.try_send(response).is_err(){break;}
+                            if writer.try_send(Outgoing::Plain(response)).is_err(){break;}
                         },
                         _=>break,
                     }
@@ -109,17 +114,12 @@ impl Client {
 
                 if value.get("method").is_none() {
                     if let Some(id)=value.get("id").and_then(Value::as_u64) {
-                        if let Ok(mut pending)=reader_shared.pending.lock() {
-                            if let Some(tx)=pending.remove(&id) {
-                                let result=if let Some(error)=value.get("error"){
-                                    let code=error.get("code").and_then(Value::as_i64).unwrap_or(0);
-                                    let message=error.get("message").and_then(Value::as_str).unwrap_or("请求失败").chars().take(1000).collect::<String>();
-                                    Err(format!("语言服务请求错误（{code}）：{message}"))
-                                }
-                                    else {Ok(value.get("result").cloned().unwrap_or(Value::Null))};
-                                let _=tx.try_send(result);
-                            }
-                        }
+                        let result=if let Some(error)=value.get("error"){
+                            let code=error.get("code").and_then(Value::as_i64).unwrap_or(0);
+                            let message=error.get("message").and_then(Value::as_str).unwrap_or("请求失败").chars().take(1000).collect::<String>();
+                            Err(format!("语言服务请求错误（{code}）：{message}"))
+                        } else {Ok(value.get("result").cloned().unwrap_or(Value::Null))};
+                        owned::deliver(&reader_shared,&writer,id,result);
                     }
                 } else if let Some(id)=value.get("id") {
                     let method=value.get("method").and_then(Value::as_str).unwrap_or("");
@@ -140,7 +140,7 @@ impl Client {
                         "client/registerCapability"|"client/unregisterCapability"|"window/workDoneProgress/create"=>json!({"jsonrpc":"2.0","id":id,"result":null}),
                         _=>json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Unsupported client method"}}),
                     };
-                    if writer.try_send(response).is_err(){break;}
+                    if writer.try_send(Outgoing::Plain(response)).is_err(){break;}
                 } else { event(value); }
             }
             fail_all(&reader_shared);
@@ -157,7 +157,7 @@ impl Client {
     }
     pub fn notify(&self,method:&str,params:Value)->Result<(),String>{
         if self.shared.dead.load(Ordering::Acquire){return Err("语言服务已退出；请重新连接".into());}
-        self.outgoing.try_send(json!({"jsonrpc":"2.0","method":method,"params":params})).map_err(|_|"语言服务队列繁忙，请稍后重试".into())
+        self.outgoing.try_send(Outgoing::Plain(json!({"jsonrpc":"2.0","method":method,"params":params}))).map_err(|_|"语言服务队列繁忙，请稍后重试".into())
     }
     pub fn request(&self,method:&str,params:Value,timeout:Duration)->Reply{
         if self.shared.dead.load(Ordering::Acquire){return Err("语言服务已退出".into());}
@@ -165,16 +165,23 @@ impl Client {
         let (tx,rx)=mpsc::sync_channel(1);
         {
             let mut pending=self.shared.pending.lock().map_err(|_|"语言服务状态不可用")?;
+            if self.shared.dead.load(Ordering::Acquire){return Err("语言服务已退出".into());}
             if pending.len()>=32{return Err("语言服务请求过多".into());}
             pending.insert(id,tx);
         }
         let message=if self.dap{json!({"seq":id,"type":"request","command":method,"arguments":params})}else{json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})};
-        let sent=self.outgoing.try_send(message);
+        let sent=self.outgoing.try_send(Outgoing::Plain(message));
         let result=if sent.is_err(){Err("语言服务队列已满".into())}
             else{rx.recv_timeout(timeout).unwrap_or_else(|_|Err("语言服务请求超时或连接中断".into()))};
         if let Ok(mut pending)=self.shared.pending.lock(){pending.remove(&id);}
         if result.is_err()&&!self.dap{let _=self.notify("$/cancelRequest",json!({"id":id}));}
         result
+    }
+    /// Additive LSP-only API. DAP keeps its existing request/cancellation policy.
+    pub fn begin_cancellable_lsp_request(&self,method:&str,params:Value)->Result<OwnedRequest,String>{
+        if self.dap{return Err("DAP 不支持此请求接口".into());}
+        let id=self.next.fetch_add(1,Ordering::Relaxed);
+        owned::begin(&self.shared,&self.outgoing,id,method,params)
     }
     pub fn stderr(&self)->String{self.stderr.lock().map(|s|s.clone()).unwrap_or_default()}
     pub fn is_alive(&self)->bool{!self.shared.dead.load(Ordering::Acquire)}
@@ -187,6 +194,10 @@ impl Client {
 }
 fn fail_all(shared:&Shared){
     shared.dead.store(true,Ordering::Release);
-    if let Ok(mut pending)=shared.pending.lock(){for (_,tx) in pending.drain(){let _=tx.try_send(Err("语言服务连接已关闭".into()));}}
+    // Same lock order as owned admission/cancellation/response delivery.
+    if let Ok(mut owned)=shared.owned.lock(){
+        if let Ok(mut pending)=shared.pending.lock(){for (_,tx) in pending.drain(){let _=tx.try_send(Err("语言服务连接已关闭".into()));}}
+        owned.clear();
+    }
 }
 impl Drop for Client { fn drop(&mut self){self.stop();} }

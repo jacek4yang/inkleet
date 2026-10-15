@@ -1,3 +1,4 @@
+import {CompletionRequestOwner,type CompletionTicket} from "./completion-request-owner";
 import {advanceIncomplete,completionTrigger,identifierTail,type CompletionTrigger,type IncompleteContext} from "./completion-context";
 import { isolateHistory } from "@codemirror/commands";
 import { decodeSemanticSpans, semanticField, semanticTheme, setSemanticTokens } from "./semantic-tokens";
@@ -115,7 +116,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     });
   }
   let completionSequence=0;
-  async function request(kind: string, pos: number, doc: Text, newName?: string, completionContext?:CompletionTrigger, stillCurrent:()=>boolean=()=>true): Promise<unknown> {
+  const completionOwner=new CompletionRequestOwner((id,throughSequence)=>invoke("language_cancel_completion",{id,throughSequence}));
+  async function request(kind: string, pos: number, doc: Text, newName?: string, completionContext?:CompletionTrigger, stillCurrent:()=>boolean=()=>true,onIssued?:(ticket:CompletionTicket)=>void): Promise<unknown> {
     if (!session || closed || !view || !stillCurrent()) return null;
     const owner=view,id=session.id;
     await flush();
@@ -123,14 +125,18 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     const line = doc.lineAt(pos), askedVersion = version;
     if(kind==="completion"&&completionSequence>=Number.MAX_SAFE_INTEGER)throw Error("补全请求序号已耗尽，请重新连接语言服务");
     const sequence=kind==="completion"?++completionSequence:null;
-    const result = await invoke("language_request", { id, version: askedVersion, kind, completionSequence:sequence, line: line.number - 1, character: pos - line.from, newName: newName ?? null, completionContext:completionContext??null });
-    return !closed && session?.id === id && version === askedVersion && view===owner && owner.state.doc===doc && stillCurrent() ? result : null;
+    const ticket=sequence===null?null:completionOwner.begin(id,sequence);
+    if(ticket)onIssued?.(ticket);
+    try{
+      const result = await invoke("language_request", { id, version: askedVersion, kind, completionSequence:sequence, line: line.number - 1, character: pos - line.from, newName: newName ?? null, completionContext:completionContext??null });
+      return !closed && session?.id === id && version === askedVersion && view===owner && owner.state.doc===doc && stillCurrent() ? result : null;
+    }finally{if(ticket)completionOwner.finish(ticket);}
   }
   let completionApplyGeneration=0,activeCompletionResolves=0;
   let incomplete:IncompleteContext|null=null,typing:{doc:Text;pos:number}|null=null,completionRequestGeneration=0;
   function invokeCompletion(target:EditorView){
     if(closed||view!==target||!session||target.composing)return false;
-    incomplete=null;typing=null;++completionRequestGeneration;
+    incomplete=null;typing=null;++completionRequestGeneration;completionOwner.cancelActive();
     // Reset CodeMirror's active source query as well as our request generation.
     // Starting again alone can leave a stale pending query with no replacement.
     target.dispatch({selection:target.state.selection});
@@ -138,7 +144,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   }
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
-    const generation=++completionRequestGeneration;
+    const generation=++completionRequestGeneration;completionOwner.cancelActive();
     const word = context.matchBefore(identifierTail);
     const triggers=session.completionTriggerCharacters??[".",":"];
     const before=context.state.sliceDoc(Math.max(0,context.pos-2),context.pos);
@@ -146,14 +152,15 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     const typed=typing?.doc===context.state.doc&&typing.pos===context.pos;
     const trigger=completionTrigger(context.explicit&&!typed,before,triggers,continued);
     if(!context.explicit&&!word?.text&&trigger.triggerKind!==2)return null;
-    context.addEventListener("abort", () => {}, { onDocChange: true });
+    let attemptTicket:CompletionTicket|null=null;
+    context.addEventListener("abort", () => completionOwner.cancel(attemptTicket), { onDocChange: true });
     const doc = context.state.doc,owner=view,sessionId=session.id;
     const current=()=>!closed&&view===owner&&session?.id===sessionId&&generation===completionRequestGeneration&&!context.aborted&&owner.state.doc===doc&&owner.state.selection.main.head===context.pos;
     try {
       const deadline = Date.now() + (context.explicit ? 8000 : 1200);
       let items: unknown[] = [], isIncomplete=false;
       for (let attempt = 0; ; attempt++) {
-        const result = await request("completion", context.pos, doc,undefined,trigger,current);
+        const result = await request("completion", context.pos, doc,undefined,trigger,current,ticket=>{attemptTicket=ticket;});
         if (!current()) return null;
         isIncomplete=object(result)&&result.isIncomplete===true;
         items = Array.isArray(result) ? result : object(result) && Array.isArray(result.items) ? result.items : [];
@@ -306,8 +313,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     Prec.highest(keymap.of(completionKeymap.map(binding=>binding.run===startCompletion?{...binding,run:invokeCompletion}:binding))),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;}}}),
-    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;return false;}, compositionstart(){++completionApplyGeneration;++completionRequestGeneration;incomplete=null;typing=null;return false;}, mousedown(event, target) {
+    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){++completionApplyGeneration;++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}}}),
+    EditorView.domEventHandlers({ blur(){++completionApplyGeneration;++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, compositionstart(){++completionApplyGeneration;++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
@@ -315,13 +322,13 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     }}),
     EditorView.updateListener.of(update => {
       if(update.docChanged){
-        ++completionRequestGeneration;
+        ++completionRequestGeneration;completionOwner.cancelActive();
         const changes:{from:number;to:number;text:string}[]=[];
         update.changes.iterChanges((from,to,_fromB,_toB,inserted)=>{if(changes.length<2)changes.push({from,to,text:inserted.length<=256?inserted.toString():""});});
         incomplete=update.view.composing?null:advanceIncomplete(incomplete,update.startState.doc,update.state.doc,changes);
         const inserted=changes.length===1?changes[0]:null;
         typing=!update.view.composing&&inserted&&inserted.from===inserted.to&&inserted.text&&update.transactions.some(transaction=>transaction.isUserEvent("input.type"))&&update.state.selection.main.empty&&update.state.selection.main.head===inserted.from+inserted.text.length?{doc:update.state.doc,pos:update.state.selection.main.head}:null;
-      }else if(update.selectionSet){incomplete=null;typing=null;++completionRequestGeneration;}
+      }else if(update.selectionSet){incomplete=null;typing=null;++completionRequestGeneration;completionOwner.cancelActive();}
 
       if (update.docChanged || update.selectionSet) { ++completionApplyGeneration; ++signatureGeneration; clearTimeout(signatureTimer); }
       if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
@@ -368,13 +375,13 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         const started = await connecting;
         if (!started) return;
         if (closed) { await invoke("stop_language_service", { id: started.id }); return; }
-        incomplete=null;typing=null;++completionRequestGeneration;session = started; version = started.version; sent = initial;
+        incomplete=null;typing=null;++completionRequestGeneration;completionOwner.cancelActive();session = started; version = started.version; sent = initial;
         await flush();
         if (!closed) { status(`${serverName} 已连接 · F12 / Ctrl+单击查看定义`); void poll(); scheduleSemantic(); }
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration; ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); ++completionApplyGeneration; closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       session = null; view = null;
     },
