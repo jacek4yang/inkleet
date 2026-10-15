@@ -1,3 +1,4 @@
+import {useCodeMismatch,type LiveCode} from "./live-code";
 import {localResultReport,type OutputRow} from "./local-result-model";
 import {validateRunContext,sameRunStatus,type RunContext} from "./run-context";
 import {canonicalJson,compareJson,invocationCount,type Expectation} from "./case-expectations";
@@ -24,8 +25,8 @@ const CaseResult=memo(function CaseResult({row}:{row:OutputRow}){
   {!row.missing&&<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details>}
  </section>;
 });
-export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
-  onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
+export function LocalRunner({ documentKey, codeSource, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
+  onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; codeSource: LiveCode; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
 }) {
   const resize=useResizablePanel("local",!hidden);
   const names=useMemo(()=>parameterNames(metadata),[metadata]),storageKey="inkleet.test-cases.v1:"+(documentKey??title+":"+language);
@@ -63,7 +64,8 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
   },[context,result?.id,result?.documentKey,result?.clientRequestId,documentKey,snapshot]);
   const report=useMemo(()=>result?localResultReport(result,activeRecord):null,[result,activeRecord]);
   const currentPlans=useMemo(()=>cases.map(item=>({...item,expectation:item.expectation?.value.trim()?item.expectation:null})),[cases]);
-  const stale=!!activeRecord&&(activeRecord.snapshot.code!==code||activeRecord.snapshot.language!==language||activeRecord.snapshot.metadata!==metadata||activeRecord.snapshot.title!==title||
+  const codeMismatch=useCodeMismatch(codeSource,activeRecord?.snapshot.code);
+  const stale=!!activeRecord&&(codeMismatch||activeRecord.snapshot.language!==language||activeRecord.snapshot.metadata!==metadata||activeRecord.snapshot.title!==title||
     (activeRecord.mode==="all"?JSON.stringify(activeRecord.cases)!==JSON.stringify(currentPlans):
       activeRecord.cases.some(item=>JSON.stringify(item)!==JSON.stringify(currentPlans.find(current=>current.id===item.id)))||
       ((activeRecord.mode??"selected")==="selected"&&activeRecord.cases.length===1&&activeRecord.cases[0].id!==selected)));
@@ -116,7 +118,7 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
       }
       const clientRequestId=crypto.randomUUID();lastRequest.current=clientRequestId;
       const combined=chosen.map(item=>item.input).join("\n");
-      const source={code,input:combined,metadata,title,language};
+      const source={code:codeSource.read(),input:combined,metadata,title,language};
       const localContext=validateRunContext({mode,documentKey,clientRequestId,snapshot:source,cases:chosen,invocations},documentKey,clientRequestId);
       const next={...source,mode,documentKey,clientRequestId,cases:chosen};
       const id=await invoke<number>("start_local_run",{snapshot:next});
@@ -166,6 +168,6 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
 
     {result && !busy(result) && result.exitCode!==null&&result.exitCode!==0 && <small className="exit-code">退出码 {result.exitCode}</small>}
     </div></div>
-    <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel onReveal={()=>{setPane("debug");onReveal?.();}} snapshot={{ documentKey, code, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
+    <div data-runner-pane="debug" hidden={pane !== "debug"}><DebugPanel onReveal={()=>{setPane("debug");onReveal?.();}} codeSource={codeSource} snapshot={{ documentKey, input, metadata, title, language }} breakpoints={breakpoints} onPauseLine={onPauseLine} running={busy(result) || pending} /></div>
   </section>;
 }

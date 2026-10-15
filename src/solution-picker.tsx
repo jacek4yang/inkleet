@@ -1,10 +1,11 @@
+import type {LiveCode} from "./live-code";
 import React,{useEffect,useRef,useState,useLayoutEffect} from "react";
 import {invoke,isTauri} from "@tauri-apps/api/core";
 import {Icon,IconButton} from "./icons";
 type Entry={id:string;name:string};
 type Operation={kind:"new"|"copy"|"rename";name:string;code:string;expected?:string};
-export function SolutionPicker({problem,language,value,code,template,templateAvailable=true,disabled,onChange,onCreated}:{
- problem:string;language:string;value:string;code:string;template:string;templateAvailable?:boolean;disabled:boolean;
+export function SolutionPicker({problem,language,value,codeSource,template,templateAvailable=true,disabled,onChange,onCreated}:{
+ problem:string;language:string;value:string;codeSource:LiveCode;template:string;templateAvailable?:boolean;disabled:boolean;
  onChange:(id:string)=>void;onCreated:(entry:Entry,code:string)=>void;
 }){
  const [entries,setEntries]=useState<Entry[]>([{id:"default",name:"默认解答"}]),[error,setError]=useState(""),[loading,setLoading]=useState(false);
@@ -22,7 +23,7 @@ export function SolutionPicker({problem,language,value,code,template,templateAva
  function begin(kind:Operation["kind"]){
   if(menu.current)menu.current.open=false;
   const current=entries.find(item=>item.id===value);
-  setError("");setOperation({kind,name:kind==="rename"?current?.name??"":kind==="copy"?(current?.name??"解答")+" 副本":"",code:kind==="copy"?code:template,expected:current?.name});
+  setError("");setOperation({kind,name:kind==="rename"?current?.name??"":kind==="copy"?(current?.name??"解答")+" 副本":"",code:kind==="copy"?codeSource.read():template,expected:current?.name});
  }
  async function submit(name:string){
   if(!operation||guard.current)return;guard.current=true;setPending(true);setError("");

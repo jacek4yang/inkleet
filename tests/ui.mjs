@@ -473,8 +473,21 @@ try {
   assert.equal(await authPage.evaluate(() => window.__inkAuthTest.judgeStarts.length), 1);
   const sent = await authPage.evaluate(() => window.__inkAuthTest.judgeStarts[0]);
   assert.equal(sent.code, "// restored Java draft");
+  await fixtureEditor.press("Control+End");
+  await fixtureEditor.pressSequentially(" // newest request",{delay:10});
+  const approvedSource=await fixtureEditor.innerText();
   await authPage.getByRole("button", { name: "提交", exact: true }).click();
+  // Simulate a concurrent editor/model update while the modal owns user focus.
+  await authPage.evaluate(async()=>{
+    const {EditorView}=await import("/tests/input-harness.ts");
+    const view=EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor"));
+    if(!view)throw Error("missing real editor view");
+    view.dispatch({changes:{from:0,to:view.state.doc.length,insert:"// changed after submit confirmation opened"}});
+  });
   await authPage.getByRole("dialog", { name: "确认正式提交", exact: true }).getByRole("button", { name: "确认", exact: true }).click();
+  await authPage.waitForFunction(()=>window.__inkAuthTest.judgeStarts.length===2);
+  assert.equal(await authPage.evaluate(()=>window.__inkAuthTest.judgeStarts[1].code),approvedSource,"confirmation sends the source captured when the explicit request began");
+
   await authPage.getByText("测试：发送状态未知，未自动重发", { exact: true }).waitFor();
   assert.equal(await authPage.getByRole("button", { name: "提交", exact: true }).isEnabled(), false);
   await authPage.getByRole("button", { name: "我已核查官方记录", exact: true }).click();
@@ -863,6 +876,16 @@ try {
 
   const runPage = await testPage({ viewport: { width: 1440, height: 900 } });
   const runErrors = []; runPage.on("pageerror", error => runErrors.push(error.message));
+  // Test-only instrumentation of the served module; production has no counters.
+  await runPage.route("**/src/main.tsx",async route=>{
+    const response=await route.fetch();let body=await response.text();
+    assert.equal(body.split("function App() {").length,2,"instrument actual App once");
+    body=body.replace("function App() {","function App() { useEffect(() => { window.__appCommits=(window.__appCommits??0)+1; });");
+    assert.match(body,/function checkpoint\([^)]*\) \{/);
+    body=body.replace(/function checkpoint\(([^)]*)\) \{/,"function checkpoint($1) { window.__checkpointEnqueues=(window.__checkpointEnqueues??0)+1;");
+    await route.fulfill({response,body});
+  });
+
   await runPage.addInitScript(() => {
     window.isTauri = true;
     window.__runTest = { starts: [], result: null, pending: [], debug: null, debugStarts: 0, debugCalls: [], column:27, endColumn:30 };
@@ -1179,11 +1202,14 @@ try {
       const edit=runPage.getByRole("textbox",{name:"代码编辑器",exact:true});
       await edit.click();await edit.press("Control+End");
       await runPage.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-      await runPage.evaluate(()=>{const s=window.__runTest;s.perf={parses:0,parseMs:0,frames:[]};s.perfPollStart=s.perfPolls;});
+      await runPage.evaluate(()=>{const s=window.__runTest;s.perf={parses:0,parseMs:0,frames:[]};s.perfPollStart=s.perfPolls;window.__appCommits=0;window.__checkpointEnqueues=0;});
       await edit.pressSequentially(" // runner performance 01234567890123456789",{delay:20});
       await runPage.waitForFunction(()=>window.__runTest.perfPolls-window.__runTest.perfPollStart>=4&&window.__runTest.perf.frames.length>=30);
-      const sample=await runPage.evaluate(()=>{const s=window.__runTest;return {...s.perf,polls:s.perfPolls-s.perfPollStart,rawBytes:s.perfRaw.reduce((n,v)=>n+new TextEncoder().encode(v).length,0)};});
+      const sample=await runPage.evaluate(()=>{const s=window.__runTest;return {...s.perf,appCommits:window.__appCommits,checkpointEnqueues:window.__checkpointEnqueues,polls:s.perfPolls-s.perfPollStart,rawBytes:s.perfRaw.reduce((n,v)=>n+new TextEncoder().encode(v).length,0)};});
+      await writeFile("evidence/RUNNER_PERFORMANCE_PENDING.json",JSON.stringify({hidden,...sample},null,2));
       assert.equal(sample.parses,0,"unchanged result envelopes must not be reparsed during source edits or fresh-array polls");
+      assert.ok(sample.appCommits<=3,"already-dirty code typing must not rerender App per character");
+      assert.equal(sample.checkpointEnqueues," // runner performance 01234567890123456789".length,"every code edit retains its recovery checkpoint enqueue");
       const sorted=[...sample.frames].sort((a,b)=>a-b);
       assert.ok(sorted.length>=30,"record real keyboard beforeinput samples");
       runnerPerf.push({hidden,...sample,inputToRafP50Ms:sorted[Math.floor(sorted.length*.5)],inputToRafP95Ms:sorted[Math.floor(sorted.length*.95)]});
@@ -1650,9 +1676,53 @@ try {
   assert.equal(await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).inputValue(),first);
   await duplicate.getByRole("button",{name:"取消",exact:true}).click();
   assert.equal(await solutionCode.innerText(),"// named source","failed creation preserves selected draft");
+  await solutionsPage.evaluate(()=>{window.__solutionsTest.fail=false;});
+  await solutionCode.fill("// unsaved copy A");
+  await solutionCode.fill("// unsaved copy B");
+  await solutionsPage.locator(".solution-menu>summary").click();
+  await solutionsPage.getByRole("button",{name:"复制解答",exact:true}).click();
+  const frozenCopy=solutionsPage.getByRole("dialog",{name:"复制解答",exact:true});
+  await solutionsPage.evaluate(async()=>{
+    const {EditorView}=await import("/tests/input-harness.ts");
+    const view=EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor"));
+    if(!view)throw Error("missing source view");
+    view.dispatch({changes:{from:0,to:view.state.doc.length,insert:"// changed after copy began"}});
+  });
+  await frozenCopy.getByRole("textbox",{name:"解答名称",exact:true}).fill("冻结副本");
+  await frozenCopy.getByRole("button",{name:"保存",exact:true}).click();
+  await frozenCopy.waitFor({state:"hidden"});
+  assert.equal(await solutionCode.innerText(),"// unsaved copy B","copy reads newest already-dirty bytes once when operation begins");
+  await solutionsPage.getByRole("combobox",{name:"解答",exact:true}).selectOption(first);
+  assert.equal(await solutionCode.innerText(),"// changed after copy began","concurrent source edit remains in its original document");
   await solutionsPage.close();
   await writeFile("evidence/NAMED_SOLUTIONS_UI_RESULT.txt","PASS: mocked IPC copy snapshot, rename identity, independent source, language switching, duplicate-name rejection and disk failure preserving draft; native disk/restart tested separately.\n");
 
+
+
+  const noTemplatePage=await testPage();
+  await noTemplatePage.addInitScript(()=>{
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command)=>{
+      if(command==="load_recent_questions")return [{...window.__fixtureQuestions[0],codeSnippets:[]}];
+      if(command==="search_questions")return {questions:[],total:0,hasMore:false};
+      if(command==="load_document")return {code:null,notes:null};
+      if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+      if(command==="external_editor_supported")return false;
+      if(command==="stop_language_service")return;
+      throw Error("No service in missing-template fixture");
+    }};
+  });
+  await noTemplatePage.goto("http://127.0.0.1:5173");
+  const noTemplateCode=noTemplatePage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await noTemplatePage.getByText("官方模板不可用",{exact:true}).waitFor();
+  await noTemplateCode.fill("  ");
+  await noTemplatePage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await noTemplateCode.fill("// user source");
+  await noTemplatePage.getByText("官方模板不可用",{exact:true}).waitFor({state:"hidden"});
+  await noTemplateCode.fill("   ");
+  await noTemplatePage.getByText("官方模板不可用",{exact:true}).waitFor();
+  assert.equal(await noTemplatePage.getByLabel("源码未保存",{exact:true}).count(),1,"empty-source indicator updates while dirty membership stays true");
+  await noTemplatePage.close();
 
   const formatPage=await testPage({viewport:{width:1440,height:900}});
   const formatErrors=[];formatPage.on("pageerror",error=>formatErrors.push(error.message));
@@ -2193,6 +2263,30 @@ try {
   await ownerPage.close();
   await writeFile("evidence/LSP_STATUS_OWNERSHIP_UI_RESULT.txt","PASS: actual App CPP-to-C switch never displays previous ready state during deferred document load/start; completion unavailable until new session is ready, then succeeds. Mocked IPC; native verification separate.\\n");
 
+
+
+  const breakpointPage=await browser.newPage();
+  await breakpointPage.route("**/breakpoint-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
+  await breakpointPage.goto("http://127.0.0.1:5173/breakpoint-test");
+  await breakpointPage.evaluate(async()=>{
+    const {EditorView,EditorState,debugGutter,sameBreakpointLines}=await import("/tests/input-harness.ts");
+    const s=window.__breakpointTest={lines:[2],notifications:[]};
+    s.gutter=debugGutter(s.lines,lines=>{
+      if(sameBreakpointLines(s.lines,lines))return;
+      s.lines=lines;s.notifications.push([...lines]);
+    });
+    s.view=new EditorView({state:EditorState.create({doc:"first\nsecond",extensions:s.gutter.extensions}),parent:document.querySelector("#editor")});
+    s.view.focus();
+  });
+  await breakpointPage.keyboard.type("same line typing");
+  assert.deepEqual(await breakpointPage.evaluate(()=>window.__breakpointTest.notifications),[],"same-line typing preserves breakpoint array without App notification");
+  await breakpointPage.evaluate(()=>{const s=window.__breakpointTest;s.view.dispatch({changes:{from:0,insert:"\n"}});});
+  assert.deepEqual(await breakpointPage.evaluate(()=>window.__breakpointTest.notifications),[[3]],"newline remapping must publish changed breakpoint line");
+  await breakpointPage.evaluate(()=>{const s=window.__breakpointTest;s.view.dispatch({selection:{anchor:s.view.state.doc.line(3).from}});s.gutter.toggle(s.view);});
+  assert.deepEqual(await breakpointPage.evaluate(()=>window.__breakpointTest.notifications),[[3],[]],"explicit toggle must publish removal");
+  await breakpointPage.keyboard.type("typing without points");
+  assert.equal(await breakpointPage.evaluate(()=>window.__breakpointTest.notifications.length),2,"empty breakpoint set must not update App per key");
+  await breakpointPage.evaluate(()=>window.__breakpointTest.view.destroy());await breakpointPage.close();
 
   const diagnosticPage=await browser.newPage();
   await diagnosticPage.route("**/diagnostic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));

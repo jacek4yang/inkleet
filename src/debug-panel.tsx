@@ -1,3 +1,4 @@
+import {useCodeMismatch,type LiveCode} from "./live-code";
 import type { DebugPosition } from "./debug-position";
 import { VariableNode } from "./debug-variable-tree";
 import { debugVariables, debugFrames, debugScopes, debugThreads, type DebugVariable, type DebugFrame as Frame, type DebugScope as Scope } from "./debug-model";
@@ -12,7 +13,7 @@ type Watch = { id: number; expression: string; result?: string; error?: string; 
 // One owned snapshot survives panel unmounts; never adopt an unknown session.
 let ownedSnapshot: { id: number; snapshot: Snapshot } | null = null;
 const active = (state: State | null) => state && state.phase !== "finished";
-export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReveal }: { onReveal?:()=>void; snapshot: Snapshot; breakpoints: number[]; onPauseLine: (position:DebugPosition|null) => void; running: boolean }) {
+export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, running, onReveal }: { onReveal?:()=>void; snapshot: Omit<Snapshot,"code">; codeSource: LiveCode; breakpoints: number[]; onPauseLine: (position:DebugPosition|null) => void; running: boolean }) {
   const [state, setState] = useState<State | null>(null), [original, setOriginal] = useState<Snapshot | null>(null);
   const [targets,setTargets]=useState<{id:number;label:string}[]>([]),[choosing,setChoosing]=useState(false);
   const targetVersion=useRef(0),targetContext=useRef<{id:number;epoch:number;frame:number;thread:number|null}|null>(null);
@@ -30,7 +31,9 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReve
   frameRef.current = selectedFrame;
   const alive = useRef(true), guard = useRef(false), latest = useRef<State | null>(null), version = useRef(0), pauseCallback = useRef(onPauseLine);
   pauseCallback.current = onPauseLine;
-  const stale = (!!active(state) && !original) || (!!original && (original.documentKey !== snapshot.documentKey || original.code !== snapshot.code || original.metadata !== snapshot.metadata || original.input !== snapshot.input || original.title !== snapshot.title || original.language !== snapshot.language));
+  const codeMismatch=useCodeMismatch(codeSource,original?.code);
+  const liveMismatch=()=>!!original&&original.code!==codeSource.read();
+  const stale = (!!active(state) && !original) || (!!original && (original.documentKey !== snapshot.documentKey || codeMismatch || original.metadata !== snapshot.metadata || original.input !== snapshot.input || original.title !== snapshot.title || original.language !== snapshot.language));
   useEffect(() => {
     alive.current = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -68,7 +71,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReve
   async function showFrame(frame: Frame, current = latest.current) {
     if (!current || current.phase !== "paused") return;
     const request = ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false); setEvaluation(null); frameRef.current = frame.id; setFrame(frame.id); setVariables([]); setScopes([]);
-    if (!stale && original && frame.inkleetSource===true && (/(?:^|[\\/])(?:solution\.(?:py|go|cpp|c|rs)|Solution\.java)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current({line:frame.line,column:frame.column,endLine:frame.endLine,endColumn:frame.endColumn,frameId:frame.id,execution:topFrame.current?.id===frame.id&&topFrame.current.thread===(current.threadId??0)});
+    if (!stale && !liveMismatch() && original && frame.inkleetSource===true && (/(?:^|[\\/])(?:solution\.(?:py|go|cpp|c|rs)|Solution\.java)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current({line:frame.line,column:frame.column,endLine:frame.endLine,endColumn:frame.endColumn,frameId:frame.id,execution:topFrame.current?.id===frame.id&&topFrame.current.thread===(current.threadId??0)});
     else pauseCallback.current(null);
     try {
       const response = await inspect("scopes", frame.id, current);
@@ -100,7 +103,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReve
   }, [state?.id, state?.epoch, stale, original?.code]);
   async function evaluate(value = expression, watchId?: number) {
     const current = latest.current, frame = frameRef.current;
-    if (!current || current.phase !== "paused" || frame === null || guard.current || evaluationGuard.current || stale || snapshot.language === "java") return;
+    if (!current || current.phase !== "paused" || frame === null || guard.current || evaluationGuard.current || stale || liveMismatch() || snapshot.language === "java") return;
     if (!value.trim() || new TextEncoder().encode(value).length > 1024) { setError("请输入不超过 1024 字节的表达式"); return; }
     evaluationGuard.current = true; setEvaluating(true); setEvaluation(null); setError("");
     const token = ++evaluationVersion.current;
@@ -138,7 +141,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReve
   }
   async function chooseTarget(){
     const current=latest.current,frame=frameRef.current;
-    if(!current||!currentPause(current)||frame===null||stale||current.capabilities?.supportsStepInTargetsRequest!==true||guard.current||evaluationGuard.current)return;
+    if(!current||!currentPause(current)||frame===null||stale||liveMismatch()||current.capabilities?.supportsStepInTargetsRequest!==true||guard.current||evaluationGuard.current)return;
     const token=++targetVersion.current;setChoosing(true);setTargets([]);setError("");
     try{
       const response=await inspect("stepInTargets",frame,current);
@@ -157,7 +160,7 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReve
   async function action(kind: string, target?:number) {
     if(kind==="stepInTarget"){
       const context=targetContext.current,current=latest.current;
-      if(!context||!current||!currentPause(current)||stale||context.id!==current.id||context.epoch!==current.epoch||context.frame!==frameRef.current||context.thread!==selectedThread||selectedThread!==current.threadId||!targets.some(value=>value.id===target)){
+      if(!context||!current||!currentPause(current)||stale||liveMismatch()||context.id!==current.id||context.epoch!==current.epoch||context.frame!==frameRef.current||context.thread!==selectedThread||selectedThread!==current.threadId||!targets.some(value=>value.id===target)){
         ++targetVersion.current;setTargets([]);targetContext.current=null;setError("步入目标已过期，请重新选择");return;
       }
     }
@@ -165,12 +168,12 @@ export function DebugPanel({ snapshot, breakpoints, onPauseLine, running, onReve
     guard.current = true; ++targetVersion.current;setTargets([]);setChoosing(false);setPending(true); setError(""); setNotice("");
     try {
       if (kind === "start") {
-        const value = { ...snapshot };
+        const value = { ...snapshot,code:codeSource.read() };
         const id = await invoke<number>("start_debug", { snapshot: value, lines: breakpoints });
         ownedSnapshot = { id, snapshot: value };
         if (alive.current) setOriginal(value);
       } else if (state) {
-        if (kind === "breakpoints") { await invoke("set_debug_breakpoints", {id: state.id, code: snapshot.code, lines: breakpoints}); if (alive.current) setNotice("断点已更新"); }
+        if (kind === "breakpoints") { const code=codeSource.read();if(stale||!original||original.code!==code)throw Error("源码已改变，请重新启动调试");await invoke("set_debug_breakpoints", {id: state.id, code, lines: breakpoints}); if (alive.current) setNotice("断点已更新"); }
         else if (kind === "stop") await invoke("stop_debug", { id: state.id });
         else await invoke("debug_request", { id: state.id, epoch: state.epoch, kind, reference: target??0 });
       }
