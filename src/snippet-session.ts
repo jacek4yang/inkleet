@@ -110,7 +110,8 @@ export const snippetSession:Extension=[
  })
 ];
 export function endSnippet(view:EditorView):boolean{
- const session=view.state.field(snippetSessionState,false);if(!session||session.dormant)return false;
+ const session=view.state.field(snippetSessionState,false);if(!session||session.dormant&&!session.waiting&&!session.error)return false;
+ // A dormant save still owns a worker and callback. Escape invalidates both.
  view.dispatch({effects:setSession.of(session.dirty?{...session,owner:{},dormant:true,waiting:false,error:null,choicesOpen:false}:null)});return true;
 }
 export function moveSnippetField(view:EditorView,direction:1|-1):boolean{

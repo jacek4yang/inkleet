@@ -2609,6 +2609,18 @@ try {
   });
   await snippetPage.locator("#snippet-save-button").click();
   await snippetPage.waitForFunction(()=>window.__snippetSessionTest.saves.at(-1)==="button -> BUTTON; tail");
+  for(const command of ["保存","格式化文档"]){
+    await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
+    const before=await snippetPage.evaluate(()=>({saves:window.__snippetSessionTest.saves.length,formats:window.__snippetSessionTest.formats.length}));
+    await snippetPage.keyboard.insertText("palette");
+    await snippetCode.press("Control+Shift+p");
+    const search=snippetPage.getByRole("combobox",{name:"搜索编辑器命令",exact:true});
+    await search.fill(command);await search.press("Enter");
+    await snippetPage.waitForFunction(()=>window.__snippetSessionTest.formats.at(-1)==="palette -> PALETTE; tail");
+    if(command==="保存")await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);
+    else assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),before.saves,"format command does not save");
+    assert.ok(await snippetPage.evaluate(n=>window.__snippetSessionTest.formats.length>n,before.formats));
+  }
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setVim(true));
   await snippetPage.waitForFunction(()=>window.__snippetSessionTest.api.vimNormal(window.__snippetSessionTest.view()));
   await snippetCode.press("i");await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
@@ -2641,6 +2653,21 @@ try {
   await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor();
   assert.ok((await snippetCode.innerText()).endsWith("! / x; tail"),"worker timeout preserves user source and previous derived value");
   await snippetCode.press("Escape");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
+  await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
+  await snippetCode.press("Escape");
+  const dormantSaveCount=await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length);
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.waiting===true);
+  await snippetCode.press("Escape");
+  assert.deepEqual(await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest,v=s.view(),f=v.state.field(s.api.snippetSessionState);return {dormant:f?.dormant,waiting:f?.waiting,error:f?.error};}),{dormant:true,waiting:false,error:null},"Escape cancels dormant save ownership");
+  await snippetPage.waitForTimeout(1700);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),dormantSaveCount,"canceled dormant save never runs after worker deadline");
+  await snippetCode.press("Control+s");
+  await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor();
+  await snippetCode.press("Escape");
+  await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor({state:"hidden"});
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),dormantSaveCount,"failed dormant settlement never saves");
   await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; nested sessions and native/real-IME acceptance remain unverified.\n");
 
   await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested sessions and real IME/native acceptance remain unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
