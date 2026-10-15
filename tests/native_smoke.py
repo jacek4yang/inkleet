@@ -353,16 +353,16 @@ def native_snippet_case(group,code):
         cmd("POST",f"/element/{choice['node']}/click",{})
         wait_for(lambda:snippet_selection()["activeFields"]>0,group+" real active argument field",seconds=20)
         selected=snippet_selection()
-        assert selected["focus"]=="代码编辑器" and selected["text"],group+" argument selection owns keyboard focus"
         accepted=source_text(code)
+        observation={"phase":phase,"freshAfter":prior,"wire":wire,"accepted":accepted,"selection":selected,"expectedAfterArgument":expected}
+        observations.append(observation)
+        persist_observations()
+        assert selected["focus"]=="代码编辑器" and selected["text"],group+" argument selection owns keyboard focus"
         if accepted_expected is not None:
             assert accepted==accepted_expected,group+" exact two-argument rendered snippet"
             assert selected["text"]==selections[0],group+" exact first placeholder selection"
             assert response["request"]["line"]==0,group+" editable source position excludes virtual scaffold"
         assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
-        observation={"phase":phase,"freshAfter":prior,"wire":wire,"accepted":accepted,"selection":selected,"expectedAfterArgument":expected}
-        observations.append(observation)
-        persist_observations()
         if phase=="history":
             subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
             wait_for(lambda:source_text(code)==source,group+" one undo removes the entire accepted snippet")
