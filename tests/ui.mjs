@@ -2680,7 +2680,7 @@ try {
       return result;
     };
   });
-  for(const keys of [["Control+s","Control+Shift+i"],["Control+Shift+i","Control+s"],["Control+s","Control+s"],["Control+s","Tab"]]){
+  for(const keys of [["Control+s","Control+Shift+KeyI"],["Control+Shift+KeyI","Control+s"],["Control+s","Control+s"],["Control+s","Tab"]]){
     await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;await s.insertDerived();s.view().setTabFocusMode(false);s.holdEvaluation=true;s.releaseEvaluation=null;});
     await snippetPage.keyboard.insertText("mixed");
     const before=await snippetPage.evaluate(()=>({saves:window.__snippetSessionTest.saves.length,formats:window.__snippetSessionTest.formats.length}));
