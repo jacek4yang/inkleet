@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {EditorState} from "@codemirror/state";
 import {history,undo} from "@codemirror/commands";
 import {prepareSnippet} from "../src/snippet-prepare.ts";
-import {normalizeSnippetEol} from "../src/snippet-layout.ts";
+import {normalizeSnippetEol,layoutSnippet} from "../src/snippet-layout.ts";
 import {evaluateSnippetTransforms} from "../src/snippet-transform.worker-core.ts";
 import {snippetInsertion,snippetSession,snippetSessionState,moveSnippetField,chooseSnippetValue} from "../src/snippet-session.ts";
 const D="$";
@@ -57,4 +57,41 @@ test("normalizing imports never mutates caller-owned additional edits",()=>{
  const state=EditorState.create({doc:"token"}),additional=[{from:0,to:0,insert:"use x;\r\n"}];
  assert.ok(snippetInsertion(state,prepareSnippet(D+"{1:x}"),0,5,additional));
  assert.equal(additional[0].insert,"use x;\r\n");
+});
+
+test("mode defaults to asIs and explicit mode2 uses only indentation before cursor",()=>{
+ const state=EditorState.create({doc:"\t\t\t\t\tfoo"}),prepared=prepareSnippet("call("+D+"{1:x}+")\n\t"+D+"1\n"+D+"0");
+ assert.equal(layoutSnippet(prepared,state,2).prepared.text,"call(x)\n\tx\n");
+ const layout=layoutSnippet(prepared,state,2,2);assert.equal(layout.indent,"\t\t");assert.equal(layout.prepared.text,"call(x)\n\t\t\tx\n\t\t");
+ for(const f of layout.prepared.fields.filter(f=>f.group==="t:1"))assert.equal(layout.prepared.text.slice(f.from,f.to),"x");
+ assert.equal(layout.prepared.fields.find(f=>f.final)!.from,layout.prepared.text.length);
+ assert.throws(()=>layoutSnippet(layout as any,state,2,2),/Invalid prepared snippet/,"layout wrapper cannot be accidentally reapplied as raw DTO");
+});
+test("mode2 after code preserves relative whitespace and blank trailing lines",()=>{
+ const state=EditorState.create({doc:"  let value"}),layout=layoutSnippet(prepareSnippet("a\r\n\r\n  b\r"+D+"0"),state,11,2);
+ assert.equal(layout.indent,"  ");assert.equal(layout.prepared.text,"a\n  \n    b\n  ");
+});
+test("single-line nested fields and empty stops survive continuation indentation",()=>{
+ const state=EditorState.create({doc:"    "}),prepared=prepareSnippet("begin\n"+D+"{1:a"+D+"{2:b}c}\n"+D+"1\n"+D+"3"+D+"0");
+ const result=layoutSnippet(prepared,state,4,2).prepared;
+ assert.equal(result.text,"begin\n    abc\n    abc\n    ");
+ let s=EditorState.create({extensions:[snippetSession]});const spec=snippetInsertion(s,result,0,0);assert.ok(spec);s=s.update(spec).state;
+ assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"abc");
+ assert.equal(s.field(snippetSessionState)!.nested,true);
+});
+test("mode2 refuses multiline fields choices derived text and oversized expansion",()=>{
+ const state=EditorState.create({doc:"    "});
+ for(const source of [D+"{1:a\nb}",D+"{1|a,b\nc|}",D+"{1:a} "+D+"{1/a/b/}"]){
+  const prepared=evaluateSnippetTransforms(prepareSnippet(source));
+  assert.throws(()=>layoutSnippet(prepared,state,4,2),/not supported yet/);
+ }
+ assert.throws(()=>layoutSnippet(prepareSnippet("\n".repeat(20000)),state,4,2),/output limit/);
+ assert.throws(()=>layoutSnippet(prepareSnippet("x"),state,4,3 as any),/Unsupported snippet indentation mode/);
+});
+test("laid out snippet plus literal import remains one atomic edit",()=>{
+ let s=EditorState.create({doc:"  token",extensions:[history(),snippetSession]});
+ const layout=layoutSnippet(prepareSnippet("f("+D+"{1:x}+")\n"+D+"0"),s,7,2);
+ const spec=snippetInsertion(s,layout.prepared,2,7,[{from:0,to:0,insert:"use x;\n"}]);assert.ok(spec);s=s.update(spec).state;
+ assert.equal(s.doc.toString(),"use x;\n  f(x)\n  ");
+ const target={get state(){return s;},dispatch:(tr:any)=>{s=tr.state;}};assert.equal(undo(target as any),true);assert.equal(s.doc.toString(),"  token");
 });
