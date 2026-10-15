@@ -5,7 +5,7 @@ import {isolateHistory} from "@codemirror/commands";
 import {validatePreparedSnippet} from "./snippet-validation.ts";
 import {snippetLimits,snippetParserIdentity} from "./snippet-budget.ts";
 import type {PreparedSnippet,PreparedTransform,SnippetField} from "./snippet-prepare.ts";
-type Session={owner:object;revision:number;from:number;to:number;transforms:PreparedTransform[];dirty:boolean;waiting:boolean;error:string|null;fields:SnippetField[];navigation:string[];active:number;choicesOpen:boolean;choiceIndex:number};
+type Session={owner:object;dormant:boolean;revision:number;from:number;to:number;transforms:PreparedTransform[];dirty:boolean;waiting:boolean;error:string|null;fields:SnippetField[];navigation:string[];active:number;choicesOpen:boolean;choiceIndex:number};
 const setSession=StateEffect.define<Session|null>({map:(value,mapping)=>{
  if(!value)return null;
  if(mapping.empty)return value;
@@ -20,7 +20,7 @@ const setSession=StateEffect.define<Session|null>({map:(value,mapping)=>{
  })};
 }});
 function decorations(session:Session|null):DecorationSet{
- if(!session)return Decoration.none;
+ if(!session||session.dormant)return Decoration.none;
  const active=session.fields.find(f=>f.id===session.active)?.group;
  return Decoration.set(session.fields.filter(f=>!f.final&&!f.derived&&f.to>f.from).map(f=>Decoration.mark({class:f.group===active?"cm-snippet-field cm-snippet-field-active":"cm-snippet-field"}).range(f.from,f.to)),true);
 }
@@ -31,10 +31,12 @@ export const snippetSessionState=StateField.define<Session|null>({
   // Unfiltered edits and text history must not leave stale linked ranges.
   if(tr.docChanged)return null;
   if(value&&tr.selection){
-   value={...value,waiting:false,error:null};
+   if(value.dormant)return value;
+   if(!tr.newSelection.eq(tr.startState.selection))value={...value,waiting:false,error:null};
    const selection=tr.newSelection;
    if(selection.ranges.length!==1)return null;
-   const current=value.fields.find(f=>f.id===value.active);
+   const activeId=value.active;
+   const current=value.fields.find(f=>f.id===activeId);
    if(current&&selection.main.from>=current.from&&selection.main.to<=current.to)return value;
    const field=value.fields.find(f=>!f.final&&!f.derived&&selection.main.from>=f.from&&selection.main.to<=f.to);
    return field?{...value,active:field.id,choicesOpen:!!field.choices?.length,choiceIndex:Math.max(0,field.choices?.indexOf(tr.newDoc.sliceString(field.from,field.to))??0)}:null;
@@ -50,6 +52,7 @@ function EditorStateTransactionFilter():Extension{
  return EditorState.transactionFilter.of(tr=>{
   const session=tr.startState.field(snippetSessionState,false);
   if(!session||!tr.docChanged||tr.effects.some(effect=>effect.is(setSession)))return tr;
+  if(session.dormant)return [tr,cancelSpec];
   if(tr.annotation(Transaction.remote)||tr.isUserEvent("undo")||tr.isUserEvent("redo")||tr.newSelection.ranges.length!==1||tr.startState.selection.ranges.length!==1||!(tr.isUserEvent("input.type")||tr.isUserEvent("input.paste")||tr.isUserEvent("input.drop")||tr.isUserEvent("input.complete")||tr.isUserEvent("delete")))return [tr,cancelSpec];
   const changes:{from:number;to:number}[]=[];
   tr.changes.iterChangedRanges((from,to)=>{if(changes.length<33)changes.push({from,to});});
@@ -107,11 +110,11 @@ export const snippetSession:Extension=[
  })
 ];
 export function endSnippet(view:EditorView):boolean{
- if(!view.state.field(snippetSessionState,false))return false;
- view.dispatch({effects:setSession.of(null)});return true;
+ const session=view.state.field(snippetSessionState,false);if(!session||session.dormant)return false;
+ view.dispatch({effects:setSession.of(session.dirty?{...session,owner:{},dormant:true,waiting:false,error:null,choicesOpen:false}:null)});return true;
 }
 export function moveSnippetField(view:EditorView,direction:1|-1):boolean{
- const session=view.state.field(snippetSessionState,false);if(!session||view.composing)return false;
+ const session=view.state.field(snippetSessionState,false);if(!session||session.dormant||view.composing)return false;
  const active=session.fields.find(f=>f.id===session.active)!;
  const index=session.navigation.indexOf(active.group);
  if(session.dirty&&!(direction===-1&&index===0))return runtimes.get(view)?.leave(direction)??true;
@@ -145,7 +148,7 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
  const start=from+edits.filter(e=>e!==main&&(e.from<from||e.from===from&&e.to===e.from)).reduce((n,e)=>n+e.insert.length-(e.to-e.from),0);
  const absolute=fields.map(f=>({...f,from:f.from+start,to:f.to+start,choices:f.choices?[...f.choices]:undefined}));
  const first=absolute.find(f=>f.group===result.navigation[0]&&!f.derived);
- const session=first&&!first.final?{owner:{},revision:0,from:start,to:start+result.text.length,transforms:result.transforms,dirty:false,waiting:false,error:null,fields:absolute,navigation:[...result.navigation],active:first.id,choicesOpen:!!first.choices?.length,choiceIndex:0}:null;
+ const session=first&&!first.final?{owner:{},dormant:false,revision:0,from:start,to:start+result.text.length,transforms:result.transforms,dirty:false,waiting:false,error:null,fields:absolute,navigation:[...result.navigation],active:first.id,choicesOpen:!!first.choices?.length,choiceIndex:0}:null;
  return {changes:edits,selection:EditorSelection.single(first?.from??start+result.text.length,first&&!first.final?first.to:first?.from??start+result.text.length),effects:setSession.of(session),annotations:isolateHistory.of("full"),userEvent:"input.complete",scrollIntoView:true};
 }
 
@@ -159,7 +162,7 @@ function choiceTooltip(session:Session|null):Tooltip|null{
   dom.setAttribute("role",session.error?"alert":"status");dom.textContent=session.error?"参数转换失败，按 Esc 退出":"参数转换中…";
   if(session.error)dom.title=session.error.slice(0,200);return {dom};
  }};
- if(!session?.choicesOpen||!field?.choices?.length)return null;
+ if(session?.dormant||!session?.choicesOpen||!field?.choices?.length)return null;
  const owner=session.owner,active=field.id,index=session.choiceIndex,options=field.choices;
  return {pos:field.from,above:false,create:view=>{
   const dom=document.createElement("div");dom.className="cm-snippet-choices";dom.setAttribute("role","listbox");dom.setAttribute("aria-label","参数选项");
@@ -250,38 +253,45 @@ export function snippetTransformCommit(state:EditorState,owner:object,revision:n
  const current=fields.find(f=>f.id===session.active)!;
  const nextGroup=direction===0?current.group:session.navigation[Math.max(0,session.navigation.indexOf(current.group)+direction)];
  const next=fields.find(f=>f.group===nextGroup&&!f.derived);
- const nextSession=next&&!next.final?{...session,revision:session.revision+1,to:session.from+result.text.length,fields,active:next.id,dirty:false,waiting:false,error:null,choicesOpen:direction!==0&&!!next.choices?.length,choiceIndex:0}:null;
- const selection=direction===0?state.selection.map(changes):EditorSelection.single(next?.from??session.from+result.text.length,next&&!next.final?next.to:next?.from??session.from+result.text.length);
+ const nextSession=next&&!next.final&&!(direction===0&&session.dormant)?{...session,revision:session.revision+1,to:session.from+result.text.length,fields,active:next.id,dirty:false,waiting:false,error:null,choicesOpen:direction!==0&&!!next.choices?.length,choiceIndex:Math.max(0,next.choices?.indexOf(result.text.slice(next.from-session.from,next.to-session.from))??0)}:null;
+ const previous=session.fields.find(f=>f.id===session.active)!,chosen=state.selection.main;
+ const inside=state.selection.ranges.length===1&&chosen.from>=previous.from&&chosen.to<=previous.to;
+ const settledSelection=inside?EditorSelection.single(current.from+chosen.anchor-previous.from,current.from+chosen.head-previous.from):state.selection.map(changes);
+ const selection=direction===0?settledSelection:EditorSelection.single(next?.from??session.from+result.text.length,next&&!next.final?next.to:next?.from??session.from+result.text.length);
  return {changes,selection,effects:setSession.of(nextSession),annotations:isolateHistory.of("full"),userEvent:"input.snippet-transform",scrollIntoView:true};
 }
 const runtimes=new WeakMap<EditorView,SnippetTransformRuntime>();
 class SnippetTransformRuntime {
  private readonly view:EditorView;private readonly service=new SnippetPreparationService();private closed=false;
- private active:{owner:object;revision:number;doc:EditorState["doc"];selection:EditorSelection;direction:1|-1|0;after?:()=>void}|null=null;
+ private active:{owner:object;revision:number;doc:EditorState["doc"];selection:EditorSelection;direction:1|-1|0;after?:()=>void;actionKind?:"save"|"format"}|null=null;
  constructor(view:EditorView){this.view=view;runtimes.set(view,this);}
  update(update:ViewUpdate){
   const session=update.state.field(snippetSessionState);
-  if(this.active&&(update.docChanged||update.selectionSet||session?.owner!==this.active.owner||session.revision!==this.active.revision))this.cancel();
+  if(this.active&&(update.docChanged||update.selectionSet&&!update.state.selection.eq(this.active.selection)||session?.owner!==this.active.owner||session.revision!==this.active.revision))this.cancel();
+  if(this.active&&update.focusChanged&&!this.view.hasFocus&&!this.active.after){
+   const owner=this.active.owner;this.cancel();
+   queueMicrotask(()=>{const current=this.view.state.field(snippetSessionState,false);if(!this.closed&&!this.active&&current?.owner===owner)this.view.dispatch({effects:setSession.of({...current,waiting:false})});});
+  }
  }
  private cancel(){this.active=null;this.service.cancel();}
- leave(direction:1|-1|0,after?:()=>void):boolean{
+ leave(direction:1|-1|0,after?:()=>void,actionKind?:"save"|"format"):boolean{
   const view=this.view,session=view.state.field(snippetSessionState);
   if(this.closed||!session?.dirty)return false;
   if(view.composing)return true;
   if(this.active&&this.active.doc===view.state.doc&&this.active.owner===session.owner&&this.active.revision===session.revision){
-   this.active.direction=direction;if(after)this.active.after=after;return true;
+   this.active.direction=direction;if(after&&(this.active.actionKind!=="save"||actionKind==="save")){this.active.after=after;this.active.actionKind=actionKind;}return true;
   }
   this.cancel();
   let snapshot:PreparedSnippet|null;
   try{snapshot=snippetTransformSnapshot(view.state);}catch(error){this.report(session,String(error));return true;}
   if(!snapshot)return false;
-  const ticket={owner:session.owner,revision:session.revision,doc:view.state.doc,selection:view.state.selection,direction,after};
+  const ticket={owner:session.owner,revision:session.revision,doc:view.state.doc,selection:view.state.selection,direction,after,actionKind};
   this.active=ticket;
   view.dispatch({effects:setSession.of({...session,waiting:true,error:null,choicesOpen:false})});
   void this.service.evaluate(snapshot).then(result=>{
    if(this.closed)return;
    const current=view.state.field(snippetSessionState);
-   if(this.active!==ticket||view.state.doc!==ticket.doc||current?.owner!==ticket.owner||current.revision!==ticket.revision||!view.state.selection.eq(ticket.selection)||!view.hasFocus||view.composing){
+   if(this.active!==ticket||view.state.doc!==ticket.doc||current?.owner!==ticket.owner||current.revision!==ticket.revision||!view.state.selection.eq(ticket.selection)||!view.hasFocus&&!ticket.after||view.composing){
     if(this.active===ticket){this.active=null;if(current?.owner===ticket.owner)view.dispatch({effects:setSession.of({...current,waiting:false})});}
     return;
    }
@@ -300,7 +310,11 @@ class SnippetTransformRuntime {
  private report(session:Session,error:string){if(!this.closed&&this.view.state.field(snippetSessionState)?.owner===session.owner)this.view.dispatch({effects:setSession.of({...session,waiting:false,error:error.slice(0,200)})});}
  destroy(){this.closed=true;this.cancel();this.service.destroy();runtimes.delete(this.view);}
 }
-export function settleSnippetForAction(view:EditorView,action:()=>void):boolean{
+export function settleSnippetForAction(view:EditorView,action:()=>void,kind:"save"|"format"="save"):boolean{
  const session=view.state.field(snippetSessionState,false);
- return session?.dirty?(runtimes.get(view)?.leave(0,action)??true):false;
+ return session?.dirty?(runtimes.get(view)?.leave(0,action,kind)??true):false;
+}
+
+export function discardSnippet(view:EditorView):boolean{
+ if(!view.state.field(snippetSessionState,false))return false;view.dispatch({effects:setSession.of(null)});return true;
 }

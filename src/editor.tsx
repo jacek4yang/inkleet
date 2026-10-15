@@ -1,4 +1,4 @@
-import {snippetSession,moveSnippetField,endSnippet,snippetChoiceOpen,moveSnippetChoice,acceptSnippetChoice,settleSnippetForAction} from "./snippet-session";
+import {snippetSession,moveSnippetField,endSnippet,discardSnippet,snippetChoiceOpen,moveSnippetChoice,acceptSnippetChoice,settleSnippetForAction} from "./snippet-session";
 import {snapshotText} from "./snapshot-text";
 import {editorStatus} from "./editor-status";
 import {vimEditing,vimNormal,getCM} from "./vim";
@@ -92,7 +92,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
         {id:"editor.signature",enabled:()=>intelligence.available(),label:"参数提示",key:"Mod-Shift-Space",run:intelligence.commands.signature},
         {id:"editor.completion",enabled:()=>intelligence.available(),label:"触发补全",run:intelligence.commands.completion},
       ]:[]),
-      ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:target=>settleSnippetForAction(target,()=>formatDocument(target))||formatDocument(target)}]:[]),
+      ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:(target:EditorView)=>settleSnippetForAction(target,()=>formatDocument(target),"format")||formatDocument(target)}]:[]),
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
     ];
     const footer=document.getElementById("vim-command-slot");
@@ -112,7 +112,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       keymap.of([{key:"Mod-m",run:view=>{view.setTabFocusMode(2000);return true;}}]),
       tooltips({ parent: document.body, position: "fixed" }),
       EditorView.domEventObservers({
-        compositionstart(_event,view){endSnippet(view);},
+        compositionstart(_event,view){discardSnippet(view);},
         blur(_event,view){endSnippet(view);},
         keydown(event, view) {
           // 即使 Escape 被补全/选区消耗，也保留显式移出编辑器的键盘通道。
@@ -142,7 +142,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       saveReady.current?.(null);
       debugView.current = null;
       intelligence?.destroy();
-      endSnippet(view);
+      discardSnippet(view);
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
       view.destroy();
       commandHost?.remove();
