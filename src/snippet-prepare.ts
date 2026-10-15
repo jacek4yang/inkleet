@@ -1,11 +1,11 @@
 import {SnippetParser,Text,Placeholder,Choice,Variable,FormatString,Transform,type Marker} from "./vendor/snippet-parser.ts";
-import {snippetLimits,SnippetLimitError} from "./snippet-budget.ts";
+import {snippetLimits,SnippetLimitError,snippetParserIdentity} from "./snippet-budget.ts";
 export type VariableValue={kind:"value";value:string}|{kind:"unset"};
 export type SnippetField={id:number;group:string;from:number;to:number;parent:number|null;choices?:string[];derived:boolean;final:boolean};
 export type TransformFormat={kind:"text";value:string}|{kind:"capture";index:number;operation?:string;ifValue?:string;elseValue?:string};
 export type PreparedTransform={target:number;pattern:string;flags:string;format:TransformFormat[];sourceGroup?:string;sourceValue?:string};
 export type PreparedSnippet={schemaVersion:1;parserIdentity:string;text:string;fields:SnippetField[];navigation:string[];transforms:PreparedTransform[];needsTransformEvaluation:boolean};
-export const snippetParserIdentity="vscode:c2c46e750ab7afe355bad8bea20a248520adfdb0/inkleet-bounded-v1";
+export {snippetParserIdentity} from "./snippet-budget.ts";
 // Preparation is deliberately not an apply operation. Transform-bearing output
 // remains pending until the owned evaluation worker completes it.
 export function prepareSnippet(source:string,variables:Record<string,VariableValue>={}):PreparedSnippet{

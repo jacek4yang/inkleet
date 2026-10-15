@@ -56,7 +56,7 @@ test("context validation occurs before posting and copies supplied records",asyn
  assert.deepEqual(Object.keys(validateSnippetVariables(inherited)),[]);
 });
 test("prepared DTO validation rejects malformed ownership and Unicode boundaries",()=>{
- const valid=prepareSnippet("$"+"{1:😀}");assert.equal(validatePreparedSnippet(valid),valid);
+ const valid=prepareSnippet("$"+"{1:😀}");assert.deepEqual(validatePreparedSnippet(valid),valid);
  for(const change of [
  (r:any)=>{r.fields[0].to=1;},
  (r:any)=>{r.fields[0].parent=0;},
@@ -72,4 +72,28 @@ test("prepared DTO validation rejects malformed ownership and Unicode boundaries
 test("pending transforms remain pending across the worker boundary",async()=>{
  const result=prepareSnippet("$"+"{1/(a+)+$/x/}"),w=new FakeWorker(),s=new SnippetPreparationService(()=>w);
  const promise=s.prepare("ignored");w.reply(result);assert.equal((await promise).needsTransformEvaluation,true);s.destroy();
+});
+
+test("parser identity and aggregate format nodes are bounded; extra fields are discarded",()=>{
+ const valid=prepareSnippet("ok");
+ assert.throws(()=>validatePreparedSnippet({...valid,parserIdentity:"foreign"}));
+ const extra=validatePreparedSnippet({...valid,unrelated:{huge:"x".repeat(100000)}});
+ assert.equal(Object.hasOwn(extra,"unrelated"),false);
+ const pending=prepareSnippet("$"+"{1/a/x/} "+"$"+"{2/a/x/}");
+ pending.transforms.forEach(t=>{t.format=Array.from({length:5000},()=>({kind:"capture" as const,index:1}));});
+ assert.throws(()=>validatePreparedSnippet(pending));
+});
+test("wrong identity messages time out and stale errors cannot cancel replacements",async()=>{
+ const workers:FakeWorker[]=[],s=new SnippetPreparationService(()=>{const w=new FakeWorker();workers.push(w);return w;},20);
+ const expired=s.prepare("old");workers[0].onmessage?.({data:{id:999,result:prepareSnippet("wrong")}});
+ await assert.rejects(expired,/timed out/);
+ const first=s.prepare("one").catch(e=>e),lateError=workers[1].onerror!,lateMessageError=workers[1].onmessageerror!;
+ const second=s.prepare("two");await first;lateError({});lateMessageError({});
+ workers[2].reply(prepareSnippet("two"));assert.equal((await second).text,"two");s.destroy();
+});
+test("worker factory failure does not consume global capacity",async()=>{
+ const failed=new SnippetPreparationService(()=>{throw Error("startup");});
+ await assert.rejects(failed.prepare("x"),/startup/);failed.destroy();
+ const a=new FakeWorker(),b=new FakeWorker(),sa=new SnippetPreparationService(()=>a),sb=new SnippetPreparationService(()=>b);
+ const pa=sa.prepare("a"),pb=sb.prepare("b");a.reply();b.reply();await pa;await pb;sa.destroy();sb.destroy();
 });

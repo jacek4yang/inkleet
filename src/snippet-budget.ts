@@ -14,3 +14,4 @@ export class SnippetBudget {
  index(index:number){if(!Number.isSafeInteger(index)||index<0)throw new SnippetLimitError("Unsafe snippet index");}
  source(value:string){if(typeof value!=="string"||value.length>snippetLimits.source)throw new SnippetLimitError("Snippet source limit");this.copy(value.length);}
 }
+export const snippetParserIdentity="vscode:c2c46e750ab7afe355bad8bea20a248520adfdb0/inkleet-bounded-v1";
