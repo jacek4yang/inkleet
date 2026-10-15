@@ -35,23 +35,26 @@ export function prepareSnippet(source:string,variables:Record<string,VariableVal
   });
   transforms.push({target:target.id,pattern:value.regexSource,flags:value.regexFlags,format,sourceGroup,sourceValue});
  };
- type Frame={marker:Marker;parent:number|null;depth:number}|{finish:SnippetField};
+ type Frame={marker:Marker;parent:number|null;depth:number;opaque?:boolean}|{finish:SnippetField};
  const stack:Frame[]=[];
- const push=(children:Marker[],parent:number|null,depth:number)=>{for(let i=children.length-1;i>=0;i--)stack.push({marker:children[i],parent,depth});};
+ const push=(children:Marker[],parent:number|null,depth:number,opaque=false)=>{for(let i=children.length-1;i>=0;i--)stack.push({marker:children[i],parent,depth,opaque});};
  push(root.children,null,0);
  while(stack.length){
   const frame=stack.pop()!;budget.step();
   if("finish"in frame){frame.finish.to=length;continue;}
-  const {marker,parent,depth}=frame;budget.depthAt(depth);
+  const {marker,parent,depth,opaque}=frame;budget.depthAt(depth);
   if(marker instanceof Text){emit(marker.value);continue;}
   if(marker instanceof Choice){if(!marker.options.length)throw new Error("Empty snippet choice");emit(marker.options[0].value);continue;}
   if(marker instanceof Placeholder){
+   if(opaque){push(marker.children,parent,depth+1,true);continue;}
    const current=field("t:"+marker.index,parent,!!marker.transform,marker.index===0,marker.choice?.options.map(option=>option.value));
    if(marker.transform)transform(marker.transform,current,current.group);
-   stack.push({finish:current});push(marker.children,current.id,depth+1);continue;
+   stack.push({finish:current});push(marker.children,current.id,depth+1,!!marker.transform);continue;
   }
   if(marker instanceof Variable){
+   if(marker.name.length>256)throw new SnippetLimitError("Snippet variable name limit");
    const resolved=Object.prototype.hasOwnProperty.call(variables,marker.name)?variables[marker.name]:null;
+   if(opaque){if(resolved?.kind==="value")emit(resolved.value);else if(marker.children.length)push(marker.children,parent,depth+1,true);else if(!resolved)emit(marker.name);continue;}
    if(marker.transform){
     if(!resolved)throw new Error("Unknown transformed variable: "+marker.name);
     const value=resolved.kind==="value"?resolved.value:"";
@@ -60,7 +63,7 @@ export function prepareSnippet(source:string,variables:Record<string,VariableVal
    }
    if(resolved?.kind==="value"){emit(resolved.value);continue;}
    if(resolved?.kind==="unset"){push(marker.children,parent,depth+1);continue;}
-   const current=field("v:"+marker.name,parent);
+   const current=field("v:"+marker.name+":"+fields.length,parent);
    stack.push({finish:current});
    if(marker.children.length)push(marker.children,current.id,depth+1);else emit(marker.name);
    continue;

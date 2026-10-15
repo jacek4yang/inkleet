@@ -41,7 +41,7 @@ test("variables use supplied own properties and distinguish empty unset and unkn
  const source=S+"{KNOWN:fallback} "+S+"{UNSET:fallback} "+S+"UNKNOWN";
  const r=prepareSnippet(source,{KNOWN:{kind:"value",value:""},UNSET:{kind:"unset"}});
  assert.equal(r.text," fallback UNKNOWN");
- assert.ok(r.fields.some(f=>f.group==="v:UNKNOWN"));
+ assert.ok(r.fields.some(f=>f.group.startsWith("v:UNKNOWN:")));
  assert.equal(prepareSnippet(S+"__proto__").text,"__proto__");
  assert.equal(prepareSnippet(S+"{UNKNOWN:default}").text,"default");
  assert.throws(()=>prepareSnippet(S+"X",{X:{kind:"value",value:"x".repeat(65537)}}),SnippetLimitError);
@@ -90,5 +90,22 @@ test("representative six-language call forms retain navigable parameter stops",(
  for(const name of ["push","append","println","print","printf","emplace_back"]){
   const r=prepareSnippet(name+"("+S+"{1:value})"+S+"0");
   assert.equal(r.text,name+"(value)");assert.deepEqual(r.navigation,["t:1","t:0"]);
+ }
+});
+
+test("transformed copies are opaque and never add editable nested fields",()=>{
+ const r=prepareSnippet(S+"{1:"+S+"{2:x}} "+S+"{1/(.*)/"+S+"1/}");
+ const outer=r.fields.find(f=>f.group==="t:1"&&f.derived)!;
+ assert.ok(outer);assert.equal(r.fields.filter(f=>f.group==="t:2").length,1);
+ assert.equal(r.fields.some(f=>f.parent===outer.id),false);
+});
+
+test("unknown variables do not create contradictory linked defaults",()=>{
+ const r=prepareSnippet(S+"X "+S+"{X:a}");assert.equal(r.text,"X a");
+ const fields=r.fields.filter(f=>f.group.startsWith("v:X:"));assert.equal(fields.length,2);assert.notEqual(fields[0].group,fields[1].group);
+});
+test("empty transform conditional branches are retained",()=>{
+ for(const replacement of [S+"{1:?yes:}",S+"{1:+}",S+"{1:-}",S+"{1:}"]){
+  const r=prepareSnippet(S+"{1/(a)/"+replacement+"/}");assert.equal(r.transforms[0].format.length,1);
  }
 });

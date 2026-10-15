@@ -334,11 +334,11 @@ export class FormatString extends Marker {
 		if (this.shorthandName) {
 			value += `:/${this.shorthandName}`;
 
-		} else if (this.ifValue && this.elseValue) {
+		} else if (this.ifValue !== undefined && this.elseValue !== undefined) {
 			value += `:?${this.ifValue}:${this.elseValue}`;
-		} else if (this.ifValue) {
+		} else if (this.ifValue !== undefined) {
 			value += `:+${this.ifValue}`;
-		} else if (this.elseValue) {
+		} else if (this.elseValue !== undefined) {
 			value += `:-${this.elseValue}`;
 		}
 		value += '}';
@@ -638,7 +638,8 @@ export class SnippetParser {
 			}
 			this._token = this._scanner.next();
 		}
-		const value = this._scanner.value.substring(start.pos, this._token.pos).replace(/\\(\$|}|\\)/g, '$1');
+		this.budget.copy(2*(this._token.pos-start.pos));
+        const value = this._scanner.value.substring(start.pos, this._token.pos).replace(/\\(\$|}|\\)/g, '$1');
 		this._token = this._scanner.next();
 		return value;
 	}
@@ -797,7 +798,8 @@ export class SnippetParser {
 			return false;
 		}
 
-		parent.appendChild(new Text(this.budget, values.join('')));
+		this.budget.copy(values.reduce((sum,value)=>sum+value.length,0));
+        parent.appendChild(new Text(this.budget, values.join('')));
 		return true;
 	}
 
@@ -918,10 +920,7 @@ export class SnippetParser {
 		}
 
         if(regexValue.length>snippetLimits.pattern||!/^[dgimsuvy]*$/.test(regexOptions)||new Set(regexOptions).size!==regexOptions.length||(regexOptions.includes("u")&&regexOptions.includes("v")))throw new SnippetLimitError("Invalid snippet transform descriptor");
-        transform.regexSource=regexValue;transform.regexFlags=regexOptions; catch (e) {
-			// invalid regexp
-			return false;
-		}
+        transform.regexSource=regexValue;transform.regexFlags=regexOptions;
 
 		parent.transform = transform;
 		return true;
@@ -974,7 +973,7 @@ export class SnippetParser {
 		} else if (this._accept(TokenType.Plus)) {
 			// ${1:+<if>}
 			const ifValue = this._until(TokenType.CurlyClose);
-			if (ifValue) {
+			if (ifValue !== false) {
 				parent.appendChild(new FormatString(this.budget, Number(index), undefined, ifValue, undefined));
 				return true;
 			}
@@ -982,7 +981,7 @@ export class SnippetParser {
 		} else if (this._accept(TokenType.Dash)) {
 			// ${2:-<else>}
 			const elseValue = this._until(TokenType.CurlyClose);
-			if (elseValue) {
+			if (elseValue !== false) {
 				parent.appendChild(new FormatString(this.budget, Number(index), undefined, undefined, elseValue));
 				return true;
 			}
@@ -990,9 +989,9 @@ export class SnippetParser {
 		} else if (this._accept(TokenType.QuestionMark)) {
 			// ${2:?<if>:<else>}
 			const ifValue = this._until(TokenType.Colon);
-			if (ifValue) {
+			if (ifValue !== false) {
 				const elseValue = this._until(TokenType.CurlyClose);
-				if (elseValue) {
+				if (elseValue !== false) {
 					parent.appendChild(new FormatString(this.budget, Number(index), undefined, ifValue, elseValue));
 					return true;
 				}
@@ -1001,7 +1000,7 @@ export class SnippetParser {
 		} else {
 			// ${1:<else>}
 			const elseValue = this._until(TokenType.CurlyClose);
-			if (elseValue) {
+			if (elseValue !== false) {
 				parent.appendChild(new FormatString(this.budget, Number(index), undefined, undefined, elseValue));
 				return true;
 			}
