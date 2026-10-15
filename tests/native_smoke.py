@@ -1231,7 +1231,25 @@ try:
             wait_for(lambda:"与预期不符" in text(".case-result"),"native void argument mismatch",seconds=30)
             assert json.loads(text(".case-expected pre"))==[1,2,3]
             screenshot("expected-result-native.png")
+            cmd("POST","/execute/sync",{"script":"""
+              window.__nativeCaseEvents=[];
+              for(const kind of ["pointerdown","pointerup","click"])document.addEventListener(kind,event=>{
+                const t=event.target instanceof Element?event.target:null;
+                window.__nativeCaseEvents.push({kind,trusted:event.isTrusted,x:event.clientX,y:event.clientY,label:t?.closest("button")?.getAttribute("aria-label"),tag:t?.tagName});
+              },{once:true,capture:true});
+            ""","args":[]})
             click('[aria-label="添加用例"]')
+            def new_case_ready():
+                state=cmd("POST","/execute/sync",{"script":"""
+                  return {tabs:[...document.querySelectorAll('[role="tablist"][aria-label="测试用例"] [role="tab"]')].map(t=>({name:t.textContent,selected:t.getAttribute("aria-selected")})),
+                    target:document.querySelector('[aria-label="预期结果比较目标"]')?.value,
+                    input:document.querySelector('[aria-label="本地测试输入"]')?.value,
+                    expected:document.querySelector('[aria-label="预期结果"]')?.value,
+                    focus:document.activeElement?.getAttribute("aria-label"),events:window.__nativeCaseEvents??[]};
+                ""","args":[]})
+                (evidence/"native-add-case-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+                return len(state["tabs"])==2 and state["tabs"][1]["selected"]=="true" and state["tabs"][1]["name"]=="用例 2" and state["target"]=="argument:0"
+            wait_for(new_case_ready,"one native Add click creates and selects second case with inherited argument expectation")
             fill('[aria-label="本地测试输入"]',"[4,5]")
             fill('[aria-label="预期结果"]',"[5,4]")
             click_debug_action('[aria-label="运行全部用例"]')
