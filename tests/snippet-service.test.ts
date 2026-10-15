@@ -69,9 +69,9 @@ test("prepared DTO validation rejects malformed ownership and Unicode boundaries
   const r=structuredClone(valid);change(r);assert.throws(()=>validatePreparedSnippet(r));
  }
 });
-test("pending transforms remain pending across the worker boundary",async()=>{
+test("pending transform responses cannot reach snippet application",async()=>{
  const result=prepareSnippet("$"+"{1/(a+)+$/x/}"),w=new FakeWorker(),s=new SnippetPreparationService(()=>w);
- const promise=s.prepare("ignored");w.reply(result);assert.equal((await promise).needsTransformEvaluation,true);s.destroy();
+ const promise=s.prepare("ignored");w.reply(result);await assert.rejects(promise,/Unevaluated/);s.destroy();
 });
 
 test("parser identity and aggregate format nodes are bounded; extra fields are discarded",()=>{

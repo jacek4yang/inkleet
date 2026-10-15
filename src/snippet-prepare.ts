@@ -4,7 +4,7 @@ export type VariableValue={kind:"value";value:string}|{kind:"unset"};
 export type SnippetField={id:number;group:string;from:number;to:number;parent:number|null;choices?:string[];derived:boolean;final:boolean};
 export type TransformFormat={kind:"text";value:string}|{kind:"capture";index:number;operation?:string;ifValue?:string;elseValue?:string};
 export type PreparedTransform={target:number;pattern:string;flags:string;format:TransformFormat[];sourceGroup?:string;sourceValue?:string};
-export type PreparedSnippet={schemaVersion:1;parserIdentity:string;text:string;fields:SnippetField[];navigation:string[];transforms:PreparedTransform[];needsTransformEvaluation:boolean};
+export type PreparedSnippet={schemaVersion:1;parserIdentity:string;text:string;fields:SnippetField[];navigation:string[];transforms:PreparedTransform[];needsTransformEvaluation:boolean;transformState:"pending"|"resolved"};
 export {snippetParserIdentity} from "./snippet-budget.ts";
 // Preparation is deliberately not an apply operation. Transform-bearing output
 // remains pending until the owned evaluation worker completes it.
@@ -77,5 +77,5 @@ export function prepareSnippet(source:string,variables:Record<string,VariableVal
   if(a.startsWith("t:"))return -1;if(b.startsWith("t:"))return 1;return 0;
  });
  if(editable.includes("t:0"))navigation.push("t:0");
- return {schemaVersion:1,parserIdentity:snippetParserIdentity,text:chunks.join(""),fields,navigation,transforms,needsTransformEvaluation:transforms.length>0};
+ return {schemaVersion:1,parserIdentity:snippetParserIdentity,text:chunks.join(""),fields,navigation,transforms,needsTransformEvaluation:transforms.length>0,transformState:transforms.length?"pending":"resolved"};
 }
