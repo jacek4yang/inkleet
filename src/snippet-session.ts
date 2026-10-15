@@ -7,6 +7,7 @@ import type {PreparedSnippet,SnippetField} from "./snippet-prepare.ts";
 type Session={fields:SnippetField[];navigation:string[];active:number};
 const setSession=StateEffect.define<Session|null>({map:(value,mapping)=>{
  if(!value)return null;
+ if(mapping.empty)return value;
  let touched=false,count=0;
  mapping.iterChangedRanges((from,to)=>{
   if(++count>32||value.fields.some(f=>from<=f.to&&to>=f.from))touched=true;
