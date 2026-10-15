@@ -1247,7 +1247,7 @@ try {
     await runPanel.getByText("符合预期",{exact:true}).waitFor();
   }
   await runPage.evaluate(()=>{window.__runTest.result.id+=1000;});
-  await runPanel.getByText("返回值",{exact:true}).waitFor();
+  await runPanel.locator(".case-result header").getByText("返回值",{exact:true}).waitFor();
   assert.equal(await runPanel.getByText("符合预期",{exact:true}).count(),0,"foreign run cannot inherit expectation");
   await runPage.evaluate(()=>{window.__runTest.result.id-=1000;});
   await runPanel.getByText("符合预期",{exact:true}).waitFor();
