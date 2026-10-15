@@ -1,12 +1,12 @@
 name: Native Linux
 on:
   push:
-    branches: [main, feat/first-workbench, feat/editor-p0-reliability, feat/workbench-minimal-ui, feat/real-question-workspace, feat/download-proxy-inputs, feat/debugger-workspace, feat/named-solutions, feat/language-adapter-contract, feat/lsp-p1-recovery, feat/workbench-visual-polish, feat/format-on-save, feat/debugger-precision-dock, feat/lsp-semantic-analysis, feat/ide-command-routing, feat/editor-input-reliability, feat/explicit-save, feat/polished-linux-preview, feat/vim-status-cursor, feat/real-use-hardening, feat/completion-integration, feat/completion-request-ownership, feat/completion-issuer-order, feat/lsp-status-ownership, perf/runner-rendering, perf/reading-panes, fix/in-place-results, feat/case-expectations, feat/case-run-context, feat/named-case-batches, feat/owned-lsp-cancellation, perf/diagnostics-dedup, perf/live-source-boundary, fix/judge-terminal-verdict, test/native-snippet-validation]
+    branches: [main, feat/first-workbench, feat/editor-p0-reliability, feat/workbench-minimal-ui, feat/real-question-workspace, feat/download-proxy-inputs, feat/debugger-workspace, feat/named-solutions, feat/language-adapter-contract, feat/lsp-p1-recovery, feat/workbench-visual-polish, feat/format-on-save, feat/debugger-precision-dock, feat/lsp-semantic-analysis, feat/ide-command-routing, feat/editor-input-reliability, feat/explicit-save, feat/polished-linux-preview, feat/vim-status-cursor, feat/real-use-hardening, feat/completion-integration, feat/completion-request-ownership, feat/completion-issuer-order, feat/lsp-status-ownership, perf/runner-rendering, perf/reading-panes, fix/in-place-results, feat/case-expectations, feat/case-run-context, feat/named-case-batches, feat/owned-lsp-cancellation, perf/diagnostics-dedup, perf/live-source-boundary, fix/judge-terminal-verdict, test/native-snippet-validation, feat/validated-linux-snippets]
     paths: ['src/**', 'src-tauri/**', 'crates/managed-env/src/**', 'crates/managed-env/packages.json', 'crates/managed-env/Cargo.toml', 'crates/managed-env/Cargo.lock', 'package*.json', 'tests/native_smoke.py', '.github/workflows/native.yml']
   workflow_dispatch:
     inputs:
       snippets:
-        description: Enable debug-only native snippet validation
+        description: Enable debug-only native snippet validation traces
         type: boolean
         default: false
 permissions:
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   native-smoke:
     env:
-      INKLEET_NATIVE_SNIPPETS: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/test/native-snippet-validation') || inputs.snippets == true }}
+      INKLEET_NATIVE_SNIPPETS: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test/native-snippet-validation' || github.ref == 'refs/heads/feat/validated-linux-snippets')) || inputs.snippets == true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
