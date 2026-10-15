@@ -117,7 +117,28 @@ def click_native_node(node):
     assert rect["x"]>=0 and rect["y"]>=0 and rect["x"]+rect["width"]<=window["width"] and rect["y"]+rect["height"]<=window["height"], "debug action is outside the window"
     x=int(window["x"]+rect["x"]+rect["width"]/2)
     y=int(window["y"]+rect["y"]+rect["height"]/2)
-    subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","1"],check=True)
+    # X11 --sync only acknowledges pointer movement, not WebKit hit processing.
+    # Observe the target before sending exactly one click; never replay a mutation.
+    subprocess.run(["xdotool","mousemove","--sync",str(x),str(y)],check=True)
+    previous=None
+    def pointer_ready():
+        nonlocal previous
+        state=cmd("POST","/execute/sync",{"script":"""
+          const t=arguments[0],r=t.getBoundingClientRect(),h=document.elementFromPoint(arguments[1],arguments[2]);
+          return {bounds:r.toJSON(),hover:t.matches(':hover'),hit:t===h||t.contains(h),focused:document.hasFocus(),label:t.getAttribute('aria-label'),dpr:devicePixelRatio};
+        ""","args":[{EID:node},rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2]})
+        (evidence/"native-pointer-last-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+        stable=previous==state["bounds"]
+        previous=state["bounds"]
+        return state if stable and state["hover"] and state["hit"] else None
+    state=wait_for(pointer_ready,"native pointer settles on its intended control")
+    for label,command in [("pointer",["xdotool","getmouselocation","--shell"]),("window",["xdotool","getwindowfocus","getwindowname"])]:
+        result=subprocess.run(command,capture_output=True,text=True,check=False)
+        state[label]={"exit":result.returncode,"stdout":result.stdout,"stderr":result.stderr}
+    with (evidence/"native-pointer-observations.jsonl").open("a") as log:log.write(json.dumps(state,ensure_ascii=False)+"\n")
+    location=dict(line.split("=",1) for line in state["pointer"]["stdout"].splitlines() if "=" in line)
+    assert state["pointer"]["exit"]==0 and location.get("X")==str(x) and location.get("Y")==str(y),"native pointer coordinate differs from intended target"
+    subprocess.run(["xdotool","click","1"],check=True)
 
 
 def focus_code_editor():
@@ -1232,7 +1253,7 @@ try:
             assert json.loads(text(".case-expected pre"))==[1,2,3]
             screenshot("expected-result-native.png")
             cmd("POST","/execute/sync",{"script":"""
-              window.__nativeCaseEvents=[];
+              window.__nativeCaseProbeId="native-add-case-v1";window.__nativeCaseEvents=[];
               for(const kind of ["pointerdown","pointerup","click"])document.addEventListener(kind,event=>{
                 const t=event.target instanceof Element?event.target:null;
                 window.__nativeCaseEvents.push({kind,trusted:event.isTrusted,x:event.clientX,y:event.clientY,label:t?.closest("button")?.getAttribute("aria-label"),tag:t?.tagName});
@@ -1245,9 +1266,10 @@ try:
                     target:document.querySelector('[aria-label="预期结果比较目标"]')?.value,
                     input:document.querySelector('[aria-label="本地测试输入"]')?.value,
                     expected:document.querySelector('[aria-label="预期结果"]')?.value,
-                    focus:document.activeElement?.getAttribute("aria-label"),events:window.__nativeCaseEvents??[]};
+                    focus:document.activeElement?.getAttribute("aria-label"),observer:window.__nativeCaseProbeId==="native-add-case-v1"&&Array.isArray(window.__nativeCaseEvents),events:window.__nativeCaseEvents??null};
                 ""","args":[]})
                 (evidence/"native-add-case-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+                assert state["observer"],"native Add observer did not persist"
                 return len(state["tabs"])==2 and state["tabs"][1]["selected"]=="true" and state["tabs"][1]["name"]=="用例 2" and state["target"]=="argument:0"
             wait_for(new_case_ready,"one native Add click creates and selects second case with inherited argument expectation")
             fill('[aria-label="本地测试输入"]',"[4,5]")
