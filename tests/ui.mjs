@@ -2835,6 +2835,16 @@ try {
   await snippetLspCode.press("Tab");
   assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return v.state.selection.main.head===v.state.doc.length;}),true,"mode2 final stop maps after generated indentation");
   await snippetLspPage.screenshot({path:"evidence/snippet-lsp-application.png"});
+
+  await snippetLspPage.evaluate(()=>{window.__snippetLspTest.reset("call(${0:pass})");});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(pass)");
+  assert.equal(await snippetLspPage.evaluate(()=>{const v=window.__snippetLspTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"pass","final-only default is selected for replacement");
+  await snippetLspPage.keyboard.insertText("value");
+  assert.equal(await snippetLspCode.innerText(),"import helper\ncall(value)");
+  await snippetLspPage.evaluate(()=>{window.__snippetLspTest.reset("call(${1:value}) ${0:tail}");});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value) tail");
+  await snippetLspCode.press("Tab");await snippetLspPage.keyboard.insertText("done");
+  assert.equal(await snippetLspCode.innerText(),"import helper\ncall(value) done","Tab final default is replaced, never prefixed");
   await snippetLspPage.evaluate(()=>{window.__snippetLspTest.reset("call($1)",false,1,1);});
   await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall($1)");
   assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view().state.field(s.api.snippetSessionState);}),null,"plain format never parses dollar syntax");
