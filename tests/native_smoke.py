@@ -1038,6 +1038,30 @@ try:
         save_editor(code)
         (evidence/"VIM_NATIVE_RESULT.txt").write_text("PASS: real Linux WebView, OS keyboard ciw, atomic undo/redo, idle canonical preservation, explicit :w, persisted toggle without document replacement. Native IME not verified.\n")
 
+        # A void-call fixture uses the normal cache, actual private Python harness and GUI.
+        stop()
+        original_cache=cache_path.read_text()
+        void_cache=json.loads(original_cache)
+        fixture=next(item for item in void_cache if item["questionId"]=="900000001")
+        void_metadata=json.loads(fixture["metaData"]);void_metadata["return"]={"type":"void"}
+        fixture["metaData"]=json.dumps(void_metadata)
+        cache_path.write_text(json.dumps(void_cache))
+        try:
+            start()
+            click('select[aria-label="编程语言"] option[value="python3"]')
+            wait_for(lambda:"Pyright 已连接" in text(".lsp-status"),"void fixture language ready",seconds=60)
+            fill(code,"def solve(values):\n    values.reverse()")
+            click('.pane-heading .actions button[aria-label="本地"]')
+            wait_for(lambda:element('[aria-label="本地测试输入"]'),"void fixture runner")
+            fill('[aria-label="本地测试输入"]',"[1,2,3]")
+            click_debug_action('[data-action="local-execute"]')
+            wait_for(lambda:json.loads(text('pre[aria-label="调用后 values"]'))==[3,2,1],"real void call displays mutated array",seconds=30)
+            assert len(cmd("POST","/elements",{"using":"css selector","value":".case-argument"}))==1
+            screenshot("in-place-result-native.png")
+            (evidence/"IN_PLACE_NATIVE_RESULT.txt").write_text("PASS: actual private Python void call reverses input and normal GUI result displays captured parameter values without raw JSON. Non-void mutation and other language mutation GUI cases not asserted here.\n")
+        finally:
+            stop();cache_path.write_text(original_cache);start()
+
         (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")
     if os.environ.get("INKLEET_LIVE_CN") == "1":
         click('[data-action="open-catalogue"]')
