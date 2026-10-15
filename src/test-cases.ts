@@ -57,7 +57,7 @@ export function displayResult(raw:string,index:number):DisplayResult{
  try{
   const parsed=JSON.parse(raw);if(!parsed||typeof parsed!=="object"||Array.isArray(parsed)||typeof parsed.ok!=="boolean")return fallback;
   const number=Number.isSafeInteger(parsed.case)&&parsed.case>0?parsed.case:index+1;
-  if(!parsed.ok)return {caseNumber:number,value:"",error:typeof parsed.error==="string"?parsed.error:"执行失败",raw:false};
+  if(!parsed.ok)return {caseNumber:number,value:"",error:typeof parsed.error==="string"&&parsed.error.trim()?parsed.error:"执行失败",raw:false};
   let i=raw.indexOf("{")+1,output:string|undefined,argumentsRaw:string|undefined;
   while(i<raw.length){
    while(/[\s,]/.test(raw[i]??"")&&i<raw.length)i++;

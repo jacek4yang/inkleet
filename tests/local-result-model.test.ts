@@ -25,3 +25,9 @@ test("runtime errors and unavailable post-call parameters remain distinct",()=>{
  const r=localResultReport({...output(),results:['{"case":1,"ok":true,"value":null,"argumentsAfterCall":[null],"argumentsUnavailable":[0]}','{"case":2,"ok":false,"error":"failed"}']},c);
  assert.equal(r.matched,0);assert.equal(r.errors,1);assert.equal(r.rows[0].comparison?.label,"参数无法比较");
 });
+
+test("empty backend error messages still count as runtime errors",()=>{
+ const r=localResultReport({...output(),results:['{"case":1,"ok":false,"error":""}',output().results[1]]},context());
+ assert.equal(r.errors,1);assert.equal(r.rows[0].caseId,"a");
+ assert.equal(r.rows[0].comparison?.state,"error");
+});
