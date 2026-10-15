@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: 3d469e8ea8ab9ac931fdd537d229c39ee32f6560
+          ref: 1e8de8cf6f074f3fbd7ba70e25caf3900fd431a0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
@@ -34,7 +34,7 @@ jobs:
       - name: Prepare frontend and icon
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = 3d469e8ea8ab9ac931fdd537d229c39ee32f6560
+          test "$(git rev-parse HEAD)" = 1e8de8cf6f074f3fbd7ba70e25caf3900fd431a0
           npm ci --ignore-scripts
           python3 -m py_compile tests/native_smoke.py
           npm run typecheck
