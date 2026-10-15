@@ -1,4 +1,4 @@
-import {snippetSession,moveSnippetField,endSnippet,snippetChoiceOpen,moveSnippetChoice,acceptSnippetChoice} from "./snippet-session";
+import {snippetSession,moveSnippetField,endSnippet,discardSnippet,snippetChoiceOpen,moveSnippetChoice,acceptSnippetChoice,settleSnippetForAction} from "./snippet-session";
 import {snapshotText} from "./snapshot-text";
 import {editorStatus} from "./editor-status";
 import {vimEditing,vimNormal,getCM} from "./vim";
@@ -78,7 +78,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
     const report=(text:string)=>{if(live)setLspStatus(current=>current.owner===owner&&current.text===text?current:{owner,text});};
     const intelligence = (language !== "markdown") ? languageIntelligence(language, report, setSource, metadata, true) : null;
     const debug = ["python3", "golang", "cpp", "c", "rust", "java"].includes(language) && onBreakpoints ? debugGutter(breakpoints, lines => pointCallback.current?.(lines)) : null;
-    const save=(target:EditorView)=>{if(target.composing)return false;if(language==="markdown"){saveCallback.current?.();return true;}return saveDocument(target);};
+    const save=(target:EditorView)=>{if(target.composing)return false;if(language==="markdown"){saveCallback.current?.();return true;}return settleSnippetForAction(target,()=>saveDocument(target))||saveDocument(target);};
     vimSave.current=save;
     const commands:Command<EditorView>[]=[
       {id:"editor.save",label:"保存",key:"Mod-s",run:save},
@@ -92,7 +92,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
         {id:"editor.signature",enabled:()=>intelligence.available(),label:"参数提示",key:"Mod-Shift-Space",run:intelligence.commands.signature},
         {id:"editor.completion",enabled:()=>intelligence.available(),label:"触发补全",run:intelligence.commands.completion},
       ]:[]),
-      ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:formatDocument}]:[]),
+      ...(intelligence&&formatting?[{id:"editor.format",label:"格式化文档",key:formatBinding(navigator.platform),run:(target:EditorView)=>settleSnippetForAction(target,()=>formatDocument(target),"format")||formatDocument(target)}]:[]),
       ...(debug?[{id:"debug.toggleBreakpoint",label:"切换断点",key:"F9",run:debug.toggle}]:[]),
     ];
     const footer=document.getElementById("vim-command-slot");
@@ -112,7 +112,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       keymap.of([{key:"Mod-m",run:view=>{view.setTabFocusMode(2000);return true;}}]),
       tooltips({ parent: document.body, position: "fixed" }),
       EditorView.domEventObservers({
-        compositionstart(_event,view){endSnippet(view);},
+        compositionstart(_event,view){discardSnippet(view);},
         blur(_event,view){endSnippet(view);},
         keydown(event, view) {
           // 即使 Escape 被补全/选区消耗，也保留显式移出编辑器的键盘通道。
@@ -142,7 +142,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       saveReady.current?.(null);
       debugView.current = null;
       intelligence?.destroy();
-      endSnippet(view);
+      discardSnippet(view);
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
       view.destroy();
       commandHost?.remove();

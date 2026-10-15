@@ -22,6 +22,15 @@ export class SnippetPreparationService {
   if(typeof source!=="string"||source.length>snippetLimits.source)return Promise.reject(Error("Snippet source limit"));
   let context:Record<string,VariableValue>;
   try{context=validateSnippetVariables(variables);}catch(error){return Promise.reject(error);}
+  return this.run({kind:"prepare",source,variables:context});
+ }
+ evaluate(prepared:PreparedSnippet):Promise<PreparedSnippet>{
+  let snapshot:PreparedSnippet;
+  try{snapshot=validatePreparedSnippet(prepared);}catch(error){return Promise.reject(error);}
+  return this.run({kind:"evaluate",prepared:snapshot});
+ }
+ private run(payload:Record<string,unknown>):Promise<PreparedSnippet>{
+  if(this.closed)return Promise.reject(Error("Snippet owner disposed"));
   this.cancel();
   if(activeWorkers>=MAX_WORKERS)return Promise.reject(Error("Snippet preparation busy"));
   if(this.sequence>=Number.MAX_SAFE_INTEGER)return Promise.reject(Error("Snippet request identity exhausted"));
@@ -45,7 +54,7 @@ export class SnippetPreparationService {
    };
    worker.onerror=()=>this.finish(id,Error("Snippet worker failed"));
    worker.onmessageerror=()=>this.finish(id,Error("Unreadable snippet worker message"));
-   try{worker.postMessage({id,source,variables:context});}catch(error){this.finish(id,error instanceof Error?error:Error("Snippet worker send failed"));}
+   try{worker.postMessage({...payload,id});}catch(error){this.finish(id,error instanceof Error?error:Error("Snippet worker send failed"));}
   });
  }
  private finish(id:number,error?:Error){

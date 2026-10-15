@@ -2459,9 +2459,10 @@ try {
   await snippetPage.goto("http://127.0.0.1:5173/snippet-session-test");
   await snippetPage.evaluate(async()=>{
     const api=await import("/tests/snippet-session-harness.tsx");
-    const s=window.__snippetSessionTest={api,value:"",edits:[],statuses:[],version:1};
+    const s=window.__snippetSessionTest={api,value:"",edits:[],statuses:[],saves:[],formats:[],errors:[],version:1};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="format_source"){s.formats.push(args.text);return args.text;}
       if(command==="start_language_service")return {id:97,version:1,server:"snippet-fixture",uri:"file:///solution.py",completionResolve:false};
       if(command==="update_language_document"){s.version=args.version;return;}
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
@@ -2569,7 +2570,148 @@ try {
   await staleChoice.evaluate(button=>button.click());
   assert.equal(await snippetCode.innerText(),"name = name; value","detached choice cannot change a replacement session");
   await snippetPage.screenshot({path:"evidence/snippet-flat-session.png"});
-  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested/derived live transformation editing and real IME/native acceptance remain unavailable.\n");
+  await snippetPage.evaluate(async()=>{
+    const s=window.__snippetSessionTest;
+    s.insertDerived=async(catastrophic=false)=>{
+      const d="$",source=catastrophic?d+"{1:a} / "+d+"{1/(a+)+$/x/}; "+d+"{2:tail}"+d+"0":
+        d+"{1:hello} -> "+d+"{1/(.*)/"+d+"{1:/upcase}/}; "+d+"{2:tail}"+d+"0";
+      const service=new s.api.SnippetPreparationService(),view=s.view(),doc=view.state.doc;
+      try{
+        const prepared=await service.prepare(source);if(view.state.doc!==doc)throw Error("Fixture source changed");
+        const spec=s.api.snippetInsertion(view.state,prepared,0,view.state.doc.length);if(!spec)throw Error("Derived snippet refused");
+        view.dispatch(spec);view.focus();
+      }finally{service.destroy();}
+    };
+    await s.insertDerived();
+  });
+  await snippetPage.keyboard.insertText("world");
+  assert.equal(await snippetCode.innerText(),"world -> HELLO; tail","placeholder transform waits for field-leave commit");
+  await snippetCode.press("Tab");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.value==="world -> WORLD; tail");
+  assert.equal(await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"tail");
+  await snippetPage.screenshot({path:"evidence/snippet-transform-session.png"});
+  await snippetCode.press("Control+z");
+  assert.equal(await snippetCode.innerText(),"world -> HELLO; tail","undo first reverses transform/navigation commit");
+  await snippetCode.press("Control+z");assert.equal(await snippetCode.innerText(),"hello -> HELLO; tail","next undo reverses typing");
+  await snippetCode.press("Control+y");await snippetCode.press("Control+y");
+  assert.equal(await snippetCode.innerText(),"world -> WORLD; tail","redo replays committed transform text without a new worker");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
+  await snippetPage.keyboard.insertText("saved");
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.saves.at(-1)==="saved -> SAVED; tail");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.formats.at(-1)),"saved -> SAVED; tail","formatter sees settled transform text");
+
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
+  await snippetPage.keyboard.insertText("button");
+  await snippetPage.evaluate(()=>{
+    const button=document.createElement("button");button.id="snippet-save-button";button.textContent="Save fixture";
+    button.onclick=()=>window.__snippetSessionTest.save?.();document.body.appendChild(button);
+  });
+  await snippetPage.locator("#snippet-save-button").click();
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.saves.at(-1)==="button -> BUTTON; tail");
+  for(const command of ["保存","格式化文档"]){
+    await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
+    const before=await snippetPage.evaluate(()=>({saves:window.__snippetSessionTest.saves.length,formats:window.__snippetSessionTest.formats.length}));
+    await snippetPage.keyboard.insertText("palette");
+    await snippetCode.press("Control+Shift+p");
+    const search=snippetPage.getByRole("combobox",{name:"搜索编辑器命令",exact:true});
+    await search.fill(command);await search.press("Enter");
+    await snippetPage.waitForFunction(n=>window.__snippetSessionTest.formats.length>n&&window.__snippetSessionTest.formats.at(-1)==="palette -> PALETTE; tail",before.formats);
+    if(command==="保存")await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);
+    else assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),before.saves,"format command does not save");
+    assert.ok(await snippetPage.evaluate(n=>window.__snippetSessionTest.formats.length>n,before.formats));
+  }
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setVim(true));
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.api.vimNormal(window.__snippetSessionTest.view()));
+  await snippetCode.press("i");await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived());
+  await snippetPage.keyboard.insertText("vim");
+  await snippetCode.press("Escape");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.dormant),true);
+  await snippetCode.press(":");await snippetPage.keyboard.type("w");await snippetPage.keyboard.press("Enter");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.saves.at(-1)==="vim -> VIM; tail");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setVim(false));
+  await snippetPage.waitForFunction(()=>!window.__snippetSessionTest.api.getCM(window.__snippetSessionTest.view()));
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
+  await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
+  await snippetCode.press("Tab");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.waiting===true);
+  await snippetCode.press("Control+z");
+  await snippetPage.waitForTimeout(200);
+  assert.equal(await snippetCode.innerText(),"a / x; tail","undo cancels pending transform ownership");
+  const savesBeforeCanceledTransform=await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length);
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
+  await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.waiting===true);
+  await snippetCode.press("x");
+  await snippetPage.waitForTimeout(200);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),savesBeforeCanceledTransform,"editing cancels pending save settlement, never saves stale derived output");
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.waiting),false);
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
+  await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
+  await snippetCode.press("Tab");
+  await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor();
+  assert.ok((await snippetCode.innerText()).endsWith("! / x; tail"),"worker timeout preserves user source and previous derived value");
+  await snippetCode.press("Escape");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertDerived(true));
+  await snippetPage.keyboard.insertText("a".repeat(5000)+"!");
+  await snippetCode.press("Escape");
+  const dormantSaveCount=await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length);
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)?.waiting===true);
+  await snippetCode.press("Escape");
+  assert.deepEqual(await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest,v=s.view(),f=v.state.field(s.api.snippetSessionState);return {dormant:f?.dormant,waiting:f?.waiting,error:f?.error};}),{dormant:true,waiting:false,error:null},"Escape cancels dormant save ownership");
+  await snippetPage.waitForTimeout(1700);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),dormantSaveCount,"canceled dormant save never runs after worker deadline");
+  await snippetCode.press("Control+s");
+  await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor();
+  await snippetCode.press("Escape");
+  await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor({state:"hidden"});
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),dormantSaveCount,"failed dormant settlement never saves");
+  // Hold delivery after a real worker has produced a valid result. This tests
+  // runtime intent arbitration and ignored-cancellation replies without timers
+  // or production hooks; worker computation itself is exercised above.
+  await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest,prototype=s.api.SnippetPreparationService.prototype,original=prototype.evaluate;
+    s.restoreEvaluation=()=>{prototype.evaluate=original;};
+    prototype.evaluate=async function(prepared){
+      const result=await original.call(this,prepared);
+      if(s.holdEvaluation)await new Promise(resolve=>{s.releaseEvaluation=resolve;});
+      return result;
+    };
+  });
+  for(const keys of [["Control+s","Control+Shift+KeyI"],["Control+Shift+KeyI","Control+s"],["Control+s","Control+s"],["Control+s","Tab"]]){
+    await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;await s.insertDerived();s.view().setTabFocusMode(false);s.holdEvaluation=true;s.releaseEvaluation=null;});
+    await snippetPage.keyboard.insertText("mixed");
+    const before=await snippetPage.evaluate(()=>({saves:window.__snippetSessionTest.saves.length,formats:window.__snippetSessionTest.formats.length}));
+    await snippetCode.press(keys[0]);
+    await snippetPage.waitForFunction(()=>typeof window.__snippetSessionTest.releaseEvaluation==="function");
+    await snippetCode.press(keys[1]);
+    await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;s.releaseEvaluation();});
+    try{await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);}catch(error){
+      await writeFile("evidence/snippet-mixed-intent-failure.json",JSON.stringify({keys,before,state:await snippetPage.evaluate(()=>{
+        const s=window.__snippetSessionTest,v=s.view(),f=v.state.field(s.api.snippetSessionState);
+        return {saves:s.saves,formats:s.formats,errors:s.errors,text:v.state.doc.toString(),selection:v.state.selection.toJSON(),focused:v.hasFocus,session:f};
+      })},null,2));throw error;
+    }
+    assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.at(-1)),"mixed -> MIXED; tail");
+    assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.formats.length),before.formats+1,"mixed intent settles and formats once");
+    if(keys[1]==="Tab")assert.equal(await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"tail","pending save preserves requested field navigation");
+  }
+  await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;await s.insertDerived();s.holdEvaluation=true;s.releaseEvaluation=null;});
+  await snippetPage.keyboard.insertText("canceled");
+  const staleSaveCount=await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length);
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(()=>typeof window.__snippetSessionTest.releaseEvaluation==="function");
+  await snippetCode.press("Escape");
+  await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;s.releaseEvaluation();});
+  await snippetPage.waitForTimeout(100);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),staleSaveCount,"late valid worker reply cannot revive canceled save");
+  assert.equal(await snippetCode.innerText(),"canceled -> HELLO; tail");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.restoreEvaluation());
+  await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; nested sessions and native/real-IME acceptance remain unverified.\n");
+
+  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested sessions and real IME/native acceptance remain unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
 
   const providerPage=await browser.newPage();
