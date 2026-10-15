@@ -2825,15 +2825,18 @@ try {
   assert.equal(await snippetLspCode.innerText(),"call = call","plain completion with outside imports cannot break active mirrors");
   await snippetLspPage.evaluate(()=>{window.__snippetLspTest.omitImports=true;});
   await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="callDone = callDone");
-  for(const boundary of ["Escape","selection","typing","blur","composition"]){
+  for(const boundary of ["Escape","selection","selection-restore","typing","edit-restore","blur","blur-restore","composition"]){
     await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.deferResolve=true;});
     await acceptLspSnippet();
     await snippetLspPage.waitForFunction(()=>typeof window.__snippetLspTest.resolveReply==="function");
     await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.oldResolve=s.resolveReply;s.deferResolve=false;});
     if(boundary==="Escape")await snippetLspCode.press("Escape");
     if(boundary==="selection")await snippetLspCode.press("ArrowLeft");
+    if(boundary==="selection-restore"){await snippetLspCode.press("ArrowLeft");await snippetLspCode.press("ArrowRight");}
     if(boundary==="typing")await snippetLspCode.press("X");
+    if(boundary==="edit-restore"){await snippetLspCode.press("X");await snippetLspCode.press("Backspace");}
     if(boundary==="blur")await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.blur());
+    if(boundary==="blur-restore")await snippetLspPage.evaluate(()=>{const v=window.__snippetLspTest.view();v.contentDOM.blur();v.focus();});
     if(boundary==="composition")await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true})));
     await snippetLspPage.evaluate(()=>window.__snippetLspTest.oldResolve());
     await snippetLspPage.waitForTimeout(150);
@@ -2841,14 +2844,17 @@ try {
     assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view().state.field(s.api.snippetSessionState);}),null);
     if(boundary==="composition"){await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true})));await snippetLspPage.waitForTimeout(100);}
   }
-  for(const boundary of ["Escape","selection","typing","blur","composition"]){
+  for(const boundary of ["Escape","selection","selection-restore","typing","edit-restore","blur","blur-restore","composition"]){
     await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.holdPreparation=true;});
     await acceptLspSnippet();
     await snippetLspPage.waitForFunction(()=>typeof window.__snippetLspTest.preparedReply==="function");
     if(boundary==="Escape")await snippetLspCode.press("Escape");
     if(boundary==="selection")await snippetLspCode.press("ArrowLeft");
+    if(boundary==="selection-restore"){await snippetLspCode.press("ArrowLeft");await snippetLspCode.press("ArrowRight");}
     if(boundary==="typing")await snippetLspCode.press("X");
+    if(boundary==="edit-restore"){await snippetLspCode.press("X");await snippetLspCode.press("Backspace");}
     if(boundary==="blur")await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.blur());
+    if(boundary==="blur-restore")await snippetLspPage.evaluate(()=>{const v=window.__snippetLspTest.view();v.contentDOM.blur();v.focus();});
     if(boundary==="composition")await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true})));
     await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.holdPreparation=false;s.preparedReply();});
     await snippetLspPage.waitForTimeout(150);
@@ -2858,12 +2864,17 @@ try {
   }
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.holdPreparation=true;});
   await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>typeof window.__snippetLspTest.preparedReply==="function");
-  await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.oldView=s.view();s.mount.destroy();});
   await snippetLspCode.waitFor({state:"hidden"});
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.mount=s.api.mountSnippetEditor(document.querySelector("#editor"),s);});
+  await snippetLspCode.waitFor();
+  assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view()!==s.oldView;}),true,"recreation uses a different editor owner");
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.holdPreparation=false;s.preparedReply();s.restorePreparation();});
   await snippetLspPage.waitForTimeout(150);
   assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),"call","destroyed editor cannot receive prepared snippet");
   await writeFile("evidence/LSP_SNIPPET_APPLICATION_RESULT.txt","PASS: actual CodeEditor format2 candidate acceptance through mocked LSP resolve and real preparation worker, atomic imports/undo, linked and nested parameters, variables, mode2/final stop, plain literal dollar text, unsupported-layout atomic refusal, delayed resolve/preparation cancellation on Escape/selection/typing/blur/synthetic composition and destroy. Production capability remains disabled; native servers and real IME unverified.\n");
+  assert.equal(await snippetLspCode.innerText(),"call","replacement editor ignores old prepared result");
+  await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
   assert.deepEqual(snippetLspErrors,[],"LSP snippet lifecycle produces no page errors");
   await snippetLspPage.close();
   const providerPage=await browser.newPage();
