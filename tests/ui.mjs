@@ -2734,6 +2734,138 @@ try {
   await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; plain nested sessions have a separate regression. Real IME/native acceptance remains unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
 
+
+  const snippetLspPage=await browser.newPage(),snippetLspErrors=[];
+  snippetLspPage.on("pageerror",error=>snippetLspErrors.push(error.message));
+  await snippetLspPage.route("**/snippet-lsp-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor' style='height:500px'></div></body></html>"}));
+  await snippetLspPage.goto("http://127.0.0.1:5173/snippet-lsp-test");
+  await snippetLspPage.evaluate(async()=>{
+    const api=await import("/tests/snippet-session-harness.tsx"),d="$";
+    const s=window.__snippetLspTest={api,value:"call",edits:[],statuses:[],saves:[],errors:[],version:1,source:"call("+d+"{1:value}, "+d+"1)"+d+"0",format:2,mode:1,indented:false,deferResolve:false,resolveReply:null,holdPreparation:false,preparedReply:null};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:109,version:1,server:"snippet-lsp-fixture",uri:"file:///solution.py",completionResolve:true};
+      if(command==="update_language_document"){s.version=args.version;return;}
+      if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
+      if(command==="language_request"){
+        if(args.kind!=="completion")return null;
+        const start=s.indented?2:0;
+        s.item={label:"call",insertTextFormat:s.format,insertTextMode:s.mode,textEdit:{range:{start:{line:0,character:start},end:{line:0,character:start+4}},newText:s.source},_inkleetCompletion:1};
+        return [s.item];
+      }
+      if(command==="language_completion_resolve"){
+        const result={...s.item,additionalTextEdits:[{range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"import helper\r\n"}]};
+        if(s.omitImports)result.additionalTextEdits=[];
+        if(s.deferResolve)return new Promise(resolve=>{s.resolveReply=()=>resolve(result);});
+        return result;
+      }
+      if(command==="language_cancel_completion"||command==="stop_language_service")return;
+      if(command==="format_source")return args.text;
+      throw Error(command);
+    }};
+    s.mount=api.mountSnippetEditor(document.querySelector("#editor"),s);
+    s.view=()=>api.EditorView.findFromDOM(document.querySelector(".cm-editor"));
+    s.reset=(source="call("+d+"{1:value}, "+d+"1)"+d+"0",indented=false,mode=1,format=2)=>{
+      s.source=source;s.indented=indented;s.mode=mode;s.format=format;s.omitImports=false;s.deferResolve=false;s.resolveReply=null;s.holdPreparation=false;s.preparedReply=null;
+      const v=s.view(),text=indented?"  call":"call";v.dispatch({changes:{from:0,to:v.state.doc.length,insert:text},selection:{anchor:text.length}});v.setTabFocusMode(false);v.focus();
+    };
+    const prototype=api.SnippetPreparationService.prototype,original=prototype.prepare;
+    prototype.prepare=async function(...args){
+      const result=await original.apply(this,args);
+      if(s.holdPreparation)await new Promise(resolve=>{s.preparedReply=resolve;});
+      return result;
+    };
+    s.restorePreparation=()=>{prototype.prepare=original;};
+  });
+  const snippetLspCode=snippetLspPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await snippetLspCode.waitFor();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("已连接")));
+  const acceptLspSnippet=async()=>{
+    await snippetLspCode.press("Control+Space");
+    await snippetLspPage.getByRole("option",{name:"call",exact:true}).waitFor();
+    await snippetLspPage.waitForTimeout(150);await snippetLspCode.press("Enter");
+  };
+  await snippetLspPage.evaluate(()=>window.__snippetLspTest.reset());
+  await acceptLspSnippet();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value, value)");
+  await snippetLspPage.keyboard.insertText("x");
+  assert.equal(await snippetLspCode.innerText(),"import helper\ncall(x, x)","real LSP acceptance starts linked parameter editing");
+  await snippetLspCode.press("Control+z");await snippetLspCode.press("Control+z");
+  assert.equal(await snippetLspCode.innerText(),"call","resolved import and snippet insertion undo together");
+  await snippetLspPage.evaluate(()=>{const d="$";window.__snippetLspTest.reset("call("+d+"{1:a"+d+"{2:b}c}, "+d+"1)"+d+"0");});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(abc, abc)");
+  await snippetLspCode.press("Tab");await snippetLspPage.keyboard.insertText("Q");
+  assert.equal(await snippetLspCode.innerText(),"import helper\ncall(aQc, aQc)","nested format2 candidate reaches the actual session");
+  await snippetLspPage.evaluate(()=>{const d="$";window.__snippetLspTest.reset("call("+d+"TM_FILENAME, "+d+"{1:value})"+d+"0");});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(solution.py, value)");
+  await snippetLspPage.evaluate(()=>{const d="$";window.__snippetLspTest.reset("call("+d+"{1:value})\r\n"+d+"0",true,2);});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\n  call(value)\n  ");
+  await snippetLspCode.press("Tab");
+  assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return v.state.selection.main.head===v.state.doc.length;}),true,"mode2 final stop maps after generated indentation");
+  await snippetLspPage.screenshot({path:"evidence/snippet-lsp-application.png"});
+  await snippetLspPage.evaluate(()=>{window.__snippetLspTest.reset("call($1)",false,1,1);});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall($1)");
+  assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view().state.field(s.api.snippetSessionState);}),null,"plain format never parses dollar syntax");
+  await snippetLspPage.evaluate(()=>{const d="$";window.__snippetLspTest.reset("call("+d+"{1:a\nb})",true,2);});
+  await acceptLspSnippet();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("Multiline parameter indentation")));
+  assert.equal(await snippetLspCode.innerText(),"  call","unsupported layout cannot apply imports alone");
+
+
+  await snippetLspPage.evaluate(()=>{
+    const s=window.__snippetLspTest,d="$";s.reset();
+    const v=s.view(),spec=s.api.snippetInsertion(v.state,s.api.prepareSnippet(d+"{1:call} = "+d+"1"),0,v.state.doc.length);
+    if(!spec)throw Error("Existing session fixture refused");v.dispatch(spec);v.dispatch({selection:{anchor:4}});v.focus();
+  });
+  await acceptLspSnippet();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("结束当前参数补全")));
+  assert.equal(await snippetLspCode.innerText(),"call = call","new snippet cannot silently replace existing linked ownership");
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.source="callDone";s.format=1;});
+  await acceptLspSnippet();await snippetLspPage.waitForTimeout(200);
+  assert.equal(await snippetLspCode.innerText(),"call = call","plain completion with outside imports cannot break active mirrors");
+  await snippetLspPage.evaluate(()=>{window.__snippetLspTest.omitImports=true;});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="callDone = callDone");
+  for(const boundary of ["Escape","selection","typing","blur","composition"]){
+    await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.deferResolve=true;});
+    await acceptLspSnippet();
+    await snippetLspPage.waitForFunction(()=>typeof window.__snippetLspTest.resolveReply==="function");
+    await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.oldResolve=s.resolveReply;s.deferResolve=false;});
+    if(boundary==="Escape")await snippetLspCode.press("Escape");
+    if(boundary==="selection")await snippetLspCode.press("ArrowLeft");
+    if(boundary==="typing")await snippetLspCode.press("X");
+    if(boundary==="blur")await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.blur());
+    if(boundary==="composition")await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true})));
+    await snippetLspPage.evaluate(()=>window.__snippetLspTest.oldResolve());
+    await snippetLspPage.waitForTimeout(150);
+    assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),boundary==="typing"?"callX":"call",boundary+" invalidates pending snippet resolve without imports");
+    assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view().state.field(s.api.snippetSessionState);}),null);
+    if(boundary==="composition"){await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true})));await snippetLspPage.waitForTimeout(100);}
+  }
+  for(const boundary of ["Escape","selection","typing","blur","composition"]){
+    await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.holdPreparation=true;});
+    await acceptLspSnippet();
+    await snippetLspPage.waitForFunction(()=>typeof window.__snippetLspTest.preparedReply==="function");
+    if(boundary==="Escape")await snippetLspCode.press("Escape");
+    if(boundary==="selection")await snippetLspCode.press("ArrowLeft");
+    if(boundary==="typing")await snippetLspCode.press("X");
+    if(boundary==="blur")await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.blur());
+    if(boundary==="composition")await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true})));
+    await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.holdPreparation=false;s.preparedReply();});
+    await snippetLspPage.waitForTimeout(150);
+    assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),boundary==="typing"?"callX":"call",boundary+" invalidates a late valid prepared snippet");
+    assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view().state.field(s.api.snippetSessionState);}),null);
+    if(boundary==="composition"){await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true})));await snippetLspPage.waitForTimeout(100);}
+  }
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.holdPreparation=true;});
+  await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>typeof window.__snippetLspTest.preparedReply==="function");
+  await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
+  await snippetLspCode.waitFor({state:"hidden"});
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.holdPreparation=false;s.preparedReply();s.restorePreparation();});
+  await snippetLspPage.waitForTimeout(150);
+  assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),"call","destroyed editor cannot receive prepared snippet");
+  await writeFile("evidence/LSP_SNIPPET_APPLICATION_RESULT.txt","PASS: actual CodeEditor format2 candidate acceptance through mocked LSP resolve and real preparation worker, atomic imports/undo, linked and nested parameters, variables, mode2/final stop, plain literal dollar text, unsupported-layout atomic refusal, delayed resolve/preparation cancellation on Escape/selection/typing/blur/synthetic composition and destroy. Production capability remains disabled; native servers and real IME unverified.\n");
+  assert.deepEqual(snippetLspErrors,[],"LSP snippet lifecycle produces no page errors");
+  await snippetLspPage.close();
   const providerPage=await browser.newPage();
   await providerPage.route("**/provider-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
   await providerPage.goto("http://127.0.0.1:5173/provider-test");

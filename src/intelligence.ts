@@ -205,6 +205,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
               if(!current())return;
               const application=completionApplication(doc,resolved,word?.from??context.pos,context.pos);
               if(!application)throw Error("补全或导入编辑无效，未修改源码");
+              if(target.state.field(snippetSessionState,false)&&(application.format===2||application.additional.length))throw Error("请先按 Esc 结束当前参数补全，再应用此候选");
               if(application.format===2){
                 const variables=snippetVariables(state,context.pos,uri);
                 const prepared=await snippetPreparation.prepare(application.primary.insert,variables);

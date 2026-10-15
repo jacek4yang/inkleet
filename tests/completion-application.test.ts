@@ -37,3 +37,20 @@ test("plain mode2 needs explicit layout rather than silently using asIs",()=>{
  assert.equal(plainCompletionChanges(doc,item,0,5),null);assert.equal(application.mode,2);
  assert.equal(completionTextChanges(application,"x\n  y")!.anchor,5);
 });
+
+test("primary edit contains the request cursor on one line and insert/replace is coherent",()=>{
+ const doc=EditorState.create({doc:"abc\ndef"}).doc;
+ const r=(a:number,b:number)=>({start:{line:0,character:a},end:{line:0,character:b}});
+ assert.equal(completionApplication(doc,{label:"x",textEdit:{range:r(0,1),newText:"x"}},0,3),null);
+ assert.equal(completionApplication(doc,{label:"x",textEdit:{range:{start:{line:0,character:0},end:{line:1,character:1}},newText:"x"}},0,3),null);
+ assert.ok(completionApplication(doc,{label:"x",textEdit:{insert:r(0,2),replace:r(0,3),newText:"x"}},0,2));
+ assert.equal(completionApplication(doc,{label:"x",textEdit:{insert:r(1,2),replace:r(0,3),newText:"x"}},0,2),null);
+ assert.equal(completionApplication(doc,{label:"x",textEdit:{insert:r(0,3),replace:r(0,2),newText:"x"}},0,2),null);
+ assert.equal(completionApplication(doc,{label:"x",textEdit:{replace:r(0,3),newText:"x"}},0,2),null);
+});
+test("final expanded plain text and imports share one aggregate insertion budget",()=>{
+ const doc=EditorState.create({doc:"abcdefghijklmnopq"}).doc;
+ const additionalTextEdits=Array.from({length:16},(_,i)=>({range:{start:{line:0,character:i+1},end:{line:0,character:i+1}},newText:"a".repeat(65000)}));
+ const application=completionApplication(doc,{label:"x",additionalTextEdits},0,1);assert.ok(application);
+ assert.equal(completionTextChanges(application,"x".repeat(10000)),null);
+});

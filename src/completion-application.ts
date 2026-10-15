@@ -20,9 +20,15 @@ export function completionApplication(doc:Text,item:unknown,from:number,to:numbe
  const format=item.insertTextFormat===undefined?1:item.insertTextFormat,mode=item.insertTextMode===undefined?1:item.insertTextMode;
  if(format!==1&&format!==2||mode!==1&&mode!==2)return null;
  if(item.textEdit!==undefined&&!object(item.textEdit))return null;
- const edit=item.textEdit,span=edit?range(doc,edit.range!==undefined?edit.range:edit.replace??edit.insert):{from,to};
+ const edit=item.textEdit;
+ let span=edit?range(doc,edit.range):{from,to};
+ if(edit&&edit.range===undefined){
+  const insert=range(doc,edit.insert),replace=range(doc,edit.replace);
+  if(!insert||!replace||insert.from!==replace.from||insert.to>replace.to||insert.from>to||insert.to<to)return null;
+  span=replace;
+ }else if(edit&&(edit.insert!==undefined||edit.replace!==undefined))return null;
  const source=edit?edit.newText:item.insertText===undefined?item.label:item.insertText;
- if(!span||typeof source!=="string"||source.length>snippetLimits.source||span.from>to||span.to<from)return null;
+ if(!span||typeof source!=="string"||source.length>snippetLimits.source||span.from>to||span.to<to||doc.lineAt(span.from).number!==doc.lineAt(span.to).number)return null;
  const primary={...span,insert:source},additional:CompletionEdit[]=[];
  let units=source.length;
  if(item.additionalTextEdits!==undefined){
@@ -44,6 +50,7 @@ export function completionApplication(doc:Text,item:unknown,from:number,to:numbe
 export function completionTextChanges(application:CompletionApplication,insert:string){
  if(typeof insert!=="string"||insert.length>snippetLimits.output)return null;
  const main={...application.primary,insert:insert.replace(/\r\n?/g,"\n")},changes=[main,...application.additional];
+ if(changes.reduce((sum,edit)=>sum+edit.insert.length,0)>snippetLimits.copies)return null;
  changes.sort((a,b)=>a.from-b.from||a.to-b.to||Number(a===main)-Number(b===main));
  return {changes,anchor:main.from+main.insert.length+changes.filter(c=>c!==main&&(c.from<main.from||c.from===main.from&&c.to===c.from)).reduce((sum,c)=>sum+c.insert.length-(c.to-c.from),0)};
 }
