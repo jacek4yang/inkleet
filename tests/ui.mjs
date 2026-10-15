@@ -2569,7 +2569,7 @@ try {
   await staleChoice.evaluate(button=>button.click());
   assert.equal(await snippetCode.innerText(),"name = name; value","detached choice cannot change a replacement session");
   await snippetPage.screenshot({path:"evidence/snippet-flat-session.png"});
-  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Partial flat session only; nesting/choices/transforms and real IME/native acceptance remain unavailable.\n");
+  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested/derived live transformation editing and real IME/native acceptance remain unavailable.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
 
   const providerPage=await browser.newPage();

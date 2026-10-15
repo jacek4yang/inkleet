@@ -127,3 +127,22 @@ test("choice values are literal and never reparsed as snippet source",()=>{
  assert.equal(chooseSnippetValue(view as any,1),true);assert.equal(s.doc.toString(),S+"{99} / "+S+"{99}");
  assert.equal(s.field(snippetSessionState)!.fields.some(f=>f.group==="t:99"),false);
 });
+
+test("oversized explicit choices are refused before any text or history change",()=>{
+ const prepared=prepareSnippet(S+"{1:a} "+Array(17).fill(S+"1").join(" "));
+ prepared.fields[0].choices=["a","x".repeat(65536)];
+ let s=EditorState.create({extensions:[history(),snippetSession]});
+ s=s.update(snippetInsertion(s,prepared,0,0)!).state;
+ const before=s,view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(chooseSnippetValue(view as any,1),false);assert.equal(s,before);
+ assert.equal(moveSnippetChoice(view as any,1),true);assert.equal(s.field(snippetSessionState)!.choiceIndex,0,"keyboard skips unavailable large choices");
+});
+
+test("same-value empty choices close picker without creating a text undo step",()=>{
+ let s=start(S+"{1|,x|} / "+S+"1; "+S+"{2:z}"+S+"0");
+ const before=s.doc.toString(),view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(chooseSnippetValue(view as any,0),true);assert.equal(s.doc.toString(),before);assert.equal(snippetChoiceOpen(view as any),false);
+ const target={state:s,dispatch:(tr:any)=>{s=tr.state;}};assert.equal(undo(target as any),true);assert.equal(s.doc.toString(),"");
+ s=start(S+"{1|,x|} / "+S+"1; "+S+"{2:z}"+S+"0");assert.equal(chooseSnippetValue(view as any,0,true),true);
+ assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"z");
+});

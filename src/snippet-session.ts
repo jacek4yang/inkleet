@@ -144,6 +144,9 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
  return {changes:edits,selection:EditorSelection.single(first?.from??start+result.text.length,first&&!first.final?first.to:first?.from??start+result.text.length),effects:setSession.of(session),annotations:isolateHistory.of("full"),userEvent:"input.complete",scrollIntoView:true};
 }
 
+function choiceAllowed(session:Session,field:SnippetField,index:number):boolean{
+ const text=field.choices?.[index];return typeof text==="string"&&text.length<=snippetLimits.output&&text.length*session.fields.filter(f=>f.group===field.group).length<=snippetLimits.copies;
+}
 function choiceTooltip(session:Session|null):Tooltip|null{
  const field=session?.fields.find(f=>f.id===session.active);
  if(!session?.choicesOpen||!field?.choices?.length)return null;
@@ -152,7 +155,8 @@ function choiceTooltip(session:Session|null):Tooltip|null{
   const dom=document.createElement("div");dom.className="cm-snippet-choices";dom.setAttribute("role","listbox");dom.setAttribute("aria-label","参数选项");
   const buttons=options.map((text,i)=>{
    const button=document.createElement("button");button.type="button";button.tabIndex=-1;button.setAttribute("role","option");button.setAttribute("aria-selected",String(i===index));
-   button.textContent=text?text.slice(0,200)+(text.length>200?"…":""):"(空)";button.title=text.slice(0,1000);
+   button.disabled=!choiceAllowed(session,field,i);
+   button.textContent=text?text.slice(0,200)+(text.length>200?"…":""):"(空)";button.title=button.disabled?"超出补全大小限制":text.slice(0,1000);
    button.addEventListener("mousedown",event=>event.preventDefault());
    button.addEventListener("click",()=>{
     const current=view.state.field(snippetSessionState,false);
@@ -175,16 +179,25 @@ export function snippetChoiceOpen(view:EditorView):boolean{
 export function moveSnippetChoice(view:EditorView,direction:1|-1):boolean{
  const session=view.state.field(snippetSessionState,false),field=session?.fields.find(f=>f.id===session.active);
  if(!session?.choicesOpen||!field?.choices?.length||view.composing)return false;
- const choiceIndex=(session.choiceIndex+direction+field.choices.length)%field.choices.length;
- view.dispatch({effects:setSession.of({...session,choiceIndex})});return true;
+ let choiceIndex=session.choiceIndex;
+ for(let count=0;count<field.choices.length;count++){
+  choiceIndex=(choiceIndex+direction+field.choices.length)%field.choices.length;
+  if(choiceAllowed(session,field,choiceIndex)){view.dispatch({effects:setSession.of({...session,choiceIndex})});return true;}
+ }
+ return true;
 }
 export function chooseSnippetValue(view:EditorView,index:number,advance=false):boolean{
  const session=view.state.field(snippetSessionState,false),field=session?.fields.find(f=>f.id===session.active);
  if(!session?.choicesOpen||!field?.choices||!Number.isInteger(index)||index<0||index>=field.choices.length||view.composing)return false;
+ if(!choiceAllowed(session,field,index))return false;
  const insert=field.choices[index];
+ if(insert===view.state.sliceDoc(field.from,field.to)){
+  view.dispatch({selection:{anchor:field.to},effects:setSession.of({...session,choicesOpen:false})});
+  if(advance)moveSnippetField(view,1);return true;
+ }
  view.dispatch({changes:{from:field.from,to:field.to,insert},selection:{anchor:field.from+insert.length},annotations:isolateHistory.of("full"),userEvent:"input.complete"});
  if(advance)moveSnippetField(view,1);return true;
 }
 export function acceptSnippetChoice(view:EditorView,advance=false):boolean{
- const session=view.state.field(snippetSessionState,false);return session?chooseSnippetValue(view,session.choiceIndex,advance):false;
+ const session=view.state.field(snippetSessionState,false);if(!session?.choicesOpen||view.composing)return false;chooseSnippetValue(view,session.choiceIndex,advance);return true;
 }

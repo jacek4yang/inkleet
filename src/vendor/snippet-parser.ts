@@ -793,10 +793,7 @@ export class SnippetParser {
 			values.push(value);
 		}
 
-		if (values.length === 0) {
-			this._backTo(token);
-			return false;
-		}
+		// A delimiter can bound an intentionally empty literal choice.
 
 		this.budget.copy(values.reduce((sum,value)=>sum+value.length,0));
         parent.appendChild(new Text(this.budget, values.join('')));
