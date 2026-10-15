@@ -2193,6 +2193,76 @@ try {
   await ownerPage.close();
   await writeFile("evidence/LSP_STATUS_OWNERSHIP_UI_RESULT.txt","PASS: actual App CPP-to-C switch never displays previous ready state during deferred document load/start; completion unavailable until new session is ready, then succeeds. Mocked IPC; native verification separate.\\n");
 
+
+  const diagnosticPage=await browser.newPage();
+  await diagnosticPage.route("**/diagnostic-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
+  await diagnosticPage.goto("http://127.0.0.1:5173/diagnostic-test");
+  await diagnosticPage.evaluate(async()=>{
+    const {EditorView,EditorState,languageIntelligence,setDiagnostics,setDiagnosticsEffect,diagnosticCount}=await import("/tests/input-harness.ts");
+    const s=window.__diagnosticTest={polls:0,applied:0,semanticCalls:0,version:1,revision:0,items:[],stopped:false};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:190,version:1,server:"fixture",uri:"file:///s.cpp",semanticTokens:true};
+      if(command==="stop_language_service"){s.stopped=true;return;}
+      if(command==="update_language_document"){s.version=args.version;return;}
+      if(command==="language_semantic_tokens"){s.semanticCalls++;return {version:args.version,tokens:[{line:0,start:0,end:1,kind:"variable",modifiers:[]}]};}
+      if(command==="language_diagnostics"){
+        s.polls++;
+        const result={version:s.stale?s.version-1:s.version,semanticRevision:s.revision,diagnostics:structuredClone(s.items)};
+        if(s.defer)return new Promise(resolve=>{s.reply=()=>resolve(result);});
+        return result;
+      }
+      if(command==="language_cancel_completion")return;
+      if(command==="language_request")return null;
+      throw Error(command);
+    }};
+    s.client=languageIntelligence("cpp",()=>{},()=>{});
+    s.view=new EditorView({state:EditorState.create({doc:"abcd",extensions:[s.client.extensions,EditorView.updateListener.of(update=>{
+      s.applied+=update.transactions.flatMap(tr=>tr.effects).filter(effect=>effect.is(setDiagnosticsEffect)).length;
+    })]}),parent:document.querySelector("#editor")});
+    // Simulates restored cached lint state. First [] must still clear it.
+    s.view.dispatch(setDiagnostics(s.view.state,[{from:0,to:1,severity:"error",message:"cached"}]));
+    s.applied=0;s.count=()=>diagnosticCount(s.view.state);await s.client.connect(s.view);
+  });
+  await diagnosticPage.waitForFunction(()=>window.__diagnosticTest.polls>=5);
+  const stableDiagnostics=await diagnosticPage.evaluate(()=>({polls:window.__diagnosticTest.polls,applied:window.__diagnosticTest.applied,count:window.__diagnosticTest.count()}));
+  assert.equal(stableDiagnostics.applied,1,"equal fresh-array polls produce one first diagnostics transaction");
+  assert.equal(stableDiagnostics.count,0,"first empty response clears cached lint state");
+  const semanticBefore=await diagnosticPage.evaluate(()=>{const s=window.__diagnosticTest;s.revision++;return s.semanticCalls;});
+  await diagnosticPage.waitForFunction(n=>window.__diagnosticTest.semanticCalls>n,semanticBefore);
+  assert.equal(await diagnosticPage.evaluate(()=>window.__diagnosticTest.applied),1,"semantic revision refresh survives unchanged diagnostics without lint transaction");
+  let diagnosticApplications=1;
+  for(const change of [
+    {message:"first",severity:2,range:{start:{line:0,character:0},end:{line:0,character:1}}},
+    {message:"changed",severity:2,range:{start:{line:0,character:0},end:{line:0,character:1}}},
+    {message:"changed",severity:1,range:{start:{line:0,character:0},end:{line:0,character:1}}},
+    {message:"changed",severity:1,range:{start:{line:0,character:1},end:{line:0,character:2}}}
+  ]){
+    await diagnosticPage.evaluate(item=>{window.__diagnosticTest.items=[item];},change);
+    await diagnosticPage.waitForFunction(n=>window.__diagnosticTest.applied===n,++diagnosticApplications);
+  }
+  await diagnosticPage.evaluate(()=>{const s=window.__diagnosticTest;s.view.dispatch({changes:{from:4,insert:"x"}});});
+  await diagnosticPage.waitForFunction(n=>window.__diagnosticTest.applied===n,++diagnosticApplications);
+  const staleBoundary=await diagnosticPage.evaluate(()=>{const s=window.__diagnosticTest;s.stale=true;return s.polls;});
+  await diagnosticPage.waitForFunction(n=>window.__diagnosticTest.polls>=n+2,staleBoundary);
+  assert.equal(await diagnosticPage.evaluate(()=>window.__diagnosticTest.applied),diagnosticApplications,"stale diagnostic versions cannot apply");
+  await diagnosticPage.evaluate(()=>{const s=window.__diagnosticTest;s.stale=false;s.defer=true;s.reply=null;});
+  await diagnosticPage.waitForFunction(()=>typeof window.__diagnosticTest.reply==="function");
+  await diagnosticPage.evaluate(()=>{const s=window.__diagnosticTest;s.view.dispatch({changes:{from:5,insert:"y"}});s.defer=false;s.reply();});
+  await diagnosticPage.waitForTimeout(100);
+  assert.equal(await diagnosticPage.evaluate(()=>window.__diagnosticTest.applied),diagnosticApplications,"late old-document diagnostics cannot apply");
+  await diagnosticPage.waitForFunction(n=>window.__diagnosticTest.applied===n,++diagnosticApplications);
+  await diagnosticPage.evaluate(()=>{window.__diagnosticTest.items=[];});
+  await diagnosticPage.waitForFunction(n=>window.__diagnosticTest.applied===n,++diagnosticApplications);
+  assert.equal(await diagnosticPage.evaluate(()=>window.__diagnosticTest.count()),0,"nonempty-to-empty diagnostics clears markers");
+  await diagnosticPage.evaluate(()=>{const s=window.__diagnosticTest;s.defer=true;s.reply=null;});
+  await diagnosticPage.waitForFunction(()=>typeof window.__diagnosticTest.reply==="function");
+  await diagnosticPage.evaluate(()=>{const s=window.__diagnosticTest;s.client.destroy();s.reply();});
+  await diagnosticPage.waitForTimeout(100);
+  assert.equal(await diagnosticPage.evaluate(()=>window.__diagnosticTest.applied),diagnosticApplications,"destroyed client rejects late diagnostics");
+  await writeFile("evidence/DIAGNOSTICS_DEDUP_RESULT.json",JSON.stringify({stable:stableDiagnostics,total:await diagnosticPage.evaluate(()=>({polls:window.__diagnosticTest.polls,applied:window.__diagnosticTest.applied,semanticCalls:window.__diagnosticTest.semanticCalls})),scope:"Actual CodeMirror with mocked IPC; deterministic transaction count, not native latency benchmark"},null,2));
+  await diagnosticPage.evaluate(()=>window.__diagnosticTest.view.destroy());await diagnosticPage.close();
+
   const providerPage=await browser.newPage();
   await providerPage.route("**/provider-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
   await providerPage.goto("http://127.0.0.1:5173/provider-test");

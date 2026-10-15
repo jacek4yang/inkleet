@@ -7,3 +7,5 @@ export {acceptCompletion,completionStatus,selectedCompletionIndex} from "@codemi
 export {rust} from "@codemirror/lang-rust";
 export {indentGuides,indentationColumns} from "../src/indent-guides";
 export {languageIntelligence,completionChanges} from "../src/intelligence";
+
+export {setDiagnostics,setDiagnosticsEffect,diagnosticCount} from "@codemirror/lint";
