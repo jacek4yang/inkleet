@@ -30,3 +30,23 @@ test("structured input compaction preserves string spaces and large numbers",()=
  assert.equal(compactCaseValue('[\n 900719925474099312345, "a b"\n]'),'[900719925474099312345,"a b"]');
  assert.equal(compactCaseValue("not valid\ninput"),"not valid\ninput");
 });
+
+test("void argument display preserves original numeric tokens and nested values",()=>{
+ const r=displayResult('{"case":2,"ok":true,"value":null,"argumentsAfterCall":[[900719925474099312345],{"x":"a,}b","n":900719925474099312346},null]}',0);
+ assert.equal(r.raw,false);
+ assert.equal(r.caseNumber,2);
+ assert.deepEqual(r.argumentsAfterCall,[{value:"[900719925474099312345]",unavailable:false},{value:'{"x":"a,}b","n":900719925474099312346}',unavailable:false},{value:"null",unavailable:false}]);
+ assert.deepEqual(displayResult('{"ok":true,"value":null,"argumentsAfterCall":[1],"argumentsAfterCall":[2,3]}',0).argumentsAfterCall?.map(v=>v.value),["2","3"]);
+ assert.deepEqual(displayResult('{"ok":true,"value":null,"argumentsAfterCall":[]}',0).argumentsAfterCall,[]);
+ assert.equal(displayResult('{"ok":false,"error":"bad","argumentsAfterCall":[1]}',0).argumentsAfterCall,undefined);
+});
+test("moved Rust arguments are distinct from real null and malformed metadata is untrusted",()=>{
+ const r=displayResult('{"ok":true,"value":null,"argumentsAfterCall":[null,null],"argumentsUnavailable":[1]}',0);
+ assert.deepEqual(r.argumentsAfterCall,[{value:"null",unavailable:false},{value:"null",unavailable:true}]);
+ for(const unavailable of [null,"x",[-1],[2],[0.5],[0,0],[9007199254740993]]){
+  assert.equal(displayResult(JSON.stringify({ok:true,value:null,argumentsAfterCall:[null,null],argumentsUnavailable:unavailable}),0).raw,true);
+ }
+ for(const args of [null,{},1,"x",Array(33).fill(0)]){
+  assert.equal(displayResult(JSON.stringify({ok:true,value:null,argumentsAfterCall:args}),0).raw,true);
+ }
+});

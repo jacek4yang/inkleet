@@ -1194,6 +1194,24 @@ try {
   assert.equal(await runPanel.locator(".case-result header span").first().innerText(),oldLabel.replace(/ · \d+$/,""),"single result removes ordinal suffix without dropping snapshot name");
   await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":99,"ok":false,"error":"changed error result"}'];});
   await runPanel.locator(".case-result [role=alert]").getByText("changed error result",{exact:true}).waitFor();
+  // Void arguments are first-class output, with exact bytes and owned metadata labels.
+  await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":1,"ok":true,"value":null,"argumentsAfterCall":[[9007199254740993],null],"argumentsUnavailable":[1]}'];});
+  await runPanel.locator(".case-argument .local-result").getByText("[9007199254740993]",{exact:true}).waitFor();
+  await runPanel.getByText("不可读取（值已移交）",{exact:true}).waitFor();
+  assert.equal(await runPanel.locator(".case-argument").count(),2);
+  assert.equal(await runPanel.locator(".case-result header span").last().innerText(),"调用后参数");
+  const capturedName=await runPage.evaluate(()=>JSON.parse(window.__runTest.starts.at(-1).metadata).params[0].name);
+  await runPanel.locator("pre[aria-label="+JSON.stringify("调用后 "+capturedName)+"]").getByText("[9007199254740993]",{exact:true}).waitFor();
+  await runPage.evaluate(()=>{const s=window.__runTest;s.savedResultId=s.result.id;s.result.id+=1000;});
+  await runPanel.locator('pre[aria-label="调用后 参数 1"]').getByText("[9007199254740993]",{exact:true}).waitFor();
+  assert.equal(await runPanel.locator("pre[aria-label="+JSON.stringify("调用后 "+capturedName)+"]").count(),0,"foreign result cannot inherit captured names");
+  await runPage.evaluate(()=>{window.__runTest.result.id=window.__runTest.savedResultId;});
+  await runPanel.locator("pre[aria-label="+JSON.stringify("调用后 "+capturedName)+"]").getByText("[9007199254740993]",{exact:true}).waitFor();
+  await runPage.screenshot({path:"evidence/in-place-result.png"});
+  await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":1,"ok":true,"value":null,"argumentsAfterCall":[[3,2,1],null]}'];});
+  await runPanel.locator(".case-argument .local-result").getByText("[3,2,1]",{exact:true}).waitFor();
+  await runPanel.locator(".case-argument .local-result").getByText("null",{exact:true}).waitFor();
+  assert.equal(await runPanel.getByText("不可读取（值已移交）",{exact:true}).count(),0);
   const newestCode="class Solution { /* latest performance snapshot */ }";
   await runPage.getByRole("textbox",{name:"代码编辑器",exact:true}).fill(newestCode);
   await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
