@@ -2700,7 +2700,7 @@ try {
       return result;
     };
   });
-  for(const keys of [["Control+s","Control+Shift+i"],["Control+Shift+i","Control+s"],["Control+s","Control+s"],["Control+s","Tab"]]){
+  for(const keys of [["Control+s","Control+Shift+KeyI"],["Control+Shift+KeyI","Control+s"],["Control+s","Control+s"],["Control+s","Tab"]]){
     await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;await s.insertDerived();s.view().setTabFocusMode(false);s.holdEvaluation=true;s.releaseEvaluation=null;});
     await snippetPage.keyboard.insertText("mixed");
     const before=await snippetPage.evaluate(()=>({saves:window.__snippetSessionTest.saves.length,formats:window.__snippetSessionTest.formats.length}));
@@ -2729,9 +2729,9 @@ try {
   assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),staleSaveCount,"late valid worker reply cannot revive canceled save");
   assert.equal(await snippetCode.innerText(),"canceled -> HELLO; tail");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.restoreEvaluation());
-  await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; nested sessions and native/real-IME acceptance remain unverified.\n");
+  await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; plain nested sessions have a separate regression. Nested transforms and native/real-IME acceptance remain unverified.\n");
 
-  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested sessions and real IME/native acceptance remain unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
+  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; plain nested sessions have a separate regression. Real IME/native acceptance remains unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
 
   const providerPage=await browser.newPage();
