@@ -2430,18 +2430,27 @@ try {
       const first=s.prepare("old").then(()=>false,error=>String(error).includes("canceled"));
       s.cancel();const canceled=await first;
       const recovered=await s.prepare(dollar+"{FILE:fallback}",{FILE:{kind:"value",value:"test.rs"}});
+      const transformed=await s.prepare(dollar+"{X/(.*)/"+dollar+"{1:/upcase}/}",{X:{kind:"value",value:"hello"}});
+      let heartbeat=0;const beat=setInterval(()=>heartbeat++,10);let timedOut=false;
+      try{await s.prepare(dollar+"{X/(a+)+$/x/}",{X:{kind:"value",value:"a".repeat(10000)+"!"}});}catch(error){timedOut=String(error).includes("timed out");}finally{clearInterval(beat);}
+      const afterTimeout=await s.prepare("recovered");
       let bounded=false;
       try{await s.prepare((dollar+"1 ").repeat(513));}catch{bounded=true;}
-      return {normal,pending,canceled,recovered,bounded,scope:"Actual same-origin Vite module worker; no native packaged or transform-execution acceptance"};
+      return {normal,pending,canceled,recovered,bounded,transformed,timedOut,heartbeat,afterTimeout,scope:"Actual same-origin Vite module worker including bounded regex evaluation; no native packaged acceptance"};
     }finally{s.destroy();}
   });
   await writeFile("evidence/SNIPPET_WORKER_RESULT.json",JSON.stringify(snippetWorkerEvidence,null,2));
   assert.equal(snippetWorkerEvidence.normal.text,"中文 中文 ");
   assert.deepEqual(snippetWorkerEvidence.normal.navigation,["t:1","t:0"]);
-  assert.equal(snippetWorkerEvidence.pending.needsTransformEvaluation,true);
+  assert.equal(snippetWorkerEvidence.pending.needsTransformEvaluation,false);
+  assert.equal(snippetWorkerEvidence.pending.transformState,"resolved");
   assert.equal(snippetWorkerEvidence.canceled,true);
   assert.equal(snippetWorkerEvidence.recovered.text,"test.rs");
   assert.equal(snippetWorkerEvidence.bounded,true);
+  assert.equal(snippetWorkerEvidence.transformed.text,"HELLO");
+  assert.equal(snippetWorkerEvidence.timedOut,true,"pathological regex is terminated by its owner");
+  assert.ok(snippetWorkerEvidence.heartbeat>10,"UI event loop remains active while regex worker is blocked");
+  assert.equal(snippetWorkerEvidence.afterTimeout.text,"recovered","later explicit request can create a fresh worker");
   await snippetWorkerPage.close();
 
 

@@ -21,7 +21,7 @@ export function validatePreparedSnippet(value:unknown):PreparedSnippet{
  !Array.isArray(value.fields)||value.fields.length>snippetLimits.occurrences||
  !Array.isArray(value.navigation)||value.navigation.length>snippetLimits.groups||
  !Array.isArray(value.transforms)||value.transforms.length>snippetLimits.transforms||
- value.needsTransformEvaluation!==(value.transforms.length>0))fail();
+ !(value.transformState==="pending"&&value.transforms.length>0&&value.needsTransformEvaluation===true||value.transformState==="resolved"&&value.needsTransformEvaluation===false))fail();
  const text=value.text as string,fields=value.fields as any[],groups=new Set<string>();
  const boundary=(n:number)=>n===0||n===text.length||!(text.charCodeAt(n-1)>=0xd800&&text.charCodeAt(n-1)<=0xdbff&&text.charCodeAt(n)>=0xdc00&&text.charCodeAt(n)<=0xdfff);
  let units=text.length,choices=0;
@@ -74,6 +74,6 @@ export function validatePreparedSnippet(value:unknown):PreparedSnippet{
   transforms:value.transforms.map((t:any)=>({target:t.target,pattern:t.pattern,flags:t.flags,
    format:t.format.map((f:any)=>f.kind==="text"?{kind:"text",value:f.value}:{kind:"capture",index:f.index,...(f.operation!==undefined?{operation:f.operation}:{}),...(f.ifValue!==undefined?{ifValue:f.ifValue}:{}),...(f.elseValue!==undefined?{elseValue:f.elseValue}:{})}),
    ...(t.sourceGroup!==undefined?{sourceGroup:t.sourceGroup}:{}),...(t.sourceValue!==undefined?{sourceValue:t.sourceValue}:{})})),
-  needsTransformEvaluation:value.needsTransformEvaluation
+  needsTransformEvaluation:value.needsTransformEvaluation,transformState:value.transformState
  };
 }

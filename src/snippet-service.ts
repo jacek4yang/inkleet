@@ -39,6 +39,7 @@ export class SnippetPreparationService {
     try{
      if(message.error!==undefined)throw Error(typeof message.error==="string"?message.error.slice(0,512):"Snippet worker failed");
      const result=validatePreparedSnippet(message.result);
+     if(result.needsTransformEvaluation)throw Error("Unevaluated snippet worker result");
      this.finish(id);resolve(result);
     }catch(error){this.finish(id,error instanceof Error?error:Error("Invalid snippet result"));}
    };
