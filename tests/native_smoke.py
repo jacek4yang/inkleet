@@ -879,7 +879,11 @@ try:
             wait_for(lambda: element("dialog.environments"), "environment dialog")
             environment_group="cpp" if group=="c" else group
             click(f'select[aria-label="开发环境语言"] option[value="{environment_group}"]')
-            click(".environment-summary button")
+            required_tools={"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview","zig","codelldb"],"cpp":["zig","clangd","codelldb"],"c":["zig","clangd","codelldb"]}[group]
+            # C reuses the C++ installation. A disabled install-missing button
+            # correctly means no work remains; do not wait for it to enable.
+            if not all("已安装" in text(f'[data-tool="{tool}"]') for tool in required_tools):
+                click(".environment-summary button")
             if group=="golang":
                 # Closing before Go finishes must not discard the queued gopls build.
                 click("dialog.environments header button")
