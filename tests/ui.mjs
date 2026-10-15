@@ -1221,6 +1221,37 @@ try {
   await runPanel.getByRole("button",{name:"停止",exact:true}).click();
   await runPanel.getByText("已停止",{exact:true}).waitFor();
 
+  // Exact expected-result comparison freezes the selected policy with the run.
+  await runPanel.locator(".case-expectation summary").click();
+  await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("9007199254740992");
+  await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.starts.length===9);
+  await runPage.evaluate(()=>window.__runTest.pending[8]());
+  await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:0,results:['{"case":1,"ok":true,"value":9007199254740993}']}));
+  await runPanel.getByText("与预期不符",{exact:true}).waitFor();
+  await runPanel.locator(".case-expected pre").getByText("9007199254740992",{exact:true}).waitFor();
+  await runPage.screenshot({path:"evidence/expected-result-mismatch.png"});
+  await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("9007199254740993");
+  await runPanel.getByText("结果已过期",{exact:true}).waitFor();
+  await runPanel.getByText("与预期不符",{exact:true}).waitFor();
+  await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.starts.length===10);
+  await runPage.evaluate(()=>window.__runTest.pending[9]());
+  await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:0,results:['{"case":1,"ok":true,"value":9007199254740993}']}));
+  await runPanel.getByText("符合预期",{exact:true}).waitFor();
+  await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":1,"ok":true,"value":9007199254740992,"value":9007199254740993}'];});
+  await runPanel.getByText("结果无法比较",{exact:true}).waitFor();
+  await runPanel.getByRole("combobox",{name:"预期结果比较目标",exact:true}).selectOption("argument:0");
+  await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("[3,2,1]");
+  await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.starts.length===11);
+  await runPage.evaluate(()=>window.__runTest.pending[10]());
+  await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:0,results:['{"case":1,"ok":true,"value":null,"argumentsAfterCall":[[3,2,1]]}']}));
+  await runPanel.getByText("符合预期",{exact:true}).waitFor();
+  await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":1,"ok":true,"value":null,"argumentsAfterCall":[null],"argumentsUnavailable":[0]}'];});
+  await runPanel.getByText("参数无法比较",{exact:true}).waitFor();
+  const persistedExpectation=await runPage.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith("inkleet.test-cases.v1:")).map(k=>JSON.parse(localStorage.getItem(k))).some(r=>r.version===2&&r.cases.some(c=>c.expectation?.target.kind==="argument"&&c.expectation.value==="[3,2,1]")));
+  assert.equal(persistedExpectation,true,"versioned case data persists explicit comparison policy");
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");

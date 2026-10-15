@@ -1,4 +1,5 @@
-export type LocalCase={id:string;name:string;input:string};
+import {validateExpectation,type Expectation} from "./case-expectations.ts";
+export type LocalCase={id:string;name:string;input:string;expectation?:Expectation|null};
 export function parameterNames(metadata:string):string[]{
  try{const value=JSON.parse(metadata);if(value.systemdesign||!Array.isArray(value.params)||value.params.length>32)return [];
  return value.params.map((p:unknown,i:number)=>{const name=(p as {name?:unknown})?.name;return typeof name==="string"&&name.length<=80?name:"参数 "+(i+1);});}catch{return [];}
@@ -12,11 +13,16 @@ export function seedCases(sample:string,examples:string,names:string[]):LocalCas
 }
 export function validateCases(value:unknown):{cases:LocalCase[];selected:string}{
  const v=value as {version?:unknown;cases?:unknown;selected?:unknown};
- if(v?.version!==1||!Array.isArray(v.cases)||!v.cases.length||v.cases.length>64||typeof v.selected!=="string")throw Error("测试用例记录无效，原记录已保留");
- const ids=new Set<string>();let total=0;
- for(const c of v.cases){if(!c||typeof c.id!=="string"||c.id.length>80||ids.has(c.id)||typeof c.name!=="string"||!c.name.trim()||c.name.length>80||typeof c.input!=="string"||(total+=c.input.length)>2*1024*1024)throw Error("测试用例记录无效，原记录已保留");ids.add(c.id);}
+ if((v?.version!==1&&v?.version!==2)||!Array.isArray(v.cases)||!v.cases.length||v.cases.length>64||typeof v.selected!=="string")throw Error("测试用例记录无效，原记录已保留");
+ const ids=new Set<string>();let total=0;const cases:LocalCase[]=[];
+ for(const c of v.cases){
+  if(!c||typeof c.id!=="string"||!c.id||c.id.length>80||ids.has(c.id)||typeof c.name!=="string"||!c.name.trim()||c.name.length>80||typeof c.input!=="string")throw Error("测试用例记录无效，原记录已保留");
+  const expectation=v.version===2?validateExpectation(c.expectation):null;
+  total+=c.input.length+(expectation?.value.length??0);if(total>2*1024*1024)throw Error("测试用例超过大小限制，原记录已保留");
+  ids.add(c.id);cases.push({id:c.id,name:c.name,input:c.input,expectation});
+ }
  if(!ids.has(v.selected))throw Error("选中的测试用例不存在");
- return {cases:v.cases,selected:v.selected};
+ return {cases,selected:v.selected};
 }
 export function inputParts(input:string,names:string[]):string[]|null{
  const lines=input.replace(/\r\n?/g,"\n").split("\n");

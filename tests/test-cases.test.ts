@@ -14,7 +14,7 @@ test("case persistence validates identity and keeps selected case",()=>{
  assert.equal(validateCases(value).selected,"a");
  assert.throws(()=>validateCases({...value,cases:[...value.cases,...value.cases]}));
  assert.throws(()=>validateCases({...value,selected:"missing"}));
- assert.throws(()=>validateCases({...value,version:2}));
+ assert.throws(()=>validateCases({...value,version:3}));
 });
 test("protocol output hides envelope without rounding or mutating actual values",()=>{
  assert.equal(displayResult('{"case":1,"ok":true,"value":[7,0]}',0).value,"[7,0]");
@@ -49,4 +49,13 @@ test("moved Rust arguments are distinct from real null and malformed metadata is
  for(const args of [null,{},1,"x",Array(33).fill(0)]){
   assert.equal(displayResult(JSON.stringify({ok:true,value:null,argumentsAfterCall:args}),0).raw,true);
  }
+});
+
+test("v1 cases migrate without changing identity or inputs and v2 expectations survive",()=>{
+ const old={version:1,cases:[{id:"a",name:"原用例",input:"[1, 2]\n"}],selected:"a"};
+ assert.deepEqual(validateCases(old),{cases:[{...old.cases[0],expectation:null}],selected:"a"});
+ const next={version:2,cases:[{...old.cases[0],expectation:{mode:"exact-json",target:{kind:"argument",index:0},value:"[2,1]"}}],selected:"a"};
+ assert.deepEqual(validateCases(next).cases,next.cases);
+ assert.throws(()=>validateCases({...next,cases:[{...next.cases[0],expectation:{mode:"guess",value:"1"}}]}));
+ assert.throws(()=>validateCases({...old,cases:[{...old.cases[0],id:""}]}));
 });

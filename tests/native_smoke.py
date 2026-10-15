@@ -1058,6 +1058,18 @@ try:
             wait_for(lambda:json.loads(text('pre[aria-label="调用后 values"]'))==[3,2,1],"real void call displays mutated array",seconds=30)
             assert len(cmd("POST","/elements",{"using":"css selector","value":".case-argument"}))==1
             screenshot("in-place-result-native.png")
+            click('.case-expectation summary')
+            click('select[aria-label="预期结果比较目标"] option[value="argument:0"]')
+            fill('[aria-label="预期结果"]',"[3,2,1]")
+            click_debug_action('[data-action="local-execute"]')
+            wait_for(lambda:"符合预期" in text(".case-result"),"native void argument exact comparison",seconds=30)
+            fill('[aria-label="预期结果"]',"[1,2,3]")
+            click_debug_action('[data-action="local-execute"]')
+            wait_for(lambda:"与预期不符" in text(".case-result"),"native void argument mismatch",seconds=30)
+            assert json.loads(text(".case-expected pre"))==[1,2,3]
+            screenshot("expected-result-native.png")
+            (evidence/"EXPECTED_RESULT_NATIVE.txt").write_text("PASS: actual Python void output compares against explicitly selected argument expectation, both match and mismatch. Exact JSON policy only, not official judge acceptance.\n")
+
             (evidence/"IN_PLACE_NATIVE_RESULT.txt").write_text("PASS: actual private Python void call reverses input and normal GUI result displays captured parameter values without raw JSON. Non-void mutation and other language mutation GUI cases not asserted here.\n")
         finally:
             stop();cache_path.write_text(original_cache);start()
