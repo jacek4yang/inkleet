@@ -92,3 +92,19 @@ test("moving final selection outside the edited field safely ends linkage",()=>{
  let s=start();s=s.update({changes:{from:1,insert:"!"},selection:{anchor:9},userEvent:"input.type"}).state;
  assert.equal(s.field(snippetSessionState),null);assert.equal(s.doc.toString(),"a!bc-abc-");
 });
+
+test("session effects map through composed original-coordinate edits",()=>{
+ let s=EditorState.create({doc:"__token",extensions:[snippetSession]});
+ const insertion=snippetInsertion(s,prepareSnippet(sample),2,7)!;
+ s=s.update(insertion,{changes:{from:0,insert:"prefix"}}).state;
+ assert.equal(s.doc.toString(),"prefix__abc-abc-");
+ const active=s.field(snippetSessionState)!;assert.equal(active.fields[0].from,8);
+ s=s.update({selection:{anchor:9}}).state;
+ s=s.update({changes:{from:9,insert:"!"},selection:{anchor:10},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"prefix__a!bc-a!bc-");
+});
+test("composed edits intersecting new snippet fields invalidate session effects",()=>{
+ let s=EditorState.create({extensions:[snippetSession]});
+ s=s.update(snippetInsertion(s,prepareSnippet(sample),0,0)!,{sequential:true,changes:{from:1,insert:"!"}}).state;
+ assert.equal(s.doc.toString(),"a!bc-abc-");assert.equal(s.field(snippetSessionState),null);
+});

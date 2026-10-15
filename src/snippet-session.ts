@@ -5,7 +5,18 @@ import {validatePreparedSnippet} from "./snippet-validation.ts";
 import {snippetLimits} from "./snippet-budget.ts";
 import type {PreparedSnippet,SnippetField} from "./snippet-prepare.ts";
 type Session={fields:SnippetField[];navigation:string[];active:number};
-const setSession=StateEffect.define<Session|null>();
+const setSession=StateEffect.define<Session|null>({map:(value,mapping)=>{
+ if(!value)return null;
+ let touched=false,count=0;
+ mapping.iterChangedRanges((from,to)=>{
+  if(++count>32||value.fields.some(f=>from<=f.to&&to>=f.from))touched=true;
+ });
+ if(touched)return null;
+ return {...value,fields:value.fields.map(f=>{
+  if(f.from===f.to){const pos=mapping.mapPos(f.from,1);return {...f,from:pos,to:pos};}
+  return {...f,from:mapping.mapPos(f.from,1),to:mapping.mapPos(f.to,-1)};
+ })};
+}});
 function decorations(session:Session|null):DecorationSet{
  if(!session)return Decoration.none;
  const active=session.fields.find(f=>f.id===session.active)?.group;
@@ -38,7 +49,7 @@ function EditorStateTransactionFilter():Extension{
   if(!session||!tr.docChanged||tr.effects.some(effect=>effect.is(setSession)))return tr;
   if(tr.annotation(Transaction.remote)||tr.isUserEvent("undo")||tr.isUserEvent("redo")||tr.newSelection.ranges.length!==1||tr.startState.selection.ranges.length!==1||!(tr.isUserEvent("input.type")||tr.isUserEvent("input.paste")||tr.isUserEvent("input.drop")||tr.isUserEvent("input.complete")||tr.isUserEvent("delete")))return [tr,cancelSpec];
   const changes:{from:number;to:number}[]=[];
-  tr.changes.iterChangedRanges((from,to)=>{changes.push({from,to});});
+  tr.changes.iterChangedRanges((from,to)=>{if(changes.length<33)changes.push({from,to});});
   if(changes.length>32)return [tr,cancelSpec];
   const contains=(f:SnippetField)=>!f.final&&changes.every(c=>c.from>=f.from&&c.to<=f.to);
   const active=session.fields.find(f=>f.id===session.active);
@@ -52,7 +63,9 @@ function EditorStateTransactionFilter():Extension{
    return {...f,from:tr.changes.mapPos(f.from,1),to:tr.changes.mapPos(f.to,-1)};
   });
   if(mapped.some(f=>f.from>f.to))return [tr,cancelSpec];
-  const primary=mapped[targetIndex],text=tr.newDoc.sliceString(primary.from,primary.to);
+  const primary=mapped[targetIndex];
+  if(primary.to-primary.from>snippetLimits.output)return [tr,cancelSpec];
+  const text=tr.newDoc.sliceString(primary.from,primary.to);
   const mirrors=mapped.filter(f=>f.group===target.group&&f.id!==target.id);
   if(text.length>snippetLimits.output||text.length*(mirrors.length+1)>snippetLimits.copies)return [tr,cancelSpec];
   const replacements=mirrors.map(f=>({from:f.from,to:f.to,insert:text,id:f.id})).sort((a,b)=>a.from-b.from||a.to-b.to);
@@ -62,12 +75,13 @@ function EditorStateTransactionFilter():Extension{
   const mirrorSet=ChangeSet.of(replacements,tr.newDoc.length);
   let delta=0;const ranges=new Map<number,{from:number;to:number}>();
   for(const edit of replacements){const from=edit.from+delta;ranges.set(edit.id,{from,to:from+text.length});delta+=text.length-(edit.to-edit.from);}
+  const ordinals=new Map(session.fields.map((f,index)=>[f.id,index]));
   const fields=mapped.map((f,index)=>{
    const replacement=ranges.get(f.id);if(replacement)return {...f,...replacement};
    if(f.from===f.to){
     // Preserve source ordering at empty stops sharing a mirror insertion boundary.
     let position=mirrorSet.mapPos(f.from,-1);
-    for(const edit of replacements)if(edit.from===f.from&&edit.to===edit.from&&session.fields.findIndex(other=>other.id===edit.id)<index)position+=edit.insert.length;
+    for(const edit of replacements)if(edit.from===f.from&&edit.to===edit.from&&ordinals.get(edit.id)!<index)position+=edit.insert.length;
     return {...f,from:position,to:position};
    }
    return {...f,from:mirrorSet.mapPos(f.from,1),to:mirrorSet.mapPos(f.to,-1)};
