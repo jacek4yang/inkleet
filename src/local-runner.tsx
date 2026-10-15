@@ -1,7 +1,8 @@
+import {localResultReport,type OutputRow} from "./local-result-model";
 import {validateRunContext,sameRunStatus,type RunContext} from "./run-context";
 import {canonicalJson,compareJson,invocationCount,type Expectation} from "./case-expectations";
 import "./case-results.css";
-import {parameterNames,seedCases,validateCases,inputParts,displayResult,compactCaseValue,type LocalCase} from "./test-cases";
+import {parameterNames,seedCases,validateCases,inputParts,compactCaseValue,type LocalCase} from "./test-cases";
 import { useResizablePanel } from "./resizable-panel";
 import type { DebugPosition } from "./debug-position";
 import { Icon, IconButton } from "./icons";
@@ -9,26 +10,19 @@ import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { DebugPanel } from "./debug-panel";
 import type { Language } from "./domain";
-type Snapshot = { clientRequestId?:string;invocationCount?:number;expectation?:Expectation|null;runId?:number;caseId?:string;caseName?:string;documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
+type Snapshot = { localContext?:RunContext;clientRequestId?:string;invocationCount?:number;expectation?:Expectation|null;runId?:number;caseId?:string;caseName?:string;documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { documentKey?:string|null;clientRequestId?:string|null;id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "compiling", "running", "canceling"].includes(r.phase);
-// Primitive props preserve each rendered result across source edits and fresh IPC arrays.
-const CaseResult = memo(function CaseResult({raw,index,caseName,multiple,argumentNames,expectationJson,comparisonBlocked}:{raw:string;index:number;caseName?:string;multiple:boolean;argumentNames:string;expectationJson:string;comparisonBlocked:string}){
-  const value=useMemo(()=>displayResult(raw,index),[raw,index]);
-  const names=useMemo(()=>JSON.parse(argumentNames) as string[],[argumentNames]);
-  const argumentsAfter=value.argumentsAfterCall;
-  const expectation=useMemo(()=>JSON.parse(expectationJson) as Expectation|null,[expectationJson]);
-  const comparison=useMemo(()=>{
-    if(!expectation||value.error)return null;
-    if(comparisonBlocked)return {label:comparisonBlocked,mismatch:false};
-    if(multiple)return {label:"多组输入未比较",mismatch:false};
-    if(value.raw)return {label:"结果无法比较",mismatch:false};
-    const argument=expectation.target.kind==="argument"?value.argumentsAfterCall?.[expectation.target.index]:null;
-    if(expectation.target.kind==="argument"&&(!argument||argument.unavailable))return {label:"参数无法比较",mismatch:false};
-    try{canonicalJson(raw);const envelope=JSON.parse(raw);if(envelope.case!==1)return {label:"结果无法比较",mismatch:false};const mismatch=compareJson(argument?argument.value:value.value,expectation.value)==="mismatch";return {label:mismatch?"与预期不符":"符合预期",mismatch};}
-    catch{return {label:"结果无法比较",mismatch:false};}
-  },[raw,value,expectation,multiple,comparisonBlocked]);
-  return <section className="case-result" title="本地结果不代表通过力扣判题"><header><span>{caseName??"用例 "+value.caseNumber}{caseName&&multiple?" · "+value.caseNumber:""}</span><span>{value.error?"执行失败":comparison?comparison.label:value.raw?"输出":argumentsAfter?.length?"调用后参数":"返回值"}</span></header>{value.error?<pre role="alert" className="error">{value.error}</pre>:argumentsAfter?.length?<>{value.value!=="null"&&<div className="case-argument"><span>返回值</span><pre className="local-result">{value.value}</pre></div>}{argumentsAfter.map((argument,i)=><div className="case-argument" key={i}><span>{names[i]??"参数 "+(i+1)}</span><pre className="local-result" aria-label={"调用后 "+(names[i]??"参数 "+(i+1))}>{argument.unavailable?"不可读取（值已移交）":argument.value}</pre></div>)}</>:<pre className="local-result">{value.value}</pre>}{comparison?.mismatch&&expectation&&<div className="case-argument case-expected"><span>预期</span><pre>{expectation.value}</pre></div>}<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details></section>;
+// The report is memoized by immutable run context and deduplicated status.
+const CaseResult=memo(function CaseResult({row}:{row:OutputRow}){
+ const {raw,value,caseName,multiple,names,expectation,comparison}=row;
+ const argumentsAfter=value.argumentsAfterCall;
+ return <section className="case-result" title="本地结果不代表通过力扣判题">
+  <header><span>{caseName??"用例 "+value.caseNumber}{caseName&&multiple?" · "+value.caseNumber:""}</span><span>{value.error?"执行失败":comparison?comparison.label:value.raw?"输出":argumentsAfter?.length?"调用后参数":"返回值"}</span></header>
+  {row.missing?null:value.error?<pre role="alert" className="error">{value.error}</pre>:argumentsAfter?.length?<>{value.value!=="null"&&<div className="case-argument"><span>返回值</span><pre className="local-result">{value.value}</pre></div>}{argumentsAfter.map((argument,i)=><div className="case-argument" key={i}><span>{names[i]??"参数 "+(i+1)}</span><pre className="local-result" aria-label={"调用后 "+(names[i]??"参数 "+(i+1))}>{argument.unavailable?"不可读取（值已移交）":argument.value}</pre></div>)}</>:<pre className="local-result">{value.value}</pre>}
+  {comparison?.state==="mismatch"&&expectation&&<div className="case-argument case-expected"><span>预期</span><pre>{expectation.value}</pre></div>}
+  {!row.missing&&<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details>}
+ </section>;
 });
 export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
   onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
@@ -62,15 +56,17 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [context,setContext]=useState<{id:number;record:RunContext}|null>(null);
   const lastRequest=useRef<string|null>(null);
-  const effectiveSnapshot=useMemo(()=>{
-    if(context&&result&&context.id===result.id&&context.record.documentKey===documentKey&&context.record.clientRequestId===result.clientRequestId&&context.record.cases.length===1){
-      const record=context.record,selected=record.cases[0];
-      return {...record.snapshot,documentKey:record.documentKey,clientRequestId:record.clientRequestId,runId:context.id,caseId:selected.id,caseName:selected.name,expectation:selected.expectation??null,invocationCount:record.invocations.length};
-    }
-    return snapshot?.runId===result?.id&&(!result?.documentKey||snapshot?.documentKey===result.documentKey)&&(!result?.clientRequestId||snapshot?.clientRequestId===result.clientRequestId)?snapshot:null;
+  const activeRecord=useMemo(()=>{
+    if(context&&result&&context.id===result.id&&context.record.documentKey===documentKey&&result.documentKey===documentKey&&context.record.clientRequestId===result.clientRequestId)return context.record;
+    if(snapshot?.runId===result?.id&&snapshot?.documentKey===documentKey&&(!result?.documentKey||result.documentKey===documentKey)&&(!result?.clientRequestId||snapshot?.clientRequestId===result.clientRequestId))return snapshot?.localContext??null;
+    return null;
   },[context,result?.id,result?.documentKey,result?.clientRequestId,documentKey,snapshot]);
-  const resultNames=useMemo(()=>JSON.stringify(effectiveSnapshot?parameterNames(effectiveSnapshot.metadata):[]),[effectiveSnapshot]);
-  const resultExpectation=useMemo(()=>JSON.stringify(effectiveSnapshot?.expectation??null),[effectiveSnapshot]);
+  const report=useMemo(()=>result?localResultReport(result,activeRecord):null,[result,activeRecord]);
+  const currentPlans=useMemo(()=>cases.map(item=>({...item,expectation:item.expectation?.value.trim()?item.expectation:null})),[cases]);
+  const stale=!!activeRecord&&(activeRecord.snapshot.code!==code||activeRecord.snapshot.language!==language||activeRecord.snapshot.metadata!==metadata||activeRecord.snapshot.title!==title||
+    (activeRecord.mode==="all"?JSON.stringify(activeRecord.cases)!==JSON.stringify(currentPlans):
+      activeRecord.cases.some(item=>JSON.stringify(item)!==JSON.stringify(currentPlans.find(current=>current.id===item.id)))||
+      ((activeRecord.mode??"selected")==="selected"&&activeRecord.cases.length===1&&activeRecord.cases[0].id!==selected)));
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const guard = useRef(false), alive = useRef(true), sequence = useRef(0);
@@ -102,23 +98,36 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     return () => { alive.current = false; clearTimeout(timer); };
   }, []);
   useEffect(() => { if (!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)) setPane("run"); }, [language]);
-  async function run() {
-    if (guard.current || busy(result)) return;
-    guard.current = true; setPending(true); setError("");
-    const expectation=currentCase.expectation?.value.trim()?currentCase.expectation:null;
-    const clientRequestId=crypto.randomUUID();lastRequest.current=clientRequestId;
-    const next = { documentKey, clientRequestId, code, input, metadata, title, language, cases:[{id:currentCase.id,name:currentCase.name,input,expectation}] };
-    try {
-      let groups=0;
-      if(expectation){canonicalJson(expectation.value);if(expectation.target.kind==="argument"&&expectation.target.index>=names.length)throw Error("预期参数不属于当前函数");groups=invocationCount(input,names.length);}
-      const id = await invoke<number>("start_local_run", { snapshot: next });
-      if (alive.current) {
-        ++sequence.current;
-        setSnapshot({...next,invocationCount:groups,expectation,runId:id,caseId:currentCase.id,caseName:currentCase.name});
-        setResult({ id, documentKey, clientRequestId, phase: "queued", title, stdout: "", stderr: "", results: [], exitCode: null, timedOut: false, canceled: false, truncated: false, elapsedMs: 0, error: "" });
+  async function run(mode:"selected"|"all"|"failed"="selected") {
+    if(guard.current||busy(result))return;
+    guard.current=true;setPending(true);setError("");
+    try{
+      if(!documentKey)throw Error("当前解答标识不可用");
+      const failedIds=new Set(report?.rows.filter(row=>row.comparison?.state==="mismatch"||row.comparison?.state==="error").map(row=>row.caseId).filter(Boolean));
+      const chosen=mode==="all"?currentPlans:mode==="failed"?currentPlans.filter(item=>failedIds.has(item.id)):currentPlans.filter(item=>item.id===selected);
+      if(!chosen.length)throw Error("没有可运行的用例");
+      const invocations:RunContext["invocations"]=[];
+      for(let caseIndex=0;caseIndex<chosen.length;caseIndex++){
+        const item=chosen[caseIndex],expectation=item.expectation;
+        if(expectation){canonicalJson(expectation.value);if(expectation.target.kind==="argument"&&expectation.target.index>=names.length)throw Error("预期参数不属于当前函数");}
+        const groups=invocationCount(item.input,names.length);
+        if(invocations.length+groups>100)throw Error("一批运行最多 100 组函数调用");
+        for(let groupIndex=0;groupIndex<groups;groupIndex++)invocations.push({caseIndex,groupIndex,caseNumber:invocations.length+1});
       }
-    } catch (e) { if (alive.current) setError(String(e)); }
-    finally { guard.current = false; if (alive.current) setPending(false); }
+      const clientRequestId=crypto.randomUUID();lastRequest.current=clientRequestId;
+      const combined=chosen.map(item=>item.input).join("\n");
+      const source={code,input:combined,metadata,title,language};
+      const localContext=validateRunContext({mode,documentKey,clientRequestId,snapshot:source,cases:chosen,invocations},documentKey,clientRequestId);
+      const next={...source,mode,documentKey,clientRequestId,cases:chosen};
+      const id=await invoke<number>("start_local_run",{snapshot:next});
+      if(alive.current){
+        ++sequence.current;
+        setSnapshot({...source,documentKey,clientRequestId,runId:id,localContext});
+        setContext({id,record:localContext});
+        setResult({id,documentKey,clientRequestId,phase:"queued",title,stdout:"",stderr:"",results:[],exitCode:null,timedOut:false,canceled:false,truncated:false,elapsedMs:0,error:""});
+      }
+    }catch(e){if(alive.current)setError(String(e));}
+    finally{guard.current=false;if(alive.current)setPending(false);}
   }
   async function cancel() {
     if (!result || guard.current) return;
@@ -127,11 +136,9 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     catch (e) { if (alive.current) setError(String(e)); }
     finally { guard.current = false; }
   }
-  const stale = effectiveSnapshot && effectiveSnapshot.runId===result?.id && (effectiveSnapshot.caseId!==selected||effectiveSnapshot.documentKey !== documentKey || effectiveSnapshot.code !== code || effectiveSnapshot.input !== input || effectiveSnapshot.language !== language || effectiveSnapshot.metadata !== metadata || effectiveSnapshot.title !== title || JSON.stringify(effectiveSnapshot.expectation??null)!==JSON.stringify(currentCase.expectation?.value.trim()?currentCase.expectation:null));
-  const comparisonBlocked=!result||result.phase!=="finished"||result.exitCode!==0||result.canceled||result.timedOut||result.truncated||!!result.error?"运行未完成，未比较":effectiveSnapshot?.invocationCount!==1?"多组输入未比较":result.results.length!==1?"结果不完整，未比较":"";
   return <section ref={resize.panel} style={resize.style} hidden={hidden} className="local-runner resizable-panel" aria-label="本地运行">
     {resize.handle}
-    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><div className="local-actions">{pane==="run"&&<><IconButton icon="play" label="本地执行" title="本地执行 · 仅运行可信代码，非安全沙箱" data-action="local-execute" onClick={run} disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || pending || busy(result)} />{busy(result) && <IconButton icon="stop" label="停止" onClick={cancel} disabled={result?.phase === "canceling"} />}</>}<IconButton icon="settings" label="运行与调试设置" onClick={onSettings} /><IconButton icon="collapse" label="收起" onClick={onClose} /></div></header>
+    <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><div className="local-actions">{pane==="run"&&<><IconButton icon="play" label="本地执行" title="本地执行 · 仅运行可信代码，非安全沙箱" data-action="local-execute" onClick={()=>void run("selected")} disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || pending || busy(result)} />{busy(result) && <IconButton icon="stop" label="停止" onClick={cancel} disabled={result?.phase === "canceling"} />}</>}{pane==="run"&&<><IconButton icon="tests" label="运行全部用例" title="运行全部用例 · 共用进程与运行时限" onClick={()=>void run("all")} disabled={!isTauri()||pending||busy(result)}/>{activeRecord&&report?.rows.some(row=>row.comparison?.state==="mismatch"||row.comparison?.state==="error")&&<IconButton icon="refresh" label="重跑失败用例" onClick={()=>void run("failed")} disabled={!isTauri()||pending||busy(result)}/>}</>}<IconButton icon="settings" label="运行与调试设置" onClick={onSettings} /><IconButton icon="collapse" label="收起" onClick={onClose} /></div></header>
 
     <div className="case-toolbar">
       <div role="tablist" aria-label="测试用例">{cases.map(item=><button key={item.id} role="tab" aria-selected={item.id===selected} tabIndex={item.id===selected?0:-1} onClick={()=>chooseCase(item.id)} onKeyDown={event=>{if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;event.preventDefault();const i=cases.findIndex(c=>c.id===selected),next=cases[(i+(event.key==="ArrowRight"?1:-1)+cases.length)%cases.length];chooseCase(next.id);(event.currentTarget.parentElement?.children[cases.indexOf(next)] as HTMLElement)?.focus();}}>{item.name}</button>)}</div>
@@ -148,10 +155,11 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     <div className="local-actions"><span role="status" hidden={!result}>{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : result.phase === "compiling" ? "编译中…" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过时限，已终止" : result.phase === "error" || result.error ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
     {result?.documentKey&&result.documentKey!==documentKey&&<p className="cache-warning">其他解答的运行结果</p>}
     {stale && <p className="cache-warning">结果已过期</p>}
-    {!effectiveSnapshot && result && <p className="muted">上次运行</p>}
+    {!activeRecord && result && <p className="muted">上次运行</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
     {result?.truncated && <p role="alert">输出达到上限，已截断并终止进程。</p>}
-    {result?.results.map((raw,index)=><CaseResult key={index} raw={raw} index={index} caseName={effectiveSnapshot?.caseName} multiple={result.results.length>1} argumentNames={resultNames} expectationJson={resultExpectation} comparisonBlocked={comparisonBlocked}/>)}
+    {activeRecord&&report&&(activeRecord.mode==="all"||activeRecord.mode==="failed"||activeRecord.cases.length>1)&&<div className="batch-summary" role="status" aria-label="批量运行汇总"><span>{report.received}/{report.expected} 组</span>{report.matched>0&&<span>符合 {report.matched}</span>}{report.mismatched>0&&<span>不符 {report.mismatched}</span>}{report.errors>0&&<span>错误 {report.errors}</span>}{report.unchecked>0&&<span>未比较 {report.unchecked}</span>}{report.missing>0&&<span>未返回 {report.missing}</span>}</div>}
+    {report?.rows.map((row,index)=><CaseResult key={index} row={row}/>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
 

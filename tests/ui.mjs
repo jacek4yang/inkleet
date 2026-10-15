@@ -917,7 +917,7 @@ try {
         const plan=args.snapshot,casePlans=plan.cases??[{id:"selected",name:"用例",input:plan.input,expectation:null}];
         const invocations=[];const parameterCount=JSON.parse(plan.metadata).params.length;
         casePlans.forEach((c,caseIndex)=>{const groups=Math.max(1,Math.floor(c.input.split("\n").filter(x=>x.trim()).length/parameterCount));for(let groupIndex=0;groupIndex<groups;groupIndex++)invocations.push({caseIndex,groupIndex,caseNumber:invocations.length+1});});
-        state.records??={};state.records[state.starts.length]={documentKey:plan.documentKey,clientRequestId:plan.clientRequestId,snapshot:{code:plan.code,input:casePlans.map(c=>c.input).join("\n"),metadata:plan.metadata,title:plan.title,language:plan.language},cases:casePlans,invocations};
+        state.records??={};state.records[state.starts.length]={mode:plan.mode??"selected",documentKey:plan.documentKey,clientRequestId:plan.clientRequestId,snapshot:{code:plan.code,input:casePlans.map(c=>c.input).join("\n"),metadata:plan.metadata,title:plan.title,language:plan.language},cases:casePlans,invocations};
 
         state.result = { id: state.starts.length, documentKey:args.snapshot.documentKey,clientRequestId:args.snapshot.clientRequestId,phase: "running", title: args.snapshot.title, stdout: "", stderr: "", results: [], exitCode: null, timedOut: false, canceled: false, truncated: false, elapsedMs: 0, error: "" };
         return new Promise(resolve => state.pending.push(() => resolve(state.result.id)));
@@ -1296,6 +1296,58 @@ try {
   if(await runPanel.count()===0)await runPage.getByRole("button",{name:"本地",exact:true}).click();
   await runPanel.getByText("多组输入未比较",{exact:true}).waitFor();
   assert.equal(await runPage.evaluate(()=>window.__runTest.starts.length),12,"remount must never replay start");
+  // Named batch execution is one backend admission, with captured cases and explicit retries.
+  const tabs=runPanel.getByRole("tablist",{name:"测试用例"}).getByRole("tab");
+  while(await tabs.count()>1){
+    if(await runPanel.locator(".case-menu").getAttribute("open")===null)await runPanel.getByLabel("用例操作",{exact:true}).click();
+    await runPanel.getByRole("button",{name:"删除用例",exact:true}).click();
+  }
+  async function renameBatchCase(name){
+    if(await runPanel.locator(".case-menu").getAttribute("open")===null)await runPanel.getByLabel("用例操作",{exact:true}).click();
+    await runPanel.getByRole("button",{name:"重命名",exact:true}).click();
+    await runPanel.getByRole("textbox",{name:"用例名称",exact:true}).fill(name);
+    await runPanel.locator(".case-rename").getByRole("button",{name:"确定",exact:true}).click();
+    if(await runPanel.locator(".case-menu").getAttribute("open")!==null)await runPanel.getByLabel("用例操作",{exact:true}).click();
+  }
+  if(await runPanel.locator(".case-expectation").getAttribute("open")===null)await runPanel.locator(".case-expectation summary").click();
+  await runPanel.getByRole("combobox",{name:"预期结果比较目标",exact:true}).selectOption("return");
+  for(let i=1;i<=3;i++){
+    if(i>1)await runPanel.getByRole("button",{name:"添加用例",exact:true}).click();
+    await renameBatchCase(["A","B","C"][i-1]);
+    await runPanel.getByRole("textbox",{name:"本地测试输入",exact:true}).fill("["+i+"]");
+    await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill(String(i));
+  }
+  await runPanel.getByRole("button",{name:"运行全部用例",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.starts.length===13);
+  assert.equal(await runPage.evaluate(()=>window.__runTest.starts[12].cases.length),3);
+  assert.equal(await runPage.evaluate(()=>window.__runTest.starts[12].mode),"all");
+  await runPanel.getByRole("textbox",{name:"本地测试输入",exact:true}).fill("[30]");
+  await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("30");
+  await runPage.evaluate(()=>window.__runTest.pending[12]());
+  await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:0,results:['{"case":1,"ok":true,"value":1}','{"case":2,"ok":true,"value":99}','{"case":3,"ok":false,"error":"case C failed"}']}));
+  const summary=runPanel.getByLabel("批量运行汇总",{exact:true});
+  await summary.getByText("符合 1",{exact:true}).waitFor();
+  await summary.getByText("不符 1",{exact:true}).waitFor();
+  await summary.getByText("错误 1",{exact:true}).waitFor();
+  await runPanel.getByText("结果已过期",{exact:true}).waitFor();
+  assert.deepEqual(await runPage.evaluate(()=>window.__runTest.starts[12].cases.map(c=>c.input)),["[1]","[2]","[3]"]);
+  await runPage.screenshot({path:"evidence/named-batch-results.png"});
+  await runPanel.getByRole("button",{name:"重跑失败用例",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.starts.length===14);
+  assert.deepEqual(await runPage.evaluate(()=>window.__runTest.starts[13].cases.map(c=>c.name)),["B","C"]);
+  assert.deepEqual(await runPage.evaluate(()=>window.__runTest.starts[13].cases.map(c=>c.input)),["[2]","[30]"]);
+  await runPage.evaluate(()=>window.__runTest.pending[13]());
+  await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:0,results:['{"case":1,"ok":true,"value":2}','{"case":2,"ok":true,"value":30}']}));
+  await summary.getByText("符合 2",{exact:true}).waitFor();
+  assert.equal(await runPanel.getByRole("button",{name:"重跑失败用例",exact:true}).count(),0);
+  await runPanel.getByRole("button",{name:"运行全部用例",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.starts.length===15);
+  await runPage.evaluate(()=>window.__runTest.pending[14]());
+  await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":1,"ok":true,"value":1}'];});
+  await runPanel.getByRole("button",{name:"停止",exact:true}).click();
+  await summary.getByText("未返回 2",{exact:true}).waitFor();
+  assert.equal(await runPanel.getByText("符合预期",{exact:true}).count(),0);
+  assert.equal(await runPage.evaluate(()=>window.__runTest.starts.length),15);
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");

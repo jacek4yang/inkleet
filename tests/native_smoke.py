@@ -1070,6 +1070,19 @@ try:
             wait_for(lambda:"与预期不符" in text(".case-result"),"native void argument mismatch",seconds=30)
             assert json.loads(text(".case-expected pre"))==[1,2,3]
             screenshot("expected-result-native.png")
+            click('[aria-label="添加用例"]')
+            fill('[aria-label="本地测试输入"]',"[4,5]")
+            fill('[aria-label="预期结果"]',"[5,4]")
+            click_debug_action('[aria-label="运行全部用例"]')
+            wait_for(lambda:"符合 1" in text(".batch-summary") and "不符 1" in text(".batch-summary"),"native batch preserves both named expectations",seconds=30)
+            assert "2/2 组" in text(".batch-summary")
+            screenshot("named-batch-native.png")
+            click('[role="tablist"][aria-label="测试用例"] [role="tab"]:first-child')
+            fill('[aria-label="预期结果"]',"[3,2,1]")
+            click_debug_action('[aria-label="重跑失败用例"]')
+            wait_for(lambda:"符合 1" in text(".batch-summary") and "1/1 组" in text(".batch-summary"),"native failed-case rerun uses current case expectation",seconds=30)
+            (evidence/"NAMED_BATCH_NATIVE_RESULT.txt").write_text("PASS: actual private Python batch runs two named cases in one backend job, displays one match and one mismatch, and explicit failed-case rerun uses updated expected output. Shared process/time budget; no online judge verdict.\n")
+
             (evidence/"EXPECTED_RESULT_NATIVE.txt").write_text("PASS: actual Python void output compares against explicitly selected argument expectation, both match and mismatch. Exact JSON policy only, not official judge acceptance.\n")
 
             (evidence/"IN_PLACE_NATIVE_RESULT.txt").write_text("PASS: actual private Python void call reverses input and normal GUI result displays captured parameter values without raw JSON. Non-void mutation and other language mutation GUI cases not asserted here.\n")
