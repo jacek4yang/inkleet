@@ -1,0 +1,54 @@
+name: Inspect pinned snippet dependencies
+on:
+  push:
+    branches: [research/snippet-contract]
+    paths: ['.github/workflows/snippet-contract.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: aa021a717d08e2437f2e9b7997a2cf91510c5a0f
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - name: Preserve exact installed public dependency source and identity
+        shell: bash
+        run: |
+          mkdir -p evidence/pinned-dependencies
+          git rev-parse HEAD > evidence/pinned-dependencies/SOURCE_COMMIT.txt
+          node --input-type=module <<'NODE'
+          import {readFileSync,writeFileSync,mkdirSync,copyFileSync} from "node:fs";
+          import {createHash} from "node:crypto";
+          import assert from "node:assert/strict";
+          const lock=JSON.parse(readFileSync("package-lock.json","utf8"));
+          const identities=[];
+          for(const [name,version] of [["autocomplete","6.20.3"],["state","6.7.6"]]){
+            const base="node_modules/@codemirror/"+name, dest="evidence/pinned-dependencies/"+name;
+            const pkg=JSON.parse(readFileSync(base+"/package.json","utf8"));
+            assert.equal(pkg.version,version);assert.equal(lock.packages[base].version,version);
+            mkdirSync(dest,{recursive:true});
+            const files=[];
+            for(const file of ["package.json","LICENSE","dist/index.js","dist/index.d.ts"]){
+              const data=readFileSync(base+"/"+file);
+              assert.ok(data.length<2*1024*1024);
+              mkdirSync(dest+"/"+file.split("/").slice(0,-1).join("/"),{recursive:true});
+              copyFileSync(base+"/"+file,dest+"/"+file);
+              files.push({file,bytes:data.length,sha256:createHash("sha256").update(data).digest("hex")});
+            }
+            identities.push({package:pkg.name,version:pkg.version,integrity:lock.packages[base].integrity,resolved:lock.packages[base].resolved,files});
+          }
+          writeFileSync("evidence/pinned-dependencies/IDENTITY.json",JSON.stringify(identities,null,2));
+          NODE
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: pinned-snippet-dependency-source
+          path: evidence/pinned-dependencies/
+          if-no-files-found: error
+          retention-days: 7
