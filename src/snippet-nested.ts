@@ -93,7 +93,8 @@ function copyGroup(fields:NestedField[],doc:Text,group:string,editedId:number,b:
  const source=occurrences.find(f=>f.id===edited.id||descendant(edited,f,b))??occurrences[0],value=b.slice(doc,source.from,source.to),layout=subtree(source,index,b);
  const edits=occurrences.filter(f=>f.id!==source.id).map(root=>({root,from:root.from,to:root.to,insert:value,outputFrom:0})).sort((a,z)=>a.from-z.from||a.to-z.to||a.root.sourceOrder-z.root.sourceOrder);
  for(let i=0;i<edits.length;i++){
-  b.step();b.copy(value.length);if(!i)continue;const a=edits[i-1],z=edits[i];
+  b.step();if(edits[i].root.id===edited.id||descendant(edited,edits[i].root,b))throw new Refused();
+  b.copy(value.length);if(!i)continue;const a=edits[i-1],z=edits[i];
   if(z.from<a.to||z.from===z.to&&a.from===a.to&&z.from===a.from)throw new Refused();
  }
  const changes=ChangeSet.of(edits.map(({from,to,insert})=>({from,to,insert})),doc.length);let delta=0;
@@ -112,11 +113,16 @@ function copyGroup(fields:NestedField[],doc:Text,group:string,editedId:number,b:
  const output:NestedField[]=[];
  for(const f of fields){
   b.step();if(removed.has(f.id))continue;const replaced=replacements.get(f.id);if(replaced){output.push(replaced);continue;}
-  if(edits.some(e=>descendant(e.root,f,b)))output.push({...f,from:changes.mapPos(f.from,-1),to:changes.mapPos(f.to,1)});
-  else if(f.from===f.to){
-   let pos=changes.mapPos(f.from,-1);for(const e of edits){b.step();if(e.from===e.to&&e.from===f.from&&e.root.sourceOrder<f.sourceOrder)pos+=value.length;}
-   output.push({...f,from:pos,to:pos});
-  }else output.push({...f,from:changes.mapPos(f.from,1),to:changes.mapPos(f.to,-1)});
+  // Resolve coincident insertions by occurrence ownership, not global
+  // inclusive association: external empty mirrors must stay outside parents.
+  let from=changes.mapPos(f.from,-1),to=changes.mapPos(f.to,-1);
+  for(const e of edits){
+   b.step();if(e.from!==e.to)continue;
+   const preceding=e.root.sourceOrder<f.sourceOrder;
+   if(e.from===f.from&&preceding)from+=e.insert.length;
+   if(e.from===f.to&&(preceding||descendant(e.root,f,b)))to+=e.insert.length;
+  }
+  output.push({...f,from,to});
  }
  return {fields:output,changes};
 }
