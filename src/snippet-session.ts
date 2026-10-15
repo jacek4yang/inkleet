@@ -136,7 +136,7 @@ export function moveSnippetField(view:EditorView,direction:1|-1):boolean{
  const next=session.navigation[Math.max(0,index+direction)];
  if(!next){endSnippet(view);return true;}
  const field=session.fields.find(f=>f.group===next&&!f.derived)!;
- view.dispatch({selection:EditorSelection.single(field.from,field.final?field.from:field.to),effects:setSession.of(field.final?null:{...session,active:field.id,choicesOpen:!!field.choices?.length,choiceIndex:Math.max(0,field.choices?.indexOf(view.state.sliceDoc(field.from,field.to))??0)}),scrollIntoView:true});
+ view.dispatch({selection:EditorSelection.single(field.from,field.to),effects:setSession.of(field.final?null:{...session,active:field.id,choicesOpen:!!field.choices?.length,choiceIndex:Math.max(0,field.choices?.indexOf(view.state.sliceDoc(field.from,field.to))??0)}),scrollIntoView:true});
  return true;
 }
 type Edit={from:number;to:number;insert:string};
@@ -170,7 +170,7 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
  }
  const first=absolute.find(f=>f.group===result.navigation[0]&&!f.derived);
  const session=first&&!first.final?{owner:{},nested,dormant:false,revision:0,from:start,to:start+result.text.length,transforms:live.transforms,dirty:false,waiting:false,error:null,fields:absolute,navigation:[...result.navigation],active:first.id,choicesOpen:!!first.choices?.length,choiceIndex:0}:null;
- return {changes:edits,selection:EditorSelection.single(first?.from??start+result.text.length,first&&!first.final?first.to:first?.from??start+result.text.length),effects:setSession.of(session),annotations:isolateHistory.of("full"),userEvent:"input.complete",scrollIntoView:true};
+ return {changes:edits,selection:EditorSelection.single(first?.from??start+result.text.length,first?.to??start+result.text.length),effects:setSession.of(session),annotations:isolateHistory.of("full"),userEvent:"input.complete",scrollIntoView:true};
 }
 
 function choiceAllowed(session:Session,field:SnippetField,index:number):boolean{
@@ -315,7 +315,7 @@ export function snippetTransformCommit(state:EditorState,owner:object,revision:n
  const unchanged=state.doc.sliceString(previous.from,previous.to)===document.sliceString(current.from,current.to);
  const endpoint=(position:number)=>unchanged?current.from+position-previous.from:position===previous.from?current.from:position===previous.to?current.to:changes.mapPos(position,1);
  const settledSelection=inside?EditorSelection.single(endpoint(chosen.anchor),endpoint(chosen.head)):state.selection.map(changes);
- const selection=direction===0?settledSelection:EditorSelection.single(next?.from??session.from+result.text.length,next&&!next.final?next.to:next?.from??session.from+result.text.length);
+ const selection=direction===0?settledSelection:EditorSelection.single(next?.from??session.from+result.text.length,next?.to??session.from+result.text.length);
  return {changes,selection,effects:setSession.of(nextSession),annotations:isolateHistory.of("full"),userEvent:"input.snippet-transform",scrollIntoView:true};
 }
 const runtimes=new WeakMap<EditorView,SnippetTransformRuntime>();
