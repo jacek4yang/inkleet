@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {EditorState,StateEffect,StateField} from "@codemirror/state";
+import {EditorState,StateEffect,StateField,Transaction} from "@codemirror/state";
 import {history,undo,redo} from "@codemirror/commands";
 import {snippetSession,snippetSessionState,snippetInsertion,moveSnippetField,endSnippet} from "../src/snippet-session.ts";
 import {prepareSnippet} from "../src/snippet-prepare.ts";
@@ -76,4 +76,19 @@ test("unsupported or invalid activation is all-or-nothing",()=>{
  assert.ok(snippetInsertion(s,prepareSnippet(sample),0,5,[{from:0,to:0,insert:"a"}]));
  const unicode=EditorState.create({doc:"😀",extensions:[snippetSession]});
  assert.equal(snippetInsertion(unicode,prepareSnippet(sample),1,1),null);
+});
+
+test("remote formatter and inactive-field changes never trigger linked edits",()=>{
+ for(const spec of [
+ {changes:{from:1,insert:"!"},userEvent:"input.type",annotations:Transaction.remote.of(true)},
+ {changes:{from:1,insert:"!"},userEvent:"input.format"},
+ {changes:{from:5,insert:"!"},userEvent:"input.type"}
+ ]){
+  let s=start();s=s.update(spec).state;assert.equal(s.field(snippetSessionState),null);
+  assert.equal(s.doc.length,9,"only original edit is retained");
+ }
+});
+test("moving final selection outside the edited field safely ends linkage",()=>{
+ let s=start();s=s.update({changes:{from:1,insert:"!"},selection:{anchor:9},userEvent:"input.type"}).state;
+ assert.equal(s.field(snippetSessionState),null);assert.equal(s.doc.toString(),"a!bc-abc-");
 });

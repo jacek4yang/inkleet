@@ -1,4 +1,4 @@
-import {ChangeSet,EditorSelection,EditorState,StateEffect,StateField,type Extension,type TransactionSpec} from "@codemirror/state";
+import {ChangeSet,EditorSelection,EditorState,StateEffect,StateField,Transaction,type Extension,type TransactionSpec} from "@codemirror/state";
 import {EditorView,Decoration,type DecorationSet} from "@codemirror/view";
 import {isolateHistory} from "@codemirror/commands";
 import {validatePreparedSnippet} from "./snippet-validation.ts";
@@ -36,13 +36,14 @@ function EditorStateTransactionFilter():Extension{
  return EditorState.transactionFilter.of(tr=>{
   const session=tr.startState.field(snippetSessionState,false);
   if(!session||!tr.docChanged||tr.effects.some(effect=>effect.is(setSession)))return tr;
-  if(tr.isUserEvent("undo")||tr.isUserEvent("redo")||tr.newSelection.ranges.length!==1)return [tr,cancelSpec];
+  if(tr.annotation(Transaction.remote)||tr.isUserEvent("undo")||tr.isUserEvent("redo")||tr.newSelection.ranges.length!==1||tr.startState.selection.ranges.length!==1||!(tr.isUserEvent("input.type")||tr.isUserEvent("input.paste")||tr.isUserEvent("input.drop")||tr.isUserEvent("input.complete")||tr.isUserEvent("delete")))return [tr,cancelSpec];
   const changes:{from:number;to:number}[]=[];
   tr.changes.iterChangedRanges((from,to)=>{changes.push({from,to});});
   if(changes.length>32)return [tr,cancelSpec];
   const contains=(f:SnippetField)=>!f.final&&changes.every(c=>c.from>=f.from&&c.to<=f.to);
   const active=session.fields.find(f=>f.id===session.active);
-  const target=active&&contains(active)?active:session.fields.find(contains);
+  const before=tr.startState.selection.main;
+  const target=active&&contains(active)&&before.from>=active.from&&before.to<=active.to?active:null;
   if(!target)return [tr,cancelSpec];
   const targetIndex=session.fields.indexOf(target);
   const mapped=session.fields.map((f,index)=>{
@@ -72,7 +73,9 @@ function EditorStateTransactionFilter():Extension{
    return {...f,from:mirrorSet.mapPos(f.from,1),to:mirrorSet.mapPos(f.to,-1)};
   });
   if(fields.some(f=>f.from>f.to))return [tr,cancelSpec];
-  return [tr,{sequential:true,changes:mirrorSet,effects:setSession.of({...session,fields,active:target.id})}];
+  const selection=tr.newSelection.map(mirrorSet),finalTarget=fields.find(f=>f.id===target.id)!;
+  if(selection.main.from<finalTarget.from||selection.main.to>finalTarget.to)return [tr,cancelSpec];
+  return [tr,{sequential:true,changes:mirrorSet,selection,effects:setSession.of({...session,fields,active:target.id})}];
  });
 }
 export const snippetSession:Extension=[
