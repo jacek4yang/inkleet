@@ -2542,6 +2542,32 @@ try {
   assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.view().state.field(window.__snippetSessionTest.api.snippetSessionState)),null);
   await snippetCode.press("Control+y");
   assert.equal(await snippetCode.innerText(),"nameX = nameX; value","keyboard redo restores linked text without reactivating session");
+
+  await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest;
+    s.insertChoice=()=>{
+      const v=s.view(),d="$",prepared=s.api.prepareSnippet(d+"{1|one,two,three|} / "+d+"1; "+d+"{2:done}"+d+"0");
+      const spec=s.api.snippetInsertion(v.state,prepared,0,v.state.doc.length);if(!spec)throw Error("Choice refused");
+      v.dispatch(spec);v.focus();
+    };s.insertChoice();
+  });
+  const choiceList=snippetPage.getByRole("listbox",{name:"参数选项",exact:true});
+  await choiceList.waitFor();await snippetCode.press("ArrowDown");await snippetCode.press("Enter");
+  assert.equal(await snippetCode.innerText(),"two / two; done","choice Enter updates every mirror");
+  await choiceList.waitFor({state:"hidden"});
+  await snippetCode.press("Shift+Tab");
+  await choiceList.getByRole("option",{name:"two",exact:true}).getAttribute("aria-selected").then(value=>assert.equal(value,"true"));
+  await snippetCode.press("ArrowDown");await snippetCode.press("Tab");
+  assert.equal(await snippetCode.innerText(),"three / three; done","choice Tab commits then advances");
+  assert.equal(await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"done");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertChoice());
+  await choiceList.getByRole("option",{name:"two",exact:true}).click();
+  assert.equal(await snippetCode.innerText(),"two / two; done","pointer choice keeps editor ownership and mirrors");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insertChoice());
+  const staleChoice=await choiceList.getByRole("option",{name:"two",exact:true}).elementHandle();
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
+  await staleChoice.evaluate(button=>button.click());
+  assert.equal(await snippetCode.innerText(),"name = name; value","detached choice cannot change a replacement session");
   await snippetPage.screenshot({path:"evidence/snippet-flat-session.png"});
   await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Partial flat session only; nesting/choices/transforms and real IME/native acceptance remain unavailable.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
