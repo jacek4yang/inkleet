@@ -1,3 +1,4 @@
+import {canonicalJson,compareJson,invocationCount,type Expectation} from "./case-expectations";
 import "./case-results.css";
 import {parameterNames,seedCases,validateCases,inputParts,displayResult,compactCaseValue,type LocalCase} from "./test-cases";
 import { useResizablePanel } from "./resizable-panel";
@@ -7,15 +8,26 @@ import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { DebugPanel } from "./debug-panel";
 import type { Language } from "./domain";
-type Snapshot = { runId?:number;caseId?:string;caseName?:string;documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
+type Snapshot = { invocationCount?:number;expectation?:Expectation|null;runId?:number;caseId?:string;caseName?:string;documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "compiling", "running", "canceling"].includes(r.phase);
 // Primitive props preserve each rendered result across source edits and fresh IPC arrays.
-const CaseResult = memo(function CaseResult({raw,index,caseName,multiple,argumentNames}:{raw:string;index:number;caseName?:string;multiple:boolean;argumentNames:string}){
+const CaseResult = memo(function CaseResult({raw,index,caseName,multiple,argumentNames,expectationJson,comparisonBlocked}:{raw:string;index:number;caseName?:string;multiple:boolean;argumentNames:string;expectationJson:string;comparisonBlocked:string}){
   const value=useMemo(()=>displayResult(raw,index),[raw,index]);
   const names=useMemo(()=>JSON.parse(argumentNames) as string[],[argumentNames]);
   const argumentsAfter=value.argumentsAfterCall;
-  return <section className="case-result" title="本地结果不代表通过力扣判题"><header><span>{caseName??"用例 "+value.caseNumber}{caseName&&multiple?" · "+value.caseNumber:""}</span><span>{value.error?"执行失败":value.raw?"输出":argumentsAfter?.length?"调用后参数":"返回值"}</span></header>{value.error?<pre role="alert" className="error">{value.error}</pre>:argumentsAfter?.length?<>{value.value!=="null"&&<div className="case-argument"><span>返回值</span><pre className="local-result">{value.value}</pre></div>}{argumentsAfter.map((argument,i)=><div className="case-argument" key={i}><span>{names[i]??"参数 "+(i+1)}</span><pre className="local-result" aria-label={"调用后 "+(names[i]??"参数 "+(i+1))}>{argument.unavailable?"不可读取（值已移交）":argument.value}</pre></div>)}</>:<pre className="local-result">{value.value}</pre>}<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details></section>;
+  const expectation=useMemo(()=>JSON.parse(expectationJson) as Expectation|null,[expectationJson]);
+  const comparison=useMemo(()=>{
+    if(!expectation||value.error)return null;
+    if(comparisonBlocked)return {label:comparisonBlocked,mismatch:false};
+    if(multiple)return {label:"多组输入未比较",mismatch:false};
+    if(value.raw)return {label:"结果无法比较",mismatch:false};
+    const argument=expectation.target.kind==="argument"?value.argumentsAfterCall?.[expectation.target.index]:null;
+    if(expectation.target.kind==="argument"&&(!argument||argument.unavailable))return {label:"参数无法比较",mismatch:false};
+    try{canonicalJson(raw);const envelope=JSON.parse(raw);if(envelope.case!==1)return {label:"结果无法比较",mismatch:false};const mismatch=compareJson(argument?argument.value:value.value,expectation.value)==="mismatch";return {label:mismatch?"与预期不符":"符合预期",mismatch};}
+    catch{return {label:"结果无法比较",mismatch:false};}
+  },[raw,value,expectation,multiple,comparisonBlocked]);
+  return <section className="case-result" title="本地结果不代表通过力扣判题"><header><span>{caseName??"用例 "+value.caseNumber}{caseName&&multiple?" · "+value.caseNumber:""}</span><span>{value.error?"执行失败":comparison?comparison.label:value.raw?"输出":argumentsAfter?.length?"调用后参数":"返回值"}</span></header>{value.error?<pre role="alert" className="error">{value.error}</pre>:argumentsAfter?.length?<>{value.value!=="null"&&<div className="case-argument"><span>返回值</span><pre className="local-result">{value.value}</pre></div>}{argumentsAfter.map((argument,i)=><div className="case-argument" key={i}><span>{names[i]??"参数 "+(i+1)}</span><pre className="local-result" aria-label={"调用后 "+(names[i]??"参数 "+(i+1))}>{argument.unavailable?"不可读取（值已移交）":argument.value}</pre></div>)}</>:<pre className="local-result">{value.value}</pre>}{comparison?.mismatch&&expectation&&<div className="case-argument case-expected"><span>预期</span><pre>{expectation.value}</pre></div>}<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details></section>;
 });
 export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
   onReveal?:()=>void; hidden?:boolean; documentKey?: string; onSettings?: () => void; code: string; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
@@ -31,19 +43,24 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
   const [caseError,setCaseError]=useState(initial.error),[rename,setRename]=useState<string|null>(null);
   const currentCase=cases.find(item=>item.id===selected)??cases[0],input=currentCase.input;
   function updateCases(next:LocalCase[],id=selected){
-    if(next.length>64||next.reduce((n,c)=>n+c.input.length,0)>2*1024*1024){setCaseError("用例超过大小限制");return;}
+    if(next.length>64||next.reduce((n,c)=>n+c.input.length+(c.expectation?.value.length??0),0)>2*1024*1024){setCaseError("用例超过大小限制");return;}
     setCases(next);setSelected(id);
-    if(!initial.blocked)try{localStorage.setItem(storageKey,JSON.stringify({version:1,cases:next,selected:id}));setCaseError("");}catch{setCaseError("用例未保存，当前修改仍保留在内存");}
+    if(!initial.blocked)try{localStorage.setItem(storageKey,JSON.stringify({version:2,cases:next,selected:id}));setCaseError("");}catch{setCaseError("用例未保存，当前修改仍保留在内存");}
   }
   function setInput(value:string){updateCases(cases.map(item=>item.id===selected?{...item,input:value}:item));}
+  function setExpectation(value:string,target:Expectation["target"]=currentCase.expectation?.target??{kind:"return"}){
+    if(value.length>65536){setCaseError("预期结果超过大小限制");return;}
+    updateCases(cases.map(item=>item.id===selected?{...item,expectation:{mode:"exact-json",target,value}}:item));
+  }
   function chooseCase(id:string){setRename(null);updateCases(cases,id);}
-  function addCase(){const next={id:crypto.randomUUID(),name:"用例 "+(cases.length+1),input:currentCase.input};updateCases([...cases,next],next.id);}
+  function addCase(){const next={id:crypto.randomUUID(),name:"用例 "+(cases.length+1),input:currentCase.input,expectation:currentCase.expectation};updateCases([...cases,next],next.id);}
   function removeCase(){if(cases.length===1)return;const next=cases.filter(item=>item.id!==selected);updateCases(next,next[0].id);}
   const parts=useMemo(()=>inputParts(input,names),[input,names]);
   const [pane, setPane] = useState<"run" | "debug">("run");
   const [result, setResult] = useState<Result | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const resultNames=useMemo(()=>JSON.stringify(snapshot?.runId===result?.id&&snapshot?parameterNames(snapshot.metadata):[]),[snapshot?.runId,snapshot?.metadata,result?.id]);
+  const resultExpectation=useMemo(()=>JSON.stringify(snapshot?.runId===result?.id?snapshot?.expectation??null:null),[snapshot?.runId,snapshot?.expectation,result?.id]);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const guard = useRef(false), alive = useRef(true), sequence = useRef(0);
@@ -65,12 +82,15 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
   async function run() {
     if (guard.current || busy(result)) return;
     guard.current = true; setPending(true); setError("");
+    const expectation=currentCase.expectation?.value.trim()?currentCase.expectation:null;
     const next = { documentKey, code, input, metadata, title, language };
     try {
+      let groups=0;
+      if(expectation){canonicalJson(expectation.value);groups=invocationCount(input,names.length);}
       const id = await invoke<number>("start_local_run", { snapshot: next });
       if (alive.current) {
         ++sequence.current;
-        setSnapshot({...next,runId:id,caseId:currentCase.id,caseName:currentCase.name});
+        setSnapshot({...next,invocationCount:groups,expectation,runId:id,caseId:currentCase.id,caseName:currentCase.name});
         setResult({ id, phase: "queued", title, stdout: "", stderr: "", results: [], exitCode: null, timedOut: false, canceled: false, truncated: false, elapsedMs: 0, error: "" });
       }
     } catch (e) { if (alive.current) setError(String(e)); }
@@ -83,7 +103,8 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     catch (e) { if (alive.current) setError(String(e)); }
     finally { guard.current = false; }
   }
-  const stale = snapshot && (snapshot.caseId!==selected||snapshot.documentKey !== documentKey || snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title);
+  const stale = snapshot && snapshot.runId===result?.id && (snapshot.caseId!==selected||snapshot.documentKey !== documentKey || snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title || JSON.stringify(snapshot.expectation??null)!==JSON.stringify(currentCase.expectation?.value.trim()?currentCase.expectation:null));
+  const comparisonBlocked=!result||result.phase!=="finished"||result.exitCode!==0||result.canceled||result.timedOut||result.truncated||!!result.error?"运行未完成，未比较":snapshot?.invocationCount!==1?"多组输入未比较":result.results.length!==1?"结果不完整，未比较":"";
   return <section ref={resize.panel} style={resize.style} hidden={hidden} className="local-runner resizable-panel" aria-label="本地运行">
     {resize.handle}
     <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><div className="local-actions"><IconButton icon="settings" label="运行与调试设置" onClick={onSettings} /><IconButton icon="collapse" label="收起" onClick={onClose} /></div></header>
@@ -99,12 +120,13 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     <div className="case-inputs">
     {parts?parts.map((value,index)=><label key={index}><span>{names[index]}</span><textarea rows={2} aria-label={parts.length===1?"本地测试输入":"参数 "+names[index]} value={value} onChange={e=>{const next=[...parts];next[index]=compactCaseValue(e.target.value);setInput(next.join("\n"));}} spellCheck={false}/></label>):<label><span>输入</span><textarea aria-label="本地测试输入" value={input} onChange={e=>setInput(e.target.value)} spellCheck={false}/></label>}
     </div>
+    <details className="case-expectation"><summary>预期结果</summary><div className="case-inputs"><label><span>比较目标</span><select aria-label="预期结果比较目标" value={currentCase.expectation?.target.kind==="argument"?"argument:"+currentCase.expectation.target.index:"return"} onChange={e=>setExpectation(currentCase.expectation?.value??"",e.target.value==="return"?{kind:"return"}:{kind:"argument",index:Number(e.target.value.slice(9))})}><option value="return">返回值</option>{names.map((name,index)=><option key={index} value={"argument:"+index}>调用后 {name}</option>)}</select></label><label><span>预期</span><textarea rows={2} aria-label="预期结果" placeholder="未设置" value={currentCase.expectation?.value??""} onChange={e=>setExpectation(e.target.value)} spellCheck={false}/></label></div></details>
     <div className="local-actions"><IconButton icon="play" label="本地执行" title="本地执行 · 仅运行可信代码，非安全沙箱" data-action="local-execute" onClick={run} disabled={!isTauri() || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || pending || busy(result)} />{busy(result) && <IconButton icon="stop" label="停止" onClick={cancel} disabled={result?.phase === "canceling"} />}<span role="status" hidden={!result}>{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : result.phase === "compiling" ? "编译中…" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过时限，已终止" : result.phase === "error" || result.error ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
     {stale && <p className="cache-warning">结果已过期</p>}
     {!snapshot && result && <p className="muted">上次运行</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
     {result?.truncated && <p role="alert">输出达到上限，已截断并终止进程。</p>}
-    {result?.results.map((raw,index)=><CaseResult key={index} raw={raw} index={index} caseName={snapshot?.runId===result?.id?snapshot?.caseName:undefined} multiple={result.results.length>1} argumentNames={resultNames}/>)}
+    {result?.results.map((raw,index)=><CaseResult key={index} raw={raw} index={index} caseName={snapshot?.runId===result?.id?snapshot?.caseName:undefined} multiple={result.results.length>1} argumentNames={resultNames} expectationJson={resultExpectation} comparisonBlocked={comparisonBlocked}/>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
 
