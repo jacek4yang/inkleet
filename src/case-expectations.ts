@@ -8,7 +8,7 @@ export function validateExpectation(value:unknown):Expectation|null{
    (target.kind!=="return"&&(target.kind!=="argument"||!Number.isSafeInteger(target.index)||target.index<0||target.index>=32)))throw Error("预期结果记录无效");
  return {mode:"exact-json",target:target.kind==="return"?{kind:"return"}:{kind:"argument",index:target.index},value:e.value};
 }
-export function canonicalJson(text:string):string{
+function canonicalValues(text:string,multiple:boolean):string[]{
  if(text.length>1024*1024)throw Error("比较数据超过大小限制");
  let at=0,nodes=0;
  const space=()=>{while(at<text.length&&/[ \t\r\n]/.test(text[at]))at++;};
@@ -61,7 +61,16 @@ export function canonicalJson(text:string):string{
   if(c==="-"||(c>="0"&&c<="9"))return number();
   return fail();
  }
- const result=value(0);space();if(at!==text.length)return fail();return result;
+ const values=[value(0)];space();
+ if(multiple){while(at<text.length){values.push(value(0));space();}}
+ if(at!==text.length)return fail();return values;
+}
+export function canonicalJson(text:string):string{return canonicalValues(text,false)[0];}
+export function invocationCount(input:string,parameterCount:number):number{
+ if(!Number.isSafeInteger(parameterCount)||parameterCount<1||parameterCount>32)throw Error("函数参数信息不可用");
+ const values=canonicalValues(input,true).length;
+ if(values%parameterCount!==0||values/parameterCount>100)throw Error("用例参数数量不匹配或超过限制");
+ return values/parameterCount;
 }
 export function compareJson(actual:string,expected:string):"match"|"mismatch"{
  return canonicalJson(actual)===canonicalJson(expected)?"match":"mismatch";

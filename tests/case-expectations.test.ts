@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {canonicalJson,compareJson,validateExpectation} from "../src/case-expectations.ts";
+import {canonicalJson,compareJson,validateExpectation,invocationCount} from "../src/case-expectations.ts";
 test("exact JSON comparison preserves integers, structure and array order",()=>{
  assert.equal(compareJson("9007199254740992","9007199254740993"),"mismatch");
  assert.equal(compareJson('{"b":[9007199254740993],"a":"\\u0041"}','{"a":"A","b":[9007199254740993]}'),"match");
@@ -31,4 +31,13 @@ test("expectation record keeps null distinct from unset and validates targets",(
   assert.throws(()=>validateExpectation({...e,target}));
  }
  assert.throws(()=>validateExpectation({...e,value:"x".repeat(65537)}));
+});
+
+test("invocation count comes from submitted input, not produced result rows",()=>{
+ assert.equal(invocationCount("[1,2]\n[3,4]",1),2);
+ assert.equal(invocationCount('[1]\n2\n[3]\n4',2),2);
+ assert.equal(invocationCount('{"x":"a] b"}\ntrue',2),1);
+ assert.throws(()=>invocationCount("[1]",2));
+ assert.throws(()=>invocationCount("",1));
+ assert.throws(()=>invocationCount("[1]",0));
 });

@@ -1239,6 +1239,18 @@ try {
   await runPage.evaluate(()=>window.__runTest.pending[9]());
   await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:0,results:['{"case":1,"ok":true,"value":9007199254740993}']}));
   await runPanel.getByText("符合预期",{exact:true}).waitFor();
+  for(const patch of [{timedOut:true},{canceled:true},{truncated:true},{exitCode:1},{phase:"running"},{error:"failed after output"}]){
+    await runPage.evaluate(patch=>Object.assign(window.__runTest.result,patch),patch);
+    await runPanel.getByText("运行未完成，未比较",{exact:true}).waitFor();
+    assert.equal(await runPanel.getByText("符合预期",{exact:true}).count(),0);
+    await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:0,timedOut:false,canceled:false,truncated:false,error:""}));
+    await runPanel.getByText("符合预期",{exact:true}).waitFor();
+  }
+  await runPage.evaluate(()=>{window.__runTest.result.id+=1000;});
+  await runPanel.getByText("返回值",{exact:true}).waitFor();
+  assert.equal(await runPanel.getByText("符合预期",{exact:true}).count(),0,"foreign run cannot inherit expectation");
+  await runPage.evaluate(()=>{window.__runTest.result.id-=1000;});
+  await runPanel.getByText("符合预期",{exact:true}).waitFor();
   await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":1,"ok":true,"value":9007199254740992,"value":9007199254740993}'];});
   await runPanel.getByText("结果无法比较",{exact:true}).waitFor();
   await runPanel.getByRole("combobox",{name:"预期结果比较目标",exact:true}).selectOption("argument:0");
@@ -1252,6 +1264,16 @@ try {
   await runPanel.getByText("参数无法比较",{exact:true}).waitFor();
   const persistedExpectation=await runPage.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith("inkleet.test-cases.v1:")).map(k=>JSON.parse(localStorage.getItem(k))).some(r=>r.version===2&&r.cases.some(c=>c.expectation?.target.kind==="argument"&&c.expectation.value==="[3,2,1]")));
   assert.equal(persistedExpectation,true,"versioned case data persists explicit comparison policy");
+  await runPanel.getByRole("combobox",{name:"预期结果比较目标",exact:true}).selectOption("return");
+  await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("1");
+  await runPanel.getByRole("textbox",{name:"本地测试输入",exact:true}).fill("[1]\n[2]");
+  await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
+  await runPage.waitForFunction(()=>window.__runTest.starts.length===12);
+  await runPage.evaluate(()=>window.__runTest.pending[11]());
+  await runPage.evaluate(()=>Object.assign(window.__runTest.result,{phase:"finished",exitCode:1,timedOut:true,results:['{"case":1,"ok":true,"value":1}']}));
+  await runPanel.getByText("运行未完成，未比较",{exact:true}).waitFor();
+  await runPage.evaluate(()=>Object.assign(window.__runTest.result,{timedOut:false,exitCode:0}));
+  await runPanel.getByText("多组输入未比较",{exact:true}).waitFor();
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");

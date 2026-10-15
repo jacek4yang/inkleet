@@ -1,4 +1,4 @@
-import {canonicalJson,compareJson,type Expectation} from "./case-expectations";
+import {canonicalJson,compareJson,invocationCount,type Expectation} from "./case-expectations";
 import "./case-results.css";
 import {parameterNames,seedCases,validateCases,inputParts,displayResult,compactCaseValue,type LocalCase} from "./test-cases";
 import { useResizablePanel } from "./resizable-panel";
@@ -8,24 +8,25 @@ import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { DebugPanel } from "./debug-panel";
 import type { Language } from "./domain";
-type Snapshot = { expectation?:Expectation|null;runId?:number;caseId?:string;caseName?:string;documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
+type Snapshot = { invocationCount?:number;expectation?:Expectation|null;runId?:number;caseId?:string;caseName?:string;documentKey?: string; code: string; input: string; metadata: string; title: string; language: Language };
 type Result = { id: number; phase: string; title: string; stdout: string; stderr: string; results: string[]; exitCode: number | null; timedOut: boolean; canceled: boolean; truncated: boolean; elapsedMs: number; error: string };
 const busy = (r: Result | null) => !!r && ["queued", "compiling", "running", "canceling"].includes(r.phase);
 // Primitive props preserve each rendered result across source edits and fresh IPC arrays.
-const CaseResult = memo(function CaseResult({raw,index,caseName,multiple,argumentNames,expectationJson}:{raw:string;index:number;caseName?:string;multiple:boolean;argumentNames:string;expectationJson:string}){
+const CaseResult = memo(function CaseResult({raw,index,caseName,multiple,argumentNames,expectationJson,comparisonBlocked}:{raw:string;index:number;caseName?:string;multiple:boolean;argumentNames:string;expectationJson:string;comparisonBlocked:string}){
   const value=useMemo(()=>displayResult(raw,index),[raw,index]);
   const names=useMemo(()=>JSON.parse(argumentNames) as string[],[argumentNames]);
   const argumentsAfter=value.argumentsAfterCall;
   const expectation=useMemo(()=>JSON.parse(expectationJson) as Expectation|null,[expectationJson]);
   const comparison=useMemo(()=>{
     if(!expectation||value.error)return null;
+    if(comparisonBlocked)return {label:comparisonBlocked,mismatch:false};
     if(multiple)return {label:"多组输入未比较",mismatch:false};
     if(value.raw)return {label:"结果无法比较",mismatch:false};
     const argument=expectation.target.kind==="argument"?value.argumentsAfterCall?.[expectation.target.index]:null;
     if(expectation.target.kind==="argument"&&(!argument||argument.unavailable))return {label:"参数无法比较",mismatch:false};
     try{canonicalJson(raw);const envelope=JSON.parse(raw);if(envelope.case!==1)return {label:"结果无法比较",mismatch:false};const mismatch=compareJson(argument?argument.value:value.value,expectation.value)==="mismatch";return {label:mismatch?"与预期不符":"符合预期",mismatch};}
     catch{return {label:"结果无法比较",mismatch:false};}
-  },[raw,value,expectation,multiple]);
+  },[raw,value,expectation,multiple,comparisonBlocked]);
   return <section className="case-result" title="本地结果不代表通过力扣判题"><header><span>{caseName??"用例 "+value.caseNumber}{caseName&&multiple?" · "+value.caseNumber:""}</span><span>{value.error?"执行失败":comparison?comparison.label:value.raw?"输出":argumentsAfter?.length?"调用后参数":"返回值"}</span></header>{value.error?<pre role="alert" className="error">{value.error}</pre>:argumentsAfter?.length?<>{value.value!=="null"&&<div className="case-argument"><span>返回值</span><pre className="local-result">{value.value}</pre></div>}{argumentsAfter.map((argument,i)=><div className="case-argument" key={i}><span>{names[i]??"参数 "+(i+1)}</span><pre className="local-result" aria-label={"调用后 "+(names[i]??"参数 "+(i+1))}>{argument.unavailable?"不可读取（值已移交）":argument.value}</pre></div>)}</>:<pre className="local-result">{value.value}</pre>}{comparison?.mismatch&&expectation&&<div className="case-argument case-expected"><span>预期</span><pre>{expectation.value}</pre></div>}<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details></section>;
 });
 export function LocalRunner({ documentKey, code, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onSettings, onReveal, hidden = false }: {
@@ -84,11 +85,12 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     const expectation=currentCase.expectation?.value.trim()?currentCase.expectation:null;
     const next = { documentKey, code, input, metadata, title, language };
     try {
-      if(expectation)canonicalJson(expectation.value);
+      let groups=0;
+      if(expectation){canonicalJson(expectation.value);groups=invocationCount(input,names.length);}
       const id = await invoke<number>("start_local_run", { snapshot: next });
       if (alive.current) {
         ++sequence.current;
-        setSnapshot({...next,expectation,runId:id,caseId:currentCase.id,caseName:currentCase.name});
+        setSnapshot({...next,invocationCount:groups,expectation,runId:id,caseId:currentCase.id,caseName:currentCase.name});
         setResult({ id, phase: "queued", title, stdout: "", stderr: "", results: [], exitCode: null, timedOut: false, canceled: false, truncated: false, elapsedMs: 0, error: "" });
       }
     } catch (e) { if (alive.current) setError(String(e)); }
@@ -101,7 +103,8 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     catch (e) { if (alive.current) setError(String(e)); }
     finally { guard.current = false; }
   }
-  const stale = snapshot && (snapshot.caseId!==selected||snapshot.documentKey !== documentKey || snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title || JSON.stringify(snapshot.expectation??null)!==JSON.stringify(currentCase.expectation?.value.trim()?currentCase.expectation:null));
+  const stale = snapshot && snapshot.runId===result?.id && (snapshot.caseId!==selected||snapshot.documentKey !== documentKey || snapshot.code !== code || snapshot.input !== input || snapshot.language !== language || snapshot.metadata !== metadata || snapshot.title !== title || JSON.stringify(snapshot.expectation??null)!==JSON.stringify(currentCase.expectation?.value.trim()?currentCase.expectation:null));
+  const comparisonBlocked=!result||result.phase!=="finished"||result.exitCode!==0||result.canceled||result.timedOut||result.truncated||!!result.error?"运行未完成，未比较":snapshot?.invocationCount!==1?"多组输入未比较":result.results.length!==1?"结果不完整，未比较":"";
   return <section ref={resize.panel} style={resize.style} hidden={hidden} className="local-runner resizable-panel" aria-label="本地运行">
     {resize.handle}
     <header><div className="local-actions"><button data-local-tab="run" aria-pressed={pane === "run"} onClick={() => setPane("run")}>运行结果</button><button data-local-tab="debug" disabled={!["python3", "golang", "cpp", "c", "rust", "java"].includes(language)} title={["python3", "golang", "cpp", "c", "rust", "java"].includes(language) ? "断点调试" : "此语言的界面调试尚未接入"} aria-pressed={pane === "debug"} onClick={() => setPane("debug")}>调试</button></div><div className="local-actions"><IconButton icon="settings" label="运行与调试设置" onClick={onSettings} /><IconButton icon="collapse" label="收起" onClick={onClose} /></div></header>
@@ -123,7 +126,7 @@ export function LocalRunner({ documentKey, code, language, title, metadata, samp
     {!snapshot && result && <p className="muted">上次运行</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
     {result?.truncated && <p role="alert">输出达到上限，已截断并终止进程。</p>}
-    {result?.results.map((raw,index)=><CaseResult key={index} raw={raw} index={index} caseName={snapshot?.runId===result?.id?snapshot?.caseName:undefined} multiple={result.results.length>1} argumentNames={resultNames} expectationJson={resultExpectation}/>)}
+    {result?.results.map((raw,index)=><CaseResult key={index} raw={raw} index={index} caseName={snapshot?.runId===result?.id?snapshot?.caseName:undefined} multiple={result.results.length>1} argumentNames={resultNames} expectationJson={resultExpectation} comparisonBlocked={comparisonBlocked}/>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
 
