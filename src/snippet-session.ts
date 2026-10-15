@@ -222,7 +222,14 @@ export function chooseSnippetValue(view:EditorView,index:number,advance=false):b
   view.dispatch({selection:{anchor:field.to},effects:setSession.of({...session,choicesOpen:false})});
   if(advance)moveSnippetField(view,1);return true;
  }
- view.dispatch({changes:{from:field.from,to:field.to,insert},selection:{anchor:field.from+insert.length},annotations:isolateHistory.of("full"),userEvent:"input.complete"});
+ const spec:TransactionSpec={changes:{from:field.from,to:field.to,insert},selection:{anchor:field.from+insert.length},annotations:isolateHistory.of("full"),userEvent:"input.complete"};
+ if(session.nested){
+  // Explicit choices are all-or-nothing. A speculative rejected mirror plan
+  // must not publish its primary edit or an undo event.
+  const transaction=view.state.update(spec);
+  if(transaction.state.field(snippetSessionState,false)?.owner!==session.owner)return false;
+  view.dispatch(transaction);
+ }else view.dispatch(spec);
  if(advance)moveSnippetField(view,1);return true;
 }
 export function acceptSnippetChoice(view:EditorView,advance=false):boolean{

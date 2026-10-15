@@ -283,3 +283,12 @@ test("nested derived sessions remain refused after worker evaluation",()=>{
  const prepared=evaluateSnippetTransforms(prepareSnippet(source));
  assert.equal(snippetInsertion(s,prepared,0,0),null);
 });
+
+test("nested explicit choice overflow leaves document and session untouched",()=>{
+ let s=start(S+"{1:"+S+"{2|x,"+"q".repeat(40000)+"|}-"+S+"2} / "+S+"1");
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=spec.state??s.update(spec).state;}};
+ moveSnippetField(view as any,1);
+ const before=s,owner=s.field(snippetSessionState)!.owner;
+ assert.equal(chooseSnippetValue(view as any,1,false),false);
+ assert.equal(s,before);assert.equal(s.doc.toString(),"x-x / x-x");assert.equal(s.field(snippetSessionState)!.owner,owner);
+});
