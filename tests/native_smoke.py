@@ -363,6 +363,9 @@ def native_snippet_case(group,code):
             assert selected["text"]==selections[0],group+" exact first placeholder selection"
             assert response["request"]["line"]==0,group+" editable source position excludes virtual scaffold"
         assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
+        def record_navigation(label):
+            observation.setdefault("navigation",[]).append({"label":label,"source":source_text(code),"selection":snippet_selection()})
+            persist_observations()
         if phase=="history":
             subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
             wait_for(lambda:source_text(code)==source,group+" one undo removes the entire accepted snippet")
@@ -376,15 +379,21 @@ def native_snippet_case(group,code):
                 if index:
                     subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
                     wait_for(lambda:snippet_selection()["text"]==selections[index],group+" next argument selection")
+                    record_navigation("next")
                     subprocess.run(["xdotool","key","--clearmodifiers","shift+Tab"],check=True)
                     wait_for(lambda:snippet_selection()["text"]==replacements[index-1],group+" previous edited argument selection")
+                    record_navigation("previous")
                     subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
                     wait_for(lambda:snippet_selection()["text"]==selections[index],group+" restored next argument selection")
+                    record_navigation("next-restored")
                 subprocess.run(["xdotool","type","--clearmodifiers","--delay","25",replacement],check=True)
                 def argument_step_matches():
-                    observation["argumentStep"]={"index":index,"source":source_text(code),"selection":snippet_selection()}
+                    step={"index":index,"source":source_text(code),"selection":snippet_selection()}
+                    steps=observation.setdefault("argumentSteps",[])
+                    if len(steps)==index: steps.append(step)
+                    else: steps[index]=step
                     persist_observations()
-                    return observation["argumentStep"]["source"]==argument_sources[index]
+                    return step["source"]==argument_sources[index]
                 wait_for(argument_step_matches,group+" exact argument step source")
             def argument_matches():
                 observation["afterArgument"]=source_text(code)
