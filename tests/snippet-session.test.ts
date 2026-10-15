@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {EditorState,StateEffect,StateField,Transaction} from "@codemirror/state";
 import {history,undo,redo} from "@codemirror/commands";
-import {snippetSession,snippetSessionState,snippetInsertion,moveSnippetField,endSnippet} from "../src/snippet-session.ts";
+import {snippetSession,snippetSessionState,snippetInsertion,moveSnippetField,endSnippet,moveSnippetChoice,chooseSnippetValue,snippetChoiceOpen} from "../src/snippet-session.ts";
 import {prepareSnippet} from "../src/snippet-prepare.ts";
 const S="$",sample=S+"{1:abc}-"+S+"1-"+S+"0";
 function start(source=sample,doc=""){
@@ -68,7 +68,7 @@ test("unrelated transaction effects survive mirror propagation",()=>{
 });
 test("unsupported or invalid activation is all-or-nothing",()=>{
  const s=EditorState.create({doc:"token",extensions:[snippetSession]});
- for(const source of [S+"{1:"+S+"{2:x}}",S+"{1|a,b|}",S+"{1/a/b/}",S+"1"+S+"1"]){
+ for(const source of [S+"{1:"+S+"{2:x}}",S+"{1/a/b/}",S+"1"+S+"1"]){
   assert.equal(snippetInsertion(s,prepareSnippet(source),0,5),null,source);
  }
  assert.equal(snippetInsertion(s,prepareSnippet(sample),0,5,[{from:2,to:2,insert:"bad"}]),null);
@@ -107,4 +107,42 @@ test("composed edits intersecting new snippet fields invalidate session effects"
  let s=EditorState.create({extensions:[snippetSession]});
  s=s.update(snippetInsertion(s,prepareSnippet(sample),0,0)!,{sequential:true,changes:{from:1,insert:"!"}}).state;
  assert.equal(s.doc.toString(),"a!bc-abc-");assert.equal(s.field(snippetSessionState),null);
+});
+
+test("choice keyboard state and selection update mirrors atomically",()=>{
+ let s=start(S+"{1|one,two,three|} / "+S+"1; "+S+"{2:done}"+S+"0");
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(snippetChoiceOpen(view as any),true);
+ assert.equal(moveSnippetChoice(view as any,1),true);assert.equal(s.field(snippetSessionState)!.choiceIndex,1);
+ assert.equal(chooseSnippetValue(view as any,1),true);assert.equal(s.doc.toString(),"two / two; done");assert.equal(snippetChoiceOpen(view as any),false);
+ assert.equal(moveSnippetField(view as any,-1),true);assert.equal(s.field(snippetSessionState)!.choiceIndex,1);
+ assert.equal(chooseSnippetValue(view as any,2,true),true);assert.equal(s.doc.toString(),"three / three; done");
+ assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"done");
+ const target={state:s,dispatch:(tr:any)=>{s=tr.state;}};assert.equal(undo(target as any),true);
+ assert.equal(s.doc.toString(),"two / two; done","one undo reverses exactly the last choice and all mirrors");
+});
+test("choice values are literal and never reparsed as snippet source",()=>{
+ let s=start(S+"{1|one,"+S+"{99}|} / "+S+"1");
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(chooseSnippetValue(view as any,1),true);assert.equal(s.doc.toString(),S+"{99} / "+S+"{99}");
+ assert.equal(s.field(snippetSessionState)!.fields.some(f=>f.group==="t:99"),false);
+});
+
+test("oversized explicit choices are refused before any text or history change",()=>{
+ const prepared=prepareSnippet(S+"{1:a} "+Array(17).fill(S+"1").join(" "));
+ prepared.fields[0].choices=["a","x".repeat(65536)];
+ let s=EditorState.create({extensions:[history(),snippetSession]});
+ s=s.update(snippetInsertion(s,prepared,0,0)!).state;
+ const before=s,view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(chooseSnippetValue(view as any,1),false);assert.equal(s,before);
+ assert.equal(moveSnippetChoice(view as any,1),true);assert.equal(s.field(snippetSessionState)!.choiceIndex,0,"keyboard skips unavailable large choices");
+});
+
+test("same-value empty choices close picker without creating a text undo step",()=>{
+ let s=start(S+"{1|,x|} / "+S+"1; "+S+"{2:z}"+S+"0");
+ const before=s.doc.toString(),view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(chooseSnippetValue(view as any,0),true);assert.equal(s.doc.toString(),before);assert.equal(snippetChoiceOpen(view as any),false);
+ const target={state:s,dispatch:(tr:any)=>{s=tr.state;}};assert.equal(undo(target as any),true);assert.equal(s.doc.toString(),"");
+ s=start(S+"{1|,x|} / "+S+"1; "+S+"{2:z}"+S+"0");assert.equal(chooseSnippetValue(view as any,0,true),true);
+ assert.equal(s.sliceDoc(s.selection.main.from,s.selection.main.to),"z");
 });

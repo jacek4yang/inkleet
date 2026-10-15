@@ -109,3 +109,9 @@ test("empty transform conditional branches are retained",()=>{
   const r=prepareSnippet(S+"{1/(a)/"+replacement+"/}");assert.equal(r.transforms[0].format.length,1);
  }
 });
+
+test("empty literal choice options are retained explicitly",()=>{
+ const r=prepareSnippet(S+"{1|,x,|} / "+S+"1");
+ assert.equal(r.text," / ");assert.deepEqual(r.fields[0].choices,["","x",""]);
+ assert.throws(()=>prepareSnippet(S+"{1|"),/Malformed/);
+});

@@ -1,10 +1,10 @@
 import {ChangeSet,EditorSelection,EditorState,StateEffect,StateField,Transaction,type Extension,type TransactionSpec} from "@codemirror/state";
-import {EditorView,Decoration,type DecorationSet} from "@codemirror/view";
+import {EditorView,Decoration,showTooltip,type Tooltip,type DecorationSet} from "@codemirror/view";
 import {isolateHistory} from "@codemirror/commands";
 import {validatePreparedSnippet} from "./snippet-validation.ts";
 import {snippetLimits} from "./snippet-budget.ts";
 import type {PreparedSnippet,SnippetField} from "./snippet-prepare.ts";
-type Session={fields:SnippetField[];navigation:string[];active:number};
+type Session={owner:object;fields:SnippetField[];navigation:string[];active:number;choicesOpen:boolean;choiceIndex:number};
 const setSession=StateEffect.define<Session|null>({map:(value,mapping)=>{
  if(!value)return null;
  if(mapping.empty)return value;
@@ -35,11 +35,11 @@ export const snippetSessionState=StateField.define<Session|null>({
    const current=value.fields.find(f=>f.id===value.active);
    if(current&&selection.main.from>=current.from&&selection.main.to<=current.to)return value;
    const field=value.fields.find(f=>!f.final&&selection.main.from>=f.from&&selection.main.to<=f.to);
-   return field?{...value,active:field.id}:null;
+   return field?{...value,active:field.id,choicesOpen:!!field.choices?.length,choiceIndex:Math.max(0,field.choices?.indexOf(tr.newDoc.sliceString(field.from,field.to))??0)}:null;
   }
   return value;
  },
- provide:field=>EditorView.decorations.from(field,decorations)
+ provide:field=>[EditorView.decorations.from(field,decorations),showTooltip.from(field,choiceTooltip)]
 });
 const cancelSpec={effects:setSession.of(null)};
 const filter=EditorStateTransactionFilter();
@@ -90,14 +90,17 @@ function EditorStateTransactionFilter():Extension{
   if(fields.some(f=>f.from>f.to))return [tr,cancelSpec];
   const selection=tr.newSelection.map(mirrorSet),finalTarget=fields.find(f=>f.id===target.id)!;
   if(selection.main.from<finalTarget.from||selection.main.to>finalTarget.to)return [tr,cancelSpec];
-  return [tr,{sequential:true,changes:mirrorSet,selection,effects:setSession.of({...session,fields,active:target.id})}];
+  return [tr,{sequential:true,changes:mirrorSet,selection,effects:setSession.of({...session,fields,active:target.id,choicesOpen:false})}];
  });
 }
 export const snippetSession:Extension=[
  snippetSessionState,filter,
  EditorView.baseTheme({
   ".cm-snippet-field":{borderBottom:"1px dotted currentColor"},
-  ".cm-snippet-field-active":{backgroundColor:"var(--active-line, #80808022)",borderBottomStyle:"solid"}
+  ".cm-snippet-field-active":{backgroundColor:"var(--active-line, #80808022)",borderBottomStyle:"solid"},
+  ".cm-snippet-choices":{maxHeight:"240px",maxWidth:"420px",overflowY:"auto",padding:"3px"},
+  ".cm-snippet-choices button":{display:"block",width:"100%",border:"0",padding:"4px 8px",background:"transparent",color:"inherit",font:"inherit",textAlign:"left",whiteSpace:"pre"},
+  ".cm-snippet-choices button[aria-selected=true]":{backgroundColor:"var(--selection, #80808033)"}
  })
 ];
 export function endSnippet(view:EditorView):boolean{
@@ -110,7 +113,7 @@ export function moveSnippetField(view:EditorView,direction:1|-1):boolean{
  const index=session.navigation.indexOf(active.group),next=session.navigation[Math.max(0,index+direction)];
  if(!next){endSnippet(view);return true;}
  const field=session.fields.find(f=>f.group===next)!;
- view.dispatch({selection:EditorSelection.single(field.from,field.final?field.from:field.to),effects:setSession.of(field.final?null:{...session,active:field.id}),scrollIntoView:true});
+ view.dispatch({selection:EditorSelection.single(field.from,field.final?field.from:field.to),effects:setSession.of(field.final?null:{...session,active:field.id,choicesOpen:!!field.choices?.length,choiceIndex:Math.max(0,field.choices?.indexOf(view.state.sliceDoc(field.from,field.to))??0)}),scrollIntoView:true});
  return true;
 }
 type Edit={from:number;to:number;insert:string};
@@ -118,7 +121,7 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
  let result:PreparedSnippet;try{result=validatePreparedSnippet(prepared);}catch{return null;}
  // Intermediate flat-session checkpoint. Unsupported structures never insert
  // partially. Production LSP advertisement stays disabled until all gates pass.
- if(result.needsTransformEvaluation||result.fields.some(f=>f.parent!==null||f.derived||f.choices!==undefined)||state.selection.ranges.length!==1)return null;
+ if(result.needsTransformEvaluation||result.fields.some(f=>f.parent!==null||f.derived)||state.selection.ranges.length!==1)return null;
  const fields=result.fields;
  const defaults=new Map<string,string>();
  for(const f of fields){if(f.final)continue;const value=result.text.slice(f.from,f.to);if(defaults.has(f.group)&&defaults.get(f.group)!==value)return null;defaults.set(f.group,value);}
@@ -137,6 +140,64 @@ export function snippetInsertion(state:EditorState,prepared:PreparedSnippet,from
  const start=from+edits.filter(e=>e!==main&&(e.from<from||e.from===from&&e.to===e.from)).reduce((n,e)=>n+e.insert.length-(e.to-e.from),0);
  const absolute=fields.map(f=>({...f,from:f.from+start,to:f.to+start,choices:f.choices?[...f.choices]:undefined}));
  const first=absolute.find(f=>f.group===result.navigation[0]);
- const session=first&&!first.final?{fields:absolute,navigation:[...result.navigation],active:first.id}:null;
+ const session=first&&!first.final?{owner:{},fields:absolute,navigation:[...result.navigation],active:first.id,choicesOpen:!!first.choices?.length,choiceIndex:0}:null;
  return {changes:edits,selection:EditorSelection.single(first?.from??start+result.text.length,first&&!first.final?first.to:first?.from??start+result.text.length),effects:setSession.of(session),annotations:isolateHistory.of("full"),userEvent:"input.complete",scrollIntoView:true};
+}
+
+function choiceAllowed(session:Session,field:SnippetField,index:number):boolean{
+ const text=field.choices?.[index];return typeof text==="string"&&text.length<=snippetLimits.output&&text.length*session.fields.filter(f=>f.group===field.group).length<=snippetLimits.copies;
+}
+function choiceTooltip(session:Session|null):Tooltip|null{
+ const field=session?.fields.find(f=>f.id===session.active);
+ if(!session?.choicesOpen||!field?.choices?.length)return null;
+ const owner=session.owner,active=field.id,index=session.choiceIndex,options=field.choices;
+ return {pos:field.from,above:false,create:view=>{
+  const dom=document.createElement("div");dom.className="cm-snippet-choices";dom.setAttribute("role","listbox");dom.setAttribute("aria-label","参数选项");
+  const buttons=options.map((text,i)=>{
+   const button=document.createElement("button");button.type="button";button.tabIndex=-1;button.setAttribute("role","option");button.setAttribute("aria-selected",String(i===index));
+   button.disabled=!choiceAllowed(session,field,i);
+   button.textContent=text?text.slice(0,200)+(text.length>200?"…":""):"(空)";button.title=button.disabled?"超出补全大小限制":text.slice(0,1000);
+   button.addEventListener("mousedown",event=>event.preventDefault());
+   button.addEventListener("click",()=>{
+    const current=view.state.field(snippetSessionState,false);
+    if(current?.owner!==owner||current.active!==active)return;
+    chooseSnippetValue(view,i,false);
+   });
+   dom.appendChild(button);return button;
+  });
+  return {dom,mount:()=>{
+   const selected=buttons[index];if(!selected)return;
+   const top=selected.offsetTop,bottom=top+selected.offsetHeight;
+   if(top<dom.scrollTop)dom.scrollTop=top;else if(bottom>dom.scrollTop+dom.clientHeight)dom.scrollTop=Math.max(0,bottom-dom.clientHeight);
+  }};
+ }};
+}
+export function snippetChoiceOpen(view:EditorView):boolean{
+ const session=view.state.field(snippetSessionState,false);
+ return !!session?.choicesOpen&&!view.composing;
+}
+export function moveSnippetChoice(view:EditorView,direction:1|-1):boolean{
+ const session=view.state.field(snippetSessionState,false),field=session?.fields.find(f=>f.id===session.active);
+ if(!session?.choicesOpen||!field?.choices?.length||view.composing)return false;
+ let choiceIndex=session.choiceIndex;
+ for(let count=0;count<field.choices.length;count++){
+  choiceIndex=(choiceIndex+direction+field.choices.length)%field.choices.length;
+  if(choiceAllowed(session,field,choiceIndex)){view.dispatch({effects:setSession.of({...session,choiceIndex})});return true;}
+ }
+ return true;
+}
+export function chooseSnippetValue(view:EditorView,index:number,advance=false):boolean{
+ const session=view.state.field(snippetSessionState,false),field=session?.fields.find(f=>f.id===session.active);
+ if(!session?.choicesOpen||!field?.choices||!Number.isInteger(index)||index<0||index>=field.choices.length||view.composing)return false;
+ if(!choiceAllowed(session,field,index))return false;
+ const insert=field.choices[index];
+ if(insert===view.state.sliceDoc(field.from,field.to)){
+  view.dispatch({selection:{anchor:field.to},effects:setSession.of({...session,choicesOpen:false})});
+  if(advance)moveSnippetField(view,1);return true;
+ }
+ view.dispatch({changes:{from:field.from,to:field.to,insert},selection:{anchor:field.from+insert.length},annotations:isolateHistory.of("full"),userEvent:"input.complete"});
+ if(advance)moveSnippetField(view,1);return true;
+}
+export function acceptSnippetChoice(view:EditorView,advance=false):boolean{
+ const session=view.state.field(snippetSessionState,false);if(!session?.choicesOpen||view.composing)return false;chooseSnippetValue(view,session.choiceIndex,advance);return true;
 }
