@@ -90,14 +90,14 @@ test("nonisomorphic duplicate groups and dependency cycles are refused",()=>{
 });
 
 test("ancestor boundaries do not absorb external empty mirror insertions",()=>{
- for(const [source,expected] of [
-  [D+"{1:"+D+"{2:}A}"+D+"1"+D+"2","xAxAx"],
-  [D+"2"+D+"{1:"+D+"{2:}A}"+D+"1","xxAxA"]
+ for(const [source,expected,later] of [
+  [D+"{1:"+D+"{2:}A}"+D+"1"+D+"2","xAxAx",false],
+  [D+"2"+D+"{1:A"+D+"{2:}}"+D+"1","xAxAx",true]
  ]){
-  const f=fixture(source),child=f.fields.find(x=>x.group==="t:2"&&x.parent!==null)!;
+  const f=fixture(source as string),children=f.fields.filter(x=>x.group==="t:2"&&x.parent!==null),child=children[later?children.length-1:0];
   const next=apply(f,child.id,child.from,child.to,"x");
   assert.equal(next.state.doc.toString(),expected);
-  for(const parent of next.fields.filter(x=>x.group==="t:1"))assert.equal(next.state.doc.sliceString(parent.from,parent.to),"xA");
+  for(const parent of next.fields.filter(x=>x.group==="t:1"))assert.equal(next.state.doc.sliceString(parent.from,parent.to),later?"Ax":"xA");
   assert.equal(next.state.selection.main.head,next.fields.find(x=>x.id===child.id)!.to);
  }
 });
@@ -106,4 +106,9 @@ test("repeated children keep all four mirrors and occurrence paths",()=>{
  const next=apply(f,child.id,child.from,child.to,"Q");
  assert.equal(next.state.doc.toString(),"Q-Q / Q-Q");
  assert.deepEqual(next.fields.map(x=>[x.id,x.originPath]),f.fields.map(x=>[x.id,x.originPath]));
+});
+
+test("coincident same-group empty activation stays explicitly unsupported",()=>{
+ const prepared=prepareSnippet(D+"2"+D+"{1:"+D+"{2:}A}"+D+"1"),state=EditorState.create({doc:prepared.text});
+ assert.equal(initializeNestedFields(prepared.fields,state.doc),null);
 });
