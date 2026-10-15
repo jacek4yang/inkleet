@@ -65,7 +65,7 @@ test("mode defaults to asIs and explicit mode2 uses only indentation before curs
  const layout=layoutSnippet(prepared,state,2,2);assert.equal(layout.indent,"\t\t");assert.equal(layout.prepared.text,"call(x)\n\t\t\tx\n\t\t");
  for(const f of layout.prepared.fields.filter(f=>f.group==="t:1"))assert.equal(layout.prepared.text.slice(f.from,f.to),"x");
  assert.equal(layout.prepared.fields.find(f=>f.final)!.from,layout.prepared.text.length);
- assert.throws(()=>layoutSnippet(layout as any,state,2,2),/Invalid prepared snippet/,"layout wrapper cannot be accidentally reapplied as raw DTO");
+ assert.throws(()=>layoutSnippet(layout as any,state,2,2),/Invalid prepared snippet/,"layout wrapper and raw DTO have distinct shapes");
 });
 test("mode2 after code preserves relative whitespace and blank trailing lines",()=>{
  const state=EditorState.create({doc:"  let value"}),layout=layoutSnippet(prepareSnippet("a\r\n\r\n  b\r"+D+"0"),state,11,2);
@@ -94,4 +94,15 @@ test("laid out snippet plus literal import remains one atomic edit",()=>{
  const spec=snippetInsertion(s,layout.prepared,2,7,[{from:0,to:0,insert:"use x;\n"}]);assert.ok(spec);s=s.update(spec).state;
  assert.equal(s.doc.toString(),"use x;\n  f(x)\n  ");
  const target={get state(){return s;},dispatch:(tr:any)=>{s=tr.state;}};assert.equal(undo(target as any),true);assert.equal(s.doc.toString(),"  token");
+});
+
+test("explicit asIs equals omission and mode2 with no base indent preserves text",()=>{
+ const state=EditorState.create({doc:"code"}),prepared=prepareSnippet("a\n  "+D+"{1:b}"+D+"0");
+ assert.deepEqual(layoutSnippet(prepared,state,4,1),layoutSnippet(prepared,state,4));
+ assert.equal(layoutSnippet(prepared,state,4,2).prepared.text,prepared.text);
+});
+test("layout rejects split surrogate cursor and overlong indentation context",()=>{
+ assert.throws(()=>layoutSnippet(prepareSnippet("x"),EditorState.create({doc:"😀"}),1,2),/UTF16 boundary/);
+ const state=EditorState.create({doc:" ".repeat(65537)});
+ assert.throws(()=>layoutSnippet(prepareSnippet("x\ny"),state,65537,2),/context limit/);
 });

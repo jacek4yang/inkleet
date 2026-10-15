@@ -25,7 +25,7 @@ export function normalizeSnippetEol(prepared:PreparedSnippet):PreparedSnippet{
 }
 
 export type SnippetLayout={prepared:PreparedSnippet;mode:1|2;indent:string};
-/** One-shot application boundary. Pass the wrapper to insertion, not back here. */
+/** Raw-input-only layout stage. The acceptance owner must not re-layout result.prepared. */
 export function layoutSnippet(prepared:PreparedSnippet,state:EditorState,position:number,mode:1|2=1):SnippetLayout{
  if(mode!==1&&mode!==2)throw new SnippetLimitError("Unsupported snippet indentation mode");
  if(!Number.isSafeInteger(position)||position<0||position>state.doc.length)throw new SnippetLimitError("Invalid snippet insertion position");
