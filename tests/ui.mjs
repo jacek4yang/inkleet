@@ -1230,6 +1230,11 @@ try {
   // Exact expected-result comparison freezes the selected policy with the run.
   await runPanel.locator(".case-expectation summary").click();
   await runPanel.getByRole("textbox",{name:"预期结果",exact:true}).fill("9007199254740992");
+  assert.equal(await runPanel.evaluate(panel=>{
+    const button=panel.querySelector('[data-action="local-execute"]'),b=button.getBoundingClientRect(),p=panel.getBoundingClientRect();
+    return b.top>=p.top&&b.bottom<=p.bottom&&document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.closest("button")===button;
+  }),true,"run control stays visible and clickable with expanded expected input");
+
   await runPanel.getByRole("button",{name:"本地执行",exact:true}).click();
   await runPage.waitForFunction(()=>window.__runTest.starts.length===9);
   await runPage.evaluate(()=>window.__runTest.pending[8]());
