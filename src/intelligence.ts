@@ -1,3 +1,4 @@
+import {snapshotText} from "./snapshot-text";
 import {unchangedDiagnostics,type DiagnosticSnapshot} from "./diagnostic-snapshot";
 import {CompletionRequestOwner,type CompletionTicket} from "./completion-request-owner";
 import {advanceIncomplete,completionTrigger,identifierTail,type CompletionTrigger,type IncompleteContext} from "./completion-context";
@@ -111,7 +112,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     return synchronization.run(async () => {
       while (!closed && view && session && sent !== view.state.doc) {
         const doc = view.state.doc, nextVersion = ++version;
-        await invoke("update_language_document", { id: session.id, version: nextVersion, text: doc.toString() });
+        await invoke("update_language_document", { id: session.id, version: nextVersion, text: snapshotText(doc) });
         sent = doc;
       }
     });
@@ -352,7 +353,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if(queuedFormats>=8)throw Error("格式化请求过多，请稍后保存");
       ++queuedFormats;
       const request=formatQueue.then(async()=>{
-      if(closed||!view||view.state.doc.toString()!==text)throw Error("格式化文档已切换");
+      if(closed||!view||snapshotText(view.state.doc)!==text)throw Error("格式化文档已切换");
       const doc=view.state.doc;
       if(["c","cpp","java"].includes(language)){
         if(!session)throw Error("语言服务尚未连接");
@@ -375,7 +376,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       status(`正在连接 ${{ python3: "Python", java: "Java", golang: "Go", rust: "Rust", c: "C", cpp: "C++" }[language]} 语言服务…`);
       const initial = target.state.doc;
       try {
-        const connecting = connectionQueue.then(() => closed ? null : invoke<Started>("start_language_service", {text: initial.toString(), language, metadata: metadata ?? null}));
+        const connecting = connectionQueue.then(() => closed ? null : invoke<Started>("start_language_service", {text: snapshotText(initial), language, metadata: metadata ?? null}));
         connectionQueue = connecting.then(() => undefined, () => undefined);
         const started = await connecting;
         if (!started) return;

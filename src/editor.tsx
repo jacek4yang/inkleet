@@ -1,3 +1,4 @@
+import {snapshotText} from "./snapshot-text";
 import {editorStatus} from "./editor-status";
 import {vimEditing,vimNormal,getCM} from "./vim";
 import {indentGuides} from "./indent-guides";
@@ -114,13 +115,13 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       }), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
       EditorView.updateListener.of(update => {
-        if (update.docChanged) callback.current(update.state.doc.toString());
+        if (update.docChanged) callback.current(snapshotText(update.state.doc));
       }),
       ...(language === "markdown" ? [EditorView.lineWrapping] : []),
     ];
     const cached = sessions.get(documentKey);
     // 外部正文变化时重新建状态，不能将另一个版本的撤销历史套上去。
-    const state = cached?.state.doc.toString() === value
+    const state = (cached ? snapshotText(cached.state.doc) : undefined) === value
       ? cached.state.update({ effects: StateEffect.reconfigure.of(extensions) }).state
       : EditorState.create({ doc: value, extensions });
     const view = new EditorView({ state, parent: host.current! });

@@ -1,3 +1,4 @@
+import {snapshotText} from "./snapshot-text";
 import {formatBinding} from "./command-registry";
 import { Annotation, ChangeSet } from "@codemirror/state";
 import { isolateHistory } from "@codemirror/commands";
@@ -24,7 +25,7 @@ export function formatOnSave(options:Options){
       if(options.ready?.(save)===false){if(save)options.report("请先处理保存错误或关闭对话框");return;}
       if(this.busy){this.pending={generation:this.generation,epoch:options.epoch?.()??0,save:save||!!(this.pending?.generation===this.generation&&this.pending.save)};return;}
       this.busy=true;this.pending=null;
-      const doc=this.view.state.doc,text=doc.toString(),generation=this.generation,epoch=options.epoch?.()??0;
+      const doc=this.view.state.doc,text=snapshotText(doc),generation=this.generation,epoch=options.epoch?.()??0;
       let committedDoc:typeof doc|null=null;
       const current=()=>epoch===(options.epoch?.()??0)&&options.ready?.(save)!==false&&!this.closed&&generation===this.generation&&this.view.state.doc===doc&&!this.view.composing;
       try{
