@@ -328,7 +328,7 @@ def native_snippet_case(group,code):
         responses.sort(key=lambda r:(r["id"],r["version"],r["sequence"]),reverse=True)
         response=responses[0] if responses else None
         wire={"session":{"id":response["id"],"snippets":response["snippets"]},"response":response,"item":[i for i in response["items"] if i["label"]==choice["label"]]} if response else None
-        assert wire and wire["session"]["snippets"] is True,group+" launched binary negotiated experimental snippet support"
+        assert wire and wire["session"]["snippets"] is True,group+" launched binary negotiated snippet support"
         assert (response["id"],response["version"],response["sequence"])>prior,group+" candidate trace belongs to this fresh acceptance phase"
         assert len(wire["item"])==1 and wire["item"][0]["format"]==2,group+" actual server item is format2"
         time.sleep(.15)
@@ -364,7 +364,7 @@ def native_snippet_case(group,code):
             observation["final"]=final
             screenshot(group+"-snippet-native.png")
         persist_observations()
-    (evidence/(group.upper()+"_SNIPPET_NATIVE_RESULT.txt")).write_text("PASS: real Linux WebView and application-owned language server format2 item, worker application, selected argument replacement, Tab final caret, isolated undo/redo. Experimental debug-only capability; not production or cross-platform qualification.\n")
+    (evidence/(group.upper()+"_SNIPPET_NATIVE_RESULT.txt")).write_text("PASS: real Linux WebView and application-owned language server format2 item, worker application, selected argument replacement, Tab final caret, isolated undo/redo. Linux x86_64 default capability with debug-only evidence tracing; not release-binary or cross-platform qualification.\n")
 
 
 def screenshot(name):

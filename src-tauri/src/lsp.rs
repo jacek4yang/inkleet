@@ -252,6 +252,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         let roots=launch.roots;
         let started_uri=uri.clone();
         crate::snippet_validation::started(&state.root,generation,&language);
+        let completion_snippets=crate::lsp_launch::snippet_support_enabled(&language);
         let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,completion_resolve,completion_trigger_characters:completion_trigger_characters.clone(),completion_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
@@ -259,7 +260,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             active.replace(session)
         };
         if let Some(previous)=previous{previous.client.stop();}
-        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens,completion_resolve,completion_trigger_characters,completion_snippets:crate::lsp_launch::snippet_validation_enabled()})
+        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens,completion_resolve,completion_trigger_characters,completion_snippets})
     }).await.map_err(|_|"语言服务启动任务中断".to_owned())?
 }
 
