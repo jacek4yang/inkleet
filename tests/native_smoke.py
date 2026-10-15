@@ -74,8 +74,8 @@ def text(css):
 def settings_action(category, css):
     click('[data-action="open-settings"]')
     node=cmd("POST","/element",{"using":"xpath","value":f"//nav[@aria-label='设置分类']/button[text()='{category}']"})[EID]
-    cmd("POST",f"/element/{node}/click",{})
-    click(css)
+    click_native_node(node)
+    click_debug_action(css)
 def source_text(css):
     # WebDriver rendered text may normalize leading whitespace. Read textContent
     # of the visible CodeMirror lines, then independently check the saved file.
@@ -104,11 +104,13 @@ def reveal_debug_control(css, fallback="down"):
     raise AssertionError("Debug control remains unreachable through real wheel: "+css)
 
 def click_debug_action(css):
-    # A debugger action is not idempotent: emit exactly one real pointer click.
-    # Do not fall back to another injection path after an uncertain mutation.
-    node=element(css)
-    wait_for(lambda:cmd("GET",f"/element/{element(css)}/enabled"),"debug action becomes enabled: "+css)
-    node=element(css)
+    # Choose one real pointer click before sending any mutation. Presence and
+    # enabled polling are read-only; an uncertain click is never replayed.
+    wait_for(lambda:cmd("GET",f"/element/{element(css)}/enabled"),"native action becomes enabled: "+css)
+    click_native_node(element(css))
+
+def click_native_node(node):
+    wait_for(lambda:cmd("GET",f"/element/{node}/enabled"),"native control enabled")
     rect=cmd("GET",f"/element/{node}/rect")
     window=cmd("GET","/window/rect")
     assert rect["width"]>0 and rect["height"]>0, "debug action has no visible bounds"
@@ -134,6 +136,10 @@ def focus_code_editor():
 def click(css):
     # Only known visible transport-sensitive controls use one OS click.
     # WebDriver retains auto-scroll for other controls and native options.
+    if css == '[aria-label="关闭设置"]':
+        click_debug_action(css)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":css}),"settings closed")
+        return
     if css in (".pane-heading .actions button", '[data-action="local-execute"]', '[data-action="open-settings"]'):
         return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
@@ -937,7 +943,7 @@ try:
         def set_auto_format(enabled):
             click('[data-action="open-settings"]')
             category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='编辑器']"})[EID]
-            cmd("POST",f"/element/{category}/click",{})
+            click_native_node(category)
             check=element(".format-switch input")
             selected=cmd("GET",f"/element/{check}/selected")
             if bool(selected)!=enabled: click_debug_action(".format-switch input")
@@ -984,7 +990,7 @@ try:
         def set_vim(enabled):
             click('[data-action="open-settings"]')
             category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='编辑器']"})[EID]
-            cmd("POST",f"/element/{category}/click",{})
+            click_native_node(category)
             check=element(".vim-switch input")
             selected=cmd("GET",f"/element/{check}/selected")
             if bool(selected)!=enabled: cmd("POST",f"/element/{check}/click",{})
