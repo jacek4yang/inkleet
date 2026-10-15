@@ -2760,7 +2760,7 @@ try {
         (s.requests??=[]).push({...args});
         if(s.retryProbe&&args.completionContext?.triggerKind===1&&s.noiseServed<2){
           s.noiseServed++;
-          return [{label:s.noiseServed===1?"call":"unrelated",insertTextFormat:1,textEdit:{range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"bad"},_inkleetCompletion:1}];
+          return [{label:s.noiseServed===1?"call":"unrelated",insertTextFormat:1,textEdit:{range:{start:{line:0,character:0},end:{line:0,character:s.noiseServed===1?0:4}},newText:"bad"},_inkleetCompletion:1}];
         }
         const start=s.indented?2:0;
         s.item={label:"call",insertTextFormat:s.format,insertTextMode:s.mode,textEdit:{range:{start:{line:0,character:start},end:{line:0,character:start+4}},newText:s.source},_inkleetCompletion:1};
