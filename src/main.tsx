@@ -1,3 +1,4 @@
+import {CodeSignals,useCodeEmpty} from "./live-code";
 import {EditorStatus} from "./editor-status";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import type { DebugPosition } from "./debug-position";
@@ -9,7 +10,7 @@ import { Icon, IconButton } from "./icons";
 import { SettingsHub, type SettingsSection, type SettingsAction } from "./settings-hub";
 import { RecoveryDialog } from "./recovery";
 import { ConflictDialog, type FileConflict } from "./conflict";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { languages, draftKey, type Language } from "./domain";
@@ -74,6 +75,7 @@ function App() {
   const [status, setStatus] = useState("正在读取");
   const [loading, setLoading] = useState(true);
   const documents = useRef(new Map<string, Document>());
+  const codeSignals=useRef(new CodeSignals());
   const persisted = useRef(new Map<string, string | null>());
   const sequence = useRef(0);
   const notes = useRef(new Map<string, string>());
@@ -91,7 +93,9 @@ function App() {
   const baseCode = baseTemplate ?? "";
   const doc = documents.current.get(activeKey) ?? { code: baseCode, notes: notes.current.get(problemId) ?? "" };
 
-  const judge = useOnlineJudge({ identity, question: problem?.official, language, solution, code: doc.code });
+  const codeSource=useMemo(()=>codeSignals.current.source(activeKey,()=>documents.current.get(activeKey)?.code??baseCode),[activeKey,baseCode]);
+  const sourceEmpty=useCodeEmpty(codeSource,baseTemplate===null);
+  const judge = useOnlineJudge({ identity, question: problem?.official, language, solution, codeSource });
   const editorLoading = !problem || loading || !documents.current.has(activeKey);
   const languageStatusOwner=JSON.stringify([activeKey,reload,reconnectToken]);
   const languageStatus=!editorLoading&&languageStatusSnapshot.owner===languageStatusOwner?languageStatusSnapshot.text:"";
@@ -167,6 +171,7 @@ function App() {
           documents.current.set(activeKey, { code: baseCode, notes: notes.current.get(problemId) ?? "" });clean.current.set(activeKey,baseCode);clean.current.set(problemId+"/notes",notes.current.get(problemId)??"");
         }
       }
+      codeSignals.current.notify(activeKey);
       if (alive) { refresh(r => r + 1); setLoading(false); setStatus(isTauri() ? "已读取本机文件" : "前端预览 · 仅内存，请导出保留"); }
     }).catch(() => { if (alive) { setLoading(true); setStatus("读取失败，已保护现有文件；请重启后重试"); } });
     return () => { alive = false; };
@@ -189,9 +194,12 @@ function App() {
   function edit(kind:"code"|"notes",text:string){
     const target:SaveTarget={key:activeKey,problem:problemId,language,solution,kind};
     const previous=documents.current.get(activeKey)??doc;
+    const wasDirty=dirty.current.has(storageKey(target));
     documents.current.set(activeKey,{...previous,[kind]:text});
     if(kind==="notes")notes.current.set(problemId,text);
-    ++sequence.current;reconcileDirty(target);refresh(r=>r+1);
+    ++sequence.current;reconcileDirty(target);
+    if(kind==="code")codeSignals.current.notify(target.key);
+    if(kind==="notes"||wasDirty!==dirty.current.has(storageKey(target)))refresh(r=>r+1);
     checkpoint(target,text,persisted.current.get(storageKey(target))??null);
   }
   useEffect(() => {
@@ -263,7 +271,7 @@ function App() {
       const previous = documents.current.get(current.key);
       if (previous) documents.current.set(current.key, { ...previous, code: text });
     }
-    reconcileDirty({...current});checkpoint({...current},text,resolved.text);
+    reconcileDirty({...current});checkpoint({...current},text,resolved.text);if(current.kind==="code")codeSignals.current.notify(current.key);
     ++conflictSequence.current; setConflict(null); reloadEditors(n => n + 1); refresh(n => n + 1);
     if (selected.current === current.key) setStatus("已处理冲突 · 两份内容已保留");
   }
@@ -300,7 +308,7 @@ function App() {
       const previous = documents.current.get(target.key);
       if (previous) documents.current.set(target.key, { ...previous, code: text });
     }
-    reconcileDirty({...target});checkpoint({...target},text,result.text);
+    reconcileDirty({...target});checkpoint({...target},text,result.text);if(target.kind==="code")codeSignals.current.notify(target.key);
     setRecovery(null); reloadEditors(n => n + 1); refresh(n => n + 1);
     if (selected.current === target.key) setStatus("已恢复所选副本 · 恢复前的两份内容仍已保留");
   }
@@ -368,7 +376,7 @@ function App() {
     { id:"environment", label:"开发环境", section:"environment", icon:"terminal", dataAction:"open-environments", run:() => settingsRun(() => setEnvironments(true)) },
     { id:"reconnect", label:"重连语言服务", section:"environment", icon:"refresh", disabled:editorLoading, run:() => settingsRun(() => setReconnectToken(n => n + 1)) },
     { id:"source-recovery", label:"恢复副本", section:"files", icon:"history", dataAction:"code-recovery", disabled:editorLoading || !isTauri(), run:() => settingsRun(() => void openRecovery("code")) },
-    { id:"source-export", label:"导出源码", section:"files", icon:"download", disabled:editorLoading, run:() => settingsRun(() => download("solution." + languages.find(l => l.id === language)!.extension,doc.code)) },
+    { id:"source-export", label:"导出源码", section:"files", icon:"download", disabled:editorLoading, run:() => settingsRun(() => download("solution." + languages.find(l => l.id === language)!.extension,codeSource.read())) },
     { id:"notes-export", label:"导出 Markdown", section:"notes", icon:"download", disabled:editorLoading, run:() => settingsRun(() => download("notes.md",notes.current.get(problemId) ?? "")) },
     { id:"notes-recovery", label:"恢复笔记副本", section:"notes", icon:"history", dataAction:"notes-recovery", disabled:editorLoading || !isTauri(), run:() => settingsRun(() => void openRecovery("notes")) },
     { id:"typora", label:"Typora 编辑", section:"notes", icon:"edit", disabled:editorLoading || !externalEditors, run:() => settingsRun(() => void openExternalNotes("typora")) },
@@ -388,14 +396,14 @@ function App() {
       {cacheWarning && <p className="cache-warning error" role="alert">{cacheWarning}</p>}
     </section>
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
-      <div className="pane-heading"><div className="document-selectors"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select>{problem && <SolutionPicker key={solutionGroup} problem={problemId} language={language} value={solution} code={doc.code} template={baseCode} templateAvailable={baseTemplate!==null} disabled={editorLoading} onChange={selectSolution} onCreated={(entry,text) => {
+      <div className="pane-heading"><div className="document-selectors"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select>{problem && <SolutionPicker key={solutionGroup} problem={problemId} language={language} value={solution} codeSource={codeSource} template={baseCode} templateAvailable={baseTemplate!==null} disabled={editorLoading} onChange={selectSolution} onCreated={(entry,text) => {
         const key=draftKey({account:"local",problem:problemId,language,solution:entry.id});
         documents.current.set(key,{code:text,notes:notes.current.get(problemId)??""});
-        persisted.current.set(key,isTauri()?text:null);clean.current.set(key,text);dirty.current.delete(key);selectSolution(entry.id);
+        persisted.current.set(key,isTauri()?text:null);clean.current.set(key,text);dirty.current.delete(key);codeSignals.current.notify(key);selectSolution(entry.id);
       }} />}{dirty.current.has(activeKey)&&<span className="unsaved-mark" role="img" aria-label="源码未保存" title="未保存" />}</div><div className="actions"><IconButton icon="save" label="保存源码" shortcut="Ctrl+S" disabled={editorLoading} onClick={()=>sourceSave.current?.()} /><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} aria-expanded={localRunner} onClick={() => {setLocalOpened(true);setLocalRunner(v => !v);}} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title={judgeDisabledReason||"将当前代码与用例发送到中国站运行"}>运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title={judgeDisabledReason||"确认后正式提交到中国站"}>提交</button></div></div>
-      {problem && baseTemplate===null && !doc.code.trim() && <p className="error" role="alert">官方模板不可用</p>}
+      {problem && baseTemplate===null && sourceEmpty && <p className="error" role="alert">官方模板不可用</p>}
       {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor vimEnabled={editorSettings?.settings.vim??false} onSaveReady={save=>{sourceSave.current=save;}} formatting={{epoch:()=>formatEpoch.current,ready:(save)=>!shuttingDown.current&&(!save||(!queue.current.failed(activeKey)&&!conflict&&!recovery)),enabled:formatEnabled(editorSettings?.settings??null,language),save:text=>saveSnapshot("code",text),report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatusSnapshot} statusOwner={languageStatusOwner} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
-      {localOpened && problem && <LocalRunner onReveal={()=>setLocalRunner(true)} hidden={!localRunner} onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={position => setPaused({ key: activeKey, position })} key={activeKey} documentKey={activeKey} code={doc.code} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} exampleInputs={problem.official.exampleTestcases??""} onClose={() => {setLocalRunner(false);document.querySelector<HTMLElement>('.code-pane .cm-content')?.focus();}} />}
+      {localOpened && problem && <LocalRunner onReveal={()=>setLocalRunner(true)} hidden={!localRunner} onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={position => setPaused({ key: activeKey, position })} key={activeKey} documentKey={activeKey} codeSource={codeSource} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} exampleInputs={problem.official.exampleTestcases??""} onClose={() => {setLocalRunner(false);document.querySelector<HTMLElement>('.code-pane .cm-content')?.focus();}} />}
       {judge.panel}
     </section>
     {settings && <SettingsHub editorSettings={editorSettings} editorSettingsError={formatConfigError||formatMessage} onReloadEditorSettings={()=>void reloadEditorSettings()} onSaveEditorSettings={saveEditorSettings} initial={settings} languageStatus={languageStatus} onClose={() => setSettings(null)} actions={settingsActions} />}

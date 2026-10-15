@@ -1,3 +1,4 @@
+import {useCodeMismatch,type LiveCode} from "./live-code";
 import {JudgeResult} from "./judge-result";
 import { useResizablePanel } from "./resizable-panel";
 import { IconButton } from "./icons";
@@ -20,8 +21,8 @@ function Confirm({ title, children, accept, dismiss }: { title: string; children
     <h2>{title}</h2>{children}<div><button onClick={dismiss}>取消</button><button className="primary" onClick={accept}>确认</button></div>
   </dialog>;
 }
-export function useOnlineJudge({ identity, question, language, solution = "default", code }: {
-  identity: Identity | null; question: RemoteQuestion | undefined; language: Language; solution?: string; code: string;
+export function useOnlineJudge({ identity, question, language, solution = "default", codeSource }: {
+  identity: Identity | null; question: RemoteQuestion | undefined; language: Language; solution?: string; codeSource: LiveCode;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [cases, setCases] = useState<Record<string, string>>({});
@@ -83,6 +84,7 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
   }
   function request(kind: Kind) {
     if (!identity || !question || guard.current || blocked) return;
+    const code=codeSource.read();
     if (!code.trim()) { setOpen(true); setError("请先编写代码。"); return; }
     const snapshot: Snapshot = Object.freeze({
       id: crypto.randomUUID(), account, questionId: question.questionId, slug: question.titleSlug,
@@ -111,7 +113,8 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
     try { remember(await invoke<Job>("acknowledge_unknown_judge", { account: job.snapshot.account, id: job.snapshot.id, confirmed: true })); }
     catch (e) { setError(String(e)); }
   }
-  const stale = current && (current.snapshot.code !== code || (current.snapshot.kind === "online-run" && current.snapshot.testCase !== input));
+  const codeMismatch=useCodeMismatch(codeSource,current?.snapshot.code);
+  const stale = current && (codeMismatch || (current.snapshot.kind === "online-run" && current.snapshot.testCase !== input));
   const panel = question && <>
     <div className="judge-toggle"><IconButton icon="tests" label={open ? "收起测试与结果" : "测试用例与结果"} aria-expanded={open} onClick={() => setOpen(!open)} /></div>
     <section ref={resize.panel} style={resize.style} hidden={!open} className="judge-panel resizable-panel" aria-label="在线评测">{resize.handle}<div className="judge-content">
