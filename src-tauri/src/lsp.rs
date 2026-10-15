@@ -12,7 +12,7 @@ struct Session {
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct Started { id:u64, version:u32, server:String, uri:String, semantic_tokens:bool, completion_resolve:bool, completion_trigger_characters:Vec<String> }
+pub struct Started { id:u64, version:u32, server:String, uri:String, semantic_tokens:bool, completion_resolve:bool, completion_trigger_characters:Vec<String>, completion_snippets:bool }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Source { text:String, name:String, declaration:bool, language:String }
@@ -82,6 +82,7 @@ impl Services {
             // section, preventing a superseded response from publishing tokens.
             if session.completion_resolve{session.completion_cache.lock().map_err(|_|"补全缓存不可用")?.remember(&mut response,version,sequence);}
             crate::lsp_document::response(kind,&mut response,prefix);
+            crate::snippet_validation::completion(&self.root,id,version,sequence,&session.language,json!({"line":line,"character":character,"prefix":prefix}),&response);
             return Ok(response);
         }
         if completion_sequence.is_some(){return Err("此请求不接受补全序号".into());}
@@ -129,7 +130,9 @@ impl Services {
         if document.version!=version{return Err("忽略过期的补全解析".into());}
         let mut response=Value::Array(vec![resolved]);
         crate::lsp_document::response("completion",&mut response,document.prefix);
-        response.as_array_mut().and_then(|items|items.pop()).ok_or_else(||"补全导入涉及语言环境辅助代码，未应用任何修改".into())
+        let result=response.as_array_mut().and_then(|items|items.pop()).ok_or_else(||"补全导入涉及语言环境辅助代码，未应用任何修改".to_owned())?;
+        crate::snippet_validation::resolved(&self.root,id,version,token,&result);
+        Ok(result)
     }
     pub fn semantic_tokens(&self,id:u64,version:u32)->Result<Value>{
         let session=self.session(id)?;
@@ -231,7 +234,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             "processId":null,"rootUri":root_uri,"initializationOptions":launch.initialization,
             "capabilities":{
                 "general":{"positionEncodings":["utf-16"]},
-                "textDocument":{"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":["plaintext"]},"completion":{"contextSupport":true,"completionItem":if language=="rust"{json!({"snippetSupport":false,"resolveSupport":{"properties":["documentation","additionalTextEdits"]}})}else{json!({"snippetSupport":false})}},"publishDiagnostics":{"versionSupport":true}},
+                "textDocument":{"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":["plaintext"]},"completion":crate::lsp_launch::completion_capabilities(&language),"publishDiagnostics":{"versionSupport":true}},
                 "workspace":{"configuration":true,"workspaceFolders":true,"semanticTokens":{"refreshSupport":true}}
             },
             "workspaceFolders":[{"uri":root_uri,"name":"InkLeet"}]
@@ -248,6 +251,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let roots=launch.roots;
         let started_uri=uri.clone();
+        crate::snippet_validation::started(&state.root,generation,&language);
         let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,completion_resolve,completion_trigger_characters:completion_trigger_characters.clone(),completion_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
@@ -255,7 +259,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             active.replace(session)
         };
         if let Some(previous)=previous{previous.client.stop();}
-        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens,completion_resolve,completion_trigger_characters})
+        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens,completion_resolve,completion_trigger_characters,completion_snippets:crate::lsp_launch::snippet_validation_enabled()})
     }).await.map_err(|_|"语言服务启动任务中断".to_owned())?
 }
 

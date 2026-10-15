@@ -13,6 +13,7 @@ mod completion_requests;
 mod completion_context;
 mod lsp_document;
 mod lsp_launch;
+mod snippet_validation;
 mod lsp_native;
 mod local_run;
 mod local_run_request;

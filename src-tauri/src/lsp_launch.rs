@@ -3,6 +3,20 @@ use inkleet_managed_env::Manager;
 use serde_json::{json,Value};
 use std::{path::{Path,PathBuf},process::Command};
 type Result<T>=std::result::Result<T,String>;
+
+pub(crate) fn snippet_validation_enabled()->bool{
+    cfg!(all(feature="native-snippet-validation",debug_assertions,target_os="linux"))
+}
+pub(crate) fn completion_capabilities(language:&str)->Value{
+    let enabled=snippet_validation_enabled();
+    let mut item=json!({"snippetSupport":enabled});
+    if enabled{item["insertTextModeSupport"]=json!({"valueSet":[1]});}
+    if language=="rust"{item["resolveSupport"]=json!({"properties":["documentation","additionalTextEdits"]});}
+    let mut profile=json!({"contextSupport":true,"completionItem":item});
+    if enabled{profile["insertTextMode"]=json!(1);}
+    profile
+}
+
 pub struct Launch{
     pub command:Command,pub settings:Value,pub initialization:Value,pub roots:Vec<PathBuf>,
     pub filename:&'static str,pub language_id:&'static str,pub server:&'static str,
@@ -70,7 +84,7 @@ pub fn prepare(manager:&Manager,root:&Path,language:&str)->Result<Launch>{
             command.env("GOROOT",go_home).env("GOTOOLCHAIN","local").env("GOENV","off").env("GOWORK","off")
                 .env("CGO_ENABLED","0").env("GOPROXY","off").env("GOSUMDB","off").env("GOTELEMETRY","off")
                 .env("GOCACHE",root.join(".go-cache")).env("GOPATH",root.join(".go-path")).env("GOPLSCACHE",root.join(".gopls-cache"));
-            let initialization=json!({"staticcheck":false,"semanticTokens":true,"usePlaceholders":false,"completeUnimported":true,"buildFlags":["-mod=readonly"]});
+            let initialization=json!({"staticcheck":false,"semanticTokens":true,"usePlaceholders":snippet_validation_enabled(),"completeUnimported":true,"buildFlags":["-mod=readonly"]});
             let settings=json!({"gopls":initialization});
             Ok(Launch{command,settings,initialization,roots:vec![std::fs::canonicalize(root).map_err(|_|"工作区无效")?,std::fs::canonicalize(go_home.join("src")).map_err(|_|"Go 标准库源码无效")?],filename:"solution.go",language_id:"go",server:"gopls"})
         },
@@ -95,5 +109,30 @@ pub fn prepare(manager:&Manager,root:&Path,language:&str)->Result<Launch>{
         },
         "c"|"cpp"=>crate::lsp_native::prepare(manager,root,language),
         _=>Err("此语言服务尚未接入".into()),
+    }
+}
+
+#[cfg(test)]
+mod snippet_validation_tests{
+    use super::*;
+    #[test]
+    fn opt_in_gate_is_debug_linux_only(){
+        assert_eq!(snippet_validation_enabled(),cfg!(all(feature="native-snippet-validation",debug_assertions,target_os="linux")));
+        if !cfg!(feature="native-snippet-validation"){assert!(!snippet_validation_enabled());}
+    }
+    #[test]
+    fn completion_profile_preserves_resolve_and_indentation_scope(){
+        let rust=completion_capabilities("rust");
+        assert_eq!(rust["completionItem"]["snippetSupport"],json!(snippet_validation_enabled()));
+        assert_eq!(rust["completionItem"]["resolveSupport"]["properties"],json!(["documentation","additionalTextEdits"]));
+        if snippet_validation_enabled(){
+            assert_eq!(rust["insertTextMode"],json!(1));
+            assert_eq!(rust["completionItem"]["insertTextModeSupport"]["valueSet"],json!([1]));
+        }else{assert!(rust.get("insertTextMode").is_none());assert!(rust["completionItem"].get("insertTextModeSupport").is_none());}
+        for language in ["python3","golang","java","c","cpp"]{
+            let profile=completion_capabilities(language);
+            assert!(profile["completionItem"].get("resolveSupport").is_none());
+            assert!(profile["completionItem"].get("insertReplaceSupport").is_none());
+        }
     }
 }
