@@ -1,0 +1,79 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {EditorState,StateEffect,StateField} from "@codemirror/state";
+import {history,undo,redo} from "@codemirror/commands";
+import {snippetSession,snippetSessionState,snippetInsertion,moveSnippetField,endSnippet} from "../src/snippet-session.ts";
+import {prepareSnippet} from "../src/snippet-prepare.ts";
+const S="$",sample=S+"{1:abc}-"+S+"1-"+S+"0";
+function start(source=sample,doc=""){
+ let state=EditorState.create({doc,extensions:[history(),snippetSession]});
+ const spec=snippetInsertion(state,prepareSnippet(source),0,doc.length);assert.ok(spec);
+ state=state.update(spec).state;return state;
+}
+test("narrowed selections keep linked fields through growth shrink and paste",()=>{
+ let s=start();s=s.update({selection:{anchor:1}}).state;
+ s=s.update({changes:{from:1,insert:"Z"},selection:{anchor:2},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"aZbc-aZbc-");
+ s=s.update({changes:{from:1,to:3,insert:""},selection:{anchor:1},userEvent:"delete.backward"}).state;
+ assert.equal(s.doc.toString(),"ac-ac-");
+ s=s.update({changes:{from:0,to:2,insert:"中文😀"},selection:{anchor:4},userEvent:"input.paste"}).state;
+ assert.equal(s.doc.toString(),"中文😀-中文😀-");
+ assert.ok(s.field(snippetSessionState));
+});
+test("editing a later mirror correctly maps source selection through earlier replacements",()=>{
+ let s=start();s=s.update({selection:{anchor:5}}).state;
+ s=s.update({changes:{from:5,insert:"Z"},selection:{anchor:6},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"aZbc-aZbc-");assert.equal(s.selection.main.head,7);
+ const active=s.field(snippetSessionState)!;assert.equal(active.fields.find(f=>f.id===active.active)!.from,5);
+});
+test("initial insertion and imports are atomic, mirrored edits are one undo event",()=>{
+ let s=EditorState.create({doc:"token",extensions:[history(),snippetSession]});
+ const spec=snippetInsertion(s,prepareSnippet(sample),0,5,[{from:0,to:0,insert:"import\n"}]);assert.ok(spec);
+ s=s.update(spec).state;assert.equal(s.doc.toString(),"import\nabc-abc-");
+ s=s.update({changes:{from:7,to:10,insert:"x"},selection:{anchor:8},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"import\nx-x-");
+ const target=()=>({state:s,dispatch:(tr:any)=>{s=tr.state;}});
+ assert.equal(undo(target() as any),true);assert.equal(s.doc.toString(),"import\nabc-abc-");assert.equal(s.field(snippetSessionState),null);
+ assert.equal(undo(target() as any),true);assert.equal(s.doc.toString(),"token");
+ assert.equal(redo(target() as any),true);assert.equal(s.doc.toString(),"import\nabc-abc-");assert.equal(s.field(snippetSessionState),null);
+ assert.equal(redo(target() as any),true);assert.equal(s.doc.toString(),"import\nx-x-");assert.equal(s.field(snippetSessionState),null);
+});
+test("boundary crossing and unfiltered changes preserve typing but end linkage",()=>{
+ let s=start();s=s.update({changes:{from:2,to:5,insert:"!"},selection:{anchor:3},userEvent:"input.type"}).state;
+ assert.equal(s.doc.toString(),"ab!bc-");assert.equal(s.field(snippetSessionState),null);
+ s=start();s=s.update({changes:{from:1,insert:"!"},filter:false}).state;
+ assert.equal(s.doc.toString(),"a!bc-abc-");assert.equal(s.field(snippetSessionState),null);
+});
+test("mirror budget exhaustion does not partially modify remaining fields",()=>{
+ let s=start(S+"{1:x} "+Array(20).fill(S+"1").join(" "));
+ s=s.update({changes:{from:0,to:1,insert:"a".repeat(65536)},selection:{anchor:65536},userEvent:"input.paste"}).state;
+ assert.equal(s.field(snippetSessionState),null);assert.ok(s.doc.toString().endsWith(Array(20).fill("x").join(" ")));
+});
+test("Tab navigation, first Shift-Tab and final empty stop are deterministic",()=>{
+ let s=start(S+"{2:two} "+S+"{1:one} "+S+"0");
+ const view={get state(){return s;},composing:false,dispatch:(spec:any)=>{s=s.update(spec).state;}};
+ assert.equal(s.selection.main.from,4);
+ assert.equal(moveSnippetField(view as any,-1),true);assert.equal(s.selection.main.from,4);
+ assert.equal(moveSnippetField(view as any,1),true);assert.equal(s.selection.main.from,0);
+ assert.equal(moveSnippetField(view as any,1),true);assert.equal(s.selection.main.head,8);assert.equal(s.field(snippetSessionState),null);
+ s=start(S+"1"+S+"0");s=s.update({changes:{from:0,insert:"x"},selection:{anchor:1},userEvent:"input.type"}).state;
+ assert.equal(moveSnippetField(view as any,1),true);assert.equal(s.selection.main.head,1);
+});
+test("unrelated transaction effects survive mirror propagation",()=>{
+ const effect=StateEffect.define<number>(),field=StateField.define({create:()=>0,update:(v,tr)=>tr.effects.reduce((v,e)=>e.is(effect)?e.value:v,v)});
+ let s=EditorState.create({extensions:[snippetSession,field]});
+ s=s.update(snippetInsertion(s,prepareSnippet(sample),0,0)!).state;
+ s=s.update({changes:{from:1,insert:"!"},effects:effect.of(42),userEvent:"input.type"}).state;
+ assert.equal(s.field(field),42);assert.equal(s.doc.toString(),"a!bc-a!bc-");
+});
+test("unsupported or invalid activation is all-or-nothing",()=>{
+ const s=EditorState.create({doc:"token",extensions:[snippetSession]});
+ for(const source of [S+"{1:"+S+"{2:x}}",S+"{1|a,b|}",S+"{1/a/b/}",S+"1"+S+"1"]){
+  assert.equal(snippetInsertion(s,prepareSnippet(source),0,5),null,source);
+ }
+ assert.equal(snippetInsertion(s,prepareSnippet(sample),0,5,[{from:2,to:2,insert:"bad"}]),null);
+ assert.equal(snippetInsertion(s,prepareSnippet(sample),0,5,[{from:0,to:0,insert:"a"},{from:0,to:0,insert:"b"}]),null);
+ assert.ok(snippetInsertion(s,prepareSnippet(sample),0,5,[{from:0,to:0,insert:"a"}]));
+ const unicode=EditorState.create({doc:"😀",extensions:[snippetSession]});
+ assert.equal(snippetInsertion(unicode,prepareSnippet(sample),1,1),null);
+});

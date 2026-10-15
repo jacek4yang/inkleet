@@ -1,3 +1,4 @@
+import {snippetSession,moveSnippetField,endSnippet} from "./snippet-session";
 import {snapshotText} from "./snapshot-text";
 import {editorStatus} from "./editor-status";
 import {vimEditing,vimNormal,getCM} from "./vim";
@@ -98,19 +99,21 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
     const commandHost=footer?document.createElement("div"):null;
     if(commandHost){commandHost.className="vim-command-host";footer!.appendChild(commandHost);}
     const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
-      basicSetup, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), ...(language==="markdown"?[]:[indentGuides]),
+      basicSetup, snippetSession, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), ...(language==="markdown"?[]:[indentGuides]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       EditorState.tabSize.of(4),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
       // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。
-      Prec.high(keymap.of([{ key: "Tab", run: view => vimNormal(view)||acceptCompletion(view)||indentMore(view), shift:view=>vimNormal(view)||indentLess(view) }])),
+      Prec.high(keymap.of([{ key: "Tab", run: view => vimNormal(view)||acceptCompletion(view)||moveSnippetField(view,1)||indentMore(view), shift:view=>vimNormal(view)||moveSnippetField(view,-1)||indentLess(view) }])),
       // 脱离面板的 overflow / stacking context；CM 自动同步主题并在销毁时移除容器。
       keymap.of([{key:"Mod-m",run:view=>{view.setTabFocusMode(2000);return true;}}]),
       tooltips({ parent: document.body, position: "fixed" }),
       EditorView.domEventObservers({
+        compositionstart(_event,view){endSnippet(view);},
+        blur(_event,view){endSnippet(view);},
         keydown(event, view) {
           // 即使 Escape 被补全/选区消耗，也保留显式移出编辑器的键盘通道。
-          if (event.key === "Escape") {if(getCM(view)){closeCompletion(view);view.setTabFocusMode(false);}else view.setTabFocusMode(2000);}
+          if (event.key === "Escape") {endSnippet(view);if(getCM(view)){closeCompletion(view);view.setTabFocusMode(false);}else view.setTabFocusMode(2000);}
         },
       }), ...(intelligence?.extensions ?? []),
       EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
@@ -136,12 +139,13 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       saveReady.current?.(null);
       debugView.current = null;
       intelligence?.destroy();
+      endSnippet(view);
       sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
       view.destroy();
       commandHost?.remove();
     };
   }, [documentKey, language, label, connection, metadata, statusOwner]);
-  useLayoutEffect(()=>{const view=liveView.current;if(view)view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});},[vimEnabled]);
+  useLayoutEffect(()=>{const view=liveView.current;if(view){endSnippet(view);view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});}},[vimEnabled]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection, language, label, metadata]);
   return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }
