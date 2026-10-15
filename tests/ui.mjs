@@ -2739,7 +2739,7 @@ try {
   await snippetPage.evaluate(()=>window.__snippetSessionTest.restoreEvaluation());
   await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; plain nested sessions have a separate regression. Nested transforms and native/real-IME acceptance remain unverified.\n");
 
-  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; plain nested sessions have a separate regression. Real IME/native acceptance remains unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
+  await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; plain nested sessions have a separate regression. This browser fixture does not verify real IME or native acceptance. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
   await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.destroy());await snippetPage.close();
 
 
@@ -2862,7 +2862,7 @@ try {
     assert.equal(await snippetLspCode.innerText(),"call",stage+" anchor-only movement invalidates selected completion");
     assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return s.api.undoDepth(v.state)===s.selectedUndoDepth&&v.state.field(s.api.snippetSessionState)===null;}),true,"stale selected completion adds neither history nor session");
   }
-  await writeFile("evidence/SELECTED_COMPLETION_RESULT.txt","PASS: forward/reverse selected-text format2 completion, literal selected dollars, label-only exact selection replacement without prefix filtering, plain selected replacement, atomic imports/undo, anchor-only and ABA invalidation during resolve and preparation. Actual CodeEditor/public keyboard path with installed autocomplete; mocked LSP.\n");
+  await writeFile("evidence/SELECTED_COMPLETION_RESULT.txt","PASS: forward/reverse selected-text format2 completion, literal selected dollars, insertText-only exact selection replacement without prefix filtering, plain selected replacement, atomic imports/undo, anchor-only and ABA invalidation during resolve and preparation. Actual CodeEditor/public keyboard path with installed autocomplete; mocked LSP.\n");
   await snippetLspPage.evaluate(()=>window.__snippetLspTest.reset());
   await acceptLspSnippet();
   await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value, value)");
@@ -2984,7 +2984,7 @@ try {
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.holdPreparation=false;s.preparedReply();s.restorePreparation();});
   await snippetLspPage.waitForTimeout(150);
   assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),"call","destroyed editor cannot receive prepared snippet");
-  await writeFile("evidence/LSP_SNIPPET_APPLICATION_RESULT.txt","PASS: actual CodeEditor format2 candidate acceptance through mocked LSP resolve and real preparation worker, atomic imports/undo, linked and nested parameters, variables, mode2/final stop, plain literal dollar text, unsupported-layout atomic refusal, delayed resolve/preparation cancellation on Escape/selection/typing/blur/synthetic composition and destroy. Production capability remains disabled; native servers and real IME unverified.\n");
+  await writeFile("evidence/LSP_SNIPPET_APPLICATION_RESULT.txt","PASS: actual CodeEditor format2 candidate acceptance through mocked LSP resolve and real preparation worker, atomic imports/undo, linked and nested parameters, variables, mode2/final stop, plain literal dollar text, unsupported-layout atomic refusal, delayed resolve/preparation cancellation on Escape/selection/typing/blur/synthetic composition and destroy. This mocked-LSP fixture does not verify server capability negotiation, native server behavior or real IME.\n");
   assert.equal(await snippetLspCode.innerText(),"call","replacement editor ignores old prepared result");
   await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
   assert.deepEqual(snippetLspErrors,[],"LSP snippet lifecycle produces no page errors");
