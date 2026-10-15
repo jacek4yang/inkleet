@@ -17,7 +17,7 @@ concurrency:
 jobs:
   native-smoke:
     env:
-      INKLEET_NATIVE_SNIPPETS: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/test/native-snippet-validation' || github.ref == 'refs/heads/feat/validated-linux-snippets')) || inputs.snippets == true }}
+      INKLEET_NATIVE_SNIPPETS: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test/native-snippet-validation' || github.ref == 'refs/heads/feat/validated-linux-snippets')) || inputs.snippets == true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
