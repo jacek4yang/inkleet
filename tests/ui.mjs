@@ -2616,7 +2616,7 @@ try {
     await snippetCode.press("Control+Shift+p");
     const search=snippetPage.getByRole("combobox",{name:"搜索编辑器命令",exact:true});
     await search.fill(command);await search.press("Enter");
-    await snippetPage.waitForFunction(()=>window.__snippetSessionTest.formats.at(-1)==="palette -> PALETTE; tail");
+    await snippetPage.waitForFunction(n=>window.__snippetSessionTest.formats.length>n&&window.__snippetSessionTest.formats.at(-1)==="palette -> PALETTE; tail",before.formats);
     if(command==="保存")await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);
     else assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),before.saves,"format command does not save");
     assert.ok(await snippetPage.evaluate(n=>window.__snippetSessionTest.formats.length>n,before.formats));
@@ -2668,6 +2668,41 @@ try {
   await snippetCode.press("Escape");
   await snippetPage.getByRole("alert").filter({hasText:"参数转换失败"}).waitFor({state:"hidden"});
   assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),dormantSaveCount,"failed dormant settlement never saves");
+  // Hold delivery after a real worker has produced a valid result. This tests
+  // runtime intent arbitration and ignored-cancellation replies without timers
+  // or production hooks; worker computation itself is exercised above.
+  await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest,prototype=s.api.SnippetPreparationService.prototype,original=prototype.evaluate;
+    s.restoreEvaluation=()=>{prototype.evaluate=original;};
+    prototype.evaluate=async function(prepared){
+      const result=await original.call(this,prepared);
+      if(s.holdEvaluation)await new Promise(resolve=>{s.releaseEvaluation=resolve;});
+      return result;
+    };
+  });
+  for(const keys of [["Control+s","Control+Shift+i"],["Control+Shift+i","Control+s"],["Control+s","Control+s"],["Control+s","Tab"]]){
+    await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;await s.insertDerived();s.holdEvaluation=true;s.releaseEvaluation=null;});
+    await snippetPage.keyboard.insertText("mixed");
+    const before=await snippetPage.evaluate(()=>({saves:window.__snippetSessionTest.saves.length,formats:window.__snippetSessionTest.formats.length}));
+    await snippetCode.press(keys[0]);
+    await snippetPage.waitForFunction(()=>typeof window.__snippetSessionTest.releaseEvaluation==="function");
+    await snippetCode.press(keys[1]);
+    await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;s.releaseEvaluation();});
+    await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);
+    assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.at(-1)),"mixed -> MIXED; tail");
+    assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.formats.length),before.formats+1,"mixed intent settles and formats once");
+  }
+  await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;await s.insertDerived();s.holdEvaluation=true;s.releaseEvaluation=null;});
+  await snippetPage.keyboard.insertText("canceled");
+  const staleSaveCount=await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length);
+  await snippetCode.press("Control+s");
+  await snippetPage.waitForFunction(()=>typeof window.__snippetSessionTest.releaseEvaluation==="function");
+  await snippetCode.press("Escape");
+  await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;s.releaseEvaluation();});
+  await snippetPage.waitForTimeout(100);
+  assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.length),staleSaveCount,"late valid worker reply cannot revive canceled save");
+  assert.equal(await snippetCode.innerText(),"canceled -> HELLO; tail");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.restoreEvaluation());
   await writeFile("evidence/SNIPPET_TRANSFORM_SESSION_RESULT.txt","PASS: actual editor + owned worker transforms on field leave, separate atomic transform history, no-worker redo, focused save, external-button save and Vim :w settlement, undo/edit cancellation and visible timeout preserving text. Flat derived fields only; nested sessions and native/real-IME acceptance remain unverified.\n");
 
   await writeFile("evidence/SNIPPET_FLAT_SESSION_RESULT.txt","PASS: actual CodeEditor keyboard arrows/typing keep mirrors, Tab/Shift-Tab navigate, popup Tab accepts first, keyboard undo/redo are atomic, Escape preserves text, Vim Escape enters normal mode, synthetic composition boundary clears linkage, remount cannot revive session. Flat session including literal choices; nested sessions and real IME/native acceptance remain unavailable. Derived transforms are separately tested as commit-on-leave, not live typing transforms.\n");
