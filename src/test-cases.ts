@@ -22,15 +22,37 @@ export function inputParts(input:string,names:string[]):string[]|null{
  const lines=input.replace(/\r\n?/g,"\n").split("\n");
  return names.length&&lines.length===names.length?lines:null;
 }
-export type DisplayResult={caseNumber:number;value:string;error:string;raw:boolean};
-// Locate exact top-level value bytes after validation. Never round large integer outputs.
+export type DisplayResult={caseNumber:number;value:string;error:string;raw:boolean;argumentsAfterCall?:{value:string;unavailable:boolean}[]};
+// JSON.parse validates structure; values are sliced from original bytes to preserve integers.
+function valueEnd(raw:string,start:number):number{
+ let depth=0,quoted=false,escaped=false;
+ for(let i=start;i<raw.length;i++){
+  const c=raw[i];
+  if(quoted){if(!escaped&&c==='"')quoted=false;if(c==="\\"&&!escaped)escaped=true;else escaped=false;continue;}
+  if(c==='"'){quoted=true;continue;}
+  if(c==="["||c==="{")depth++;
+  else if(c==="]"||c==="}"){if(depth===0)return i;depth--;}
+  else if(c===","&&depth===0)return i;
+ }
+ return raw.length;
+}
+function exactArray(raw:string):string[]{
+ const values:string[]=[];let i=raw.indexOf("[")+1;
+ while(i<raw.length){
+  while(/\s/.test(raw[i]??"")&&i<raw.length)i++;
+  if(raw[i]==="]")break;
+  const end=valueEnd(raw,i);values.push(raw.slice(i,end).trim());i=end;
+  if(raw[i]===",")i++;else break;
+ }
+ return values;
+}
 export function displayResult(raw:string,index:number):DisplayResult{
  const fallback={caseNumber:index+1,value:raw,error:"",raw:true};
  try{
   const parsed=JSON.parse(raw);if(!parsed||typeof parsed!=="object"||Array.isArray(parsed)||typeof parsed.ok!=="boolean")return fallback;
   const number=Number.isSafeInteger(parsed.case)&&parsed.case>0?parsed.case:index+1;
   if(!parsed.ok)return {caseNumber:number,value:"",error:typeof parsed.error==="string"?parsed.error:"执行失败",raw:false};
-  let i=raw.indexOf("{")+1,output:string|undefined;
+  let i=raw.indexOf("{")+1,output:string|undefined,argumentsRaw:string|undefined;
   while(i<raw.length){
    while(/[\s,]/.test(raw[i]??"")&&i<raw.length)i++;
    if(raw[i]!== '"')break;
@@ -39,12 +61,19 @@ export function displayResult(raw:string,index:number):DisplayResult{
    const key=JSON.parse(raw.slice(keyStart,i));while(/\s/.test(raw[i]??"")&&i<raw.length)i++;
    if(raw[i++]!==":")return fallback;
    while(/\s/.test(raw[i]??"")&&i<raw.length)i++;
-   const start=i;let depth=0,quoted=false;escaped=false;
-   for(;i<raw.length;i++){const c=raw[i];if(quoted){if(!escaped&&c==='"')quoted=false;if(c==="\\"&&!escaped)escaped=true;else escaped=false;continue;}if(c==='"'){quoted=true;continue;}if(c==="["||c==="{")depth++;else if(c==="]"||c==="}"){if(depth===0)break;depth--;}else if(c===","&&depth===0)break;}
+   const start=i;i=valueEnd(raw,i);
    if(key==="value")output=raw.slice(start,i).trim();
+   if(key==="argumentsAfterCall")argumentsRaw=raw.slice(start,i).trim();
    if(raw[i]==="}")break;
   }
-  return output===undefined?fallback:{caseNumber:number,value:output,error:"",raw:false};
+  if(output===undefined)return fallback;
+  if(argumentsRaw===undefined)return {caseNumber:number,value:output,error:"",raw:false};
+  if(!Array.isArray(parsed.argumentsAfterCall)||parsed.argumentsAfterCall.length>32)return fallback;
+  const unavailable=parsed.argumentsUnavailable===undefined?[]:parsed.argumentsUnavailable;
+  if(!Array.isArray(unavailable)||new Set(unavailable).size!==unavailable.length||unavailable.some(n=>!Number.isSafeInteger(n)||n<0||n>=parsed.argumentsAfterCall.length))return fallback;
+  const values=exactArray(argumentsRaw);
+  if(values.length!==parsed.argumentsAfterCall.length)return fallback;
+  return {caseNumber:number,value:output,error:"",raw:false,argumentsAfterCall:values.map((value,index)=>({value,unavailable:unavailable.includes(index)}))};
  }catch{return fallback;}
 }
 
