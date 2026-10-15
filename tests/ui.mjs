@@ -2417,6 +2417,33 @@ try {
   await serializationPage.evaluate(()=>window.__serializationTest.unmount());
   await serializationPage.close();
 
+
+  const snippetWorkerPage=await browser.newPage();
+  await snippetWorkerPage.route("**/snippet-worker-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body>Snippet worker fixture</body></html>"}));
+  await snippetWorkerPage.goto("http://127.0.0.1:5173/snippet-worker-test");
+  const snippetWorkerEvidence=await snippetWorkerPage.evaluate(async()=>{
+    const {SnippetPreparationService}=await import("/src/snippet-service.ts");
+    const s=new SnippetPreparationService(),dollar="$";
+    try{
+      const normal=await s.prepare(dollar+"{1:中文} "+dollar+"1 "+dollar+"0");
+      const pending=await s.prepare(dollar+"{1/(a+)+$/x/}");
+      const first=s.prepare("old").then(()=>false,error=>String(error).includes("canceled"));
+      s.cancel();const canceled=await first;
+      const recovered=await s.prepare(dollar+"{FILE:fallback}",{FILE:{kind:"value",value:"test.rs"}});
+      let bounded=false;
+      try{await s.prepare((dollar+"1 ").repeat(513));}catch{bounded=true;}
+      return {normal,pending,canceled,recovered,bounded,scope:"Actual same-origin Vite module worker; no native packaged or transform-execution acceptance"};
+    }finally{s.destroy();}
+  });
+  await writeFile("evidence/SNIPPET_WORKER_RESULT.json",JSON.stringify(snippetWorkerEvidence,null,2));
+  assert.equal(snippetWorkerEvidence.normal.text,"中文 中文 ");
+  assert.deepEqual(snippetWorkerEvidence.normal.navigation,["t:1","t:0"]);
+  assert.equal(snippetWorkerEvidence.pending.needsTransformEvaluation,true);
+  assert.equal(snippetWorkerEvidence.canceled,true);
+  assert.equal(snippetWorkerEvidence.recovered.text,"test.rs");
+  assert.equal(snippetWorkerEvidence.bounded,true);
+  await snippetWorkerPage.close();
+
   const providerPage=await browser.newPage();
   await providerPage.route("**/provider-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
   await providerPage.goto("http://127.0.0.1:5173/provider-test");
