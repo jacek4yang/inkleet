@@ -2681,16 +2681,22 @@ try {
     };
   });
   for(const keys of [["Control+s","Control+Shift+i"],["Control+Shift+i","Control+s"],["Control+s","Control+s"],["Control+s","Tab"]]){
-    await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;await s.insertDerived();s.holdEvaluation=true;s.releaseEvaluation=null;});
+    await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;await s.insertDerived();s.view().setTabFocusMode(false);s.holdEvaluation=true;s.releaseEvaluation=null;});
     await snippetPage.keyboard.insertText("mixed");
     const before=await snippetPage.evaluate(()=>({saves:window.__snippetSessionTest.saves.length,formats:window.__snippetSessionTest.formats.length}));
     await snippetCode.press(keys[0]);
     await snippetPage.waitForFunction(()=>typeof window.__snippetSessionTest.releaseEvaluation==="function");
     await snippetCode.press(keys[1]);
     await snippetPage.evaluate(()=>{const s=window.__snippetSessionTest;s.holdEvaluation=false;s.releaseEvaluation();});
-    await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);
+    try{await snippetPage.waitForFunction(n=>window.__snippetSessionTest.saves.length===n+1,before.saves);}catch(error){
+      await writeFile("evidence/snippet-mixed-intent-failure.json",JSON.stringify({keys,before,state:await snippetPage.evaluate(()=>{
+        const s=window.__snippetSessionTest,v=s.view(),f=v.state.field(s.api.snippetSessionState);
+        return {saves:s.saves,formats:s.formats,errors:s.errors,text:v.state.doc.toString(),selection:v.state.selection.toJSON(),focused:v.hasFocus,session:f};
+      })},null,2));throw error;
+    }
     assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.saves.at(-1)),"mixed -> MIXED; tail");
     assert.equal(await snippetPage.evaluate(()=>window.__snippetSessionTest.formats.length),before.formats+1,"mixed intent settles and formats once");
+    if(keys[1]==="Tab")assert.equal(await snippetPage.evaluate(()=>{const v=window.__snippetSessionTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"tail","pending save preserves requested field navigation");
   }
   await snippetPage.evaluate(async()=>{const s=window.__snippetSessionTest;await s.insertDerived();s.holdEvaluation=true;s.releaseEvaluation=null;});
   await snippetPage.keyboard.insertText("canceled");
