@@ -136,8 +136,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   }
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
+    const contextSelection=context.state.selection;
+    if(contextSelection.ranges.length!==1||context.state.doc.lineAt(contextSelection.main.from).number!==context.state.doc.lineAt(contextSelection.main.to).number){
+      if(context.explicit)status("此选区暂不支持补全");return null;
+    }
     const generation=++completionRequestGeneration;completionOwner.cancelActive();
-    const word = context.matchBefore(identifierTail);
+    const word = contextSelection.main.empty ? context.matchBefore(identifierTail) : null;
     const triggers=session.completionTriggerCharacters??[".",":"];
     const before=context.state.sliceDoc(Math.max(0,context.pos-2),context.pos);
     const continued=!!incomplete?.continued&&incomplete.session===session.id&&incomplete.doc===context.state.doc&&incomplete.from===(word?.from??context.pos)&&incomplete.pos===context.pos;
@@ -147,7 +151,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     let attemptTicket:CompletionTicket|null=null;
     context.addEventListener("abort", () => completionOwner.cancel(attemptTicket), { onDocChange: true });
     const doc = context.state.doc,owner=view,sessionId=session.id;
-    const current=()=>!closed&&view===owner&&session?.id===sessionId&&generation===completionRequestGeneration&&!context.aborted&&owner.state.doc===doc&&owner.state.selection.main.head===context.pos;
+    const current=()=>!closed&&view===owner&&session?.id===sessionId&&generation===completionRequestGeneration&&!context.aborted&&owner.state.doc===doc&&owner.state.selection.eq(contextSelection);
     try {
       const deadline = Date.now() + (context.explicit ? 8000 : 1200);
       let items: unknown[] = [], isIncomplete=false;
@@ -172,7 +176,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       candidates.sort((a, b) => String(a.sortText ?? a.label).localeCompare(String(b.sortText ?? b.label)));
       for (const item of candidates.slice(0, 300)) {
         if (!object(item) || typeof item.label !== "string" || item.label.length > 512) continue;
-        const result=completionApplication(doc,item,word?.from??context.pos,context.pos);
+        const result=completionApplication(doc,item,word?.from??context.pos,context.pos,contextSelection.main);
         if(!result||result.format===2&&context.state.field(snippetSessionState,false)===undefined)continue;
         const id=session?.id,askedVersion=version,resolve=session?.completionResolve===true,token=item._inkleetCompletion;
         if(resolve&&(!Number.isSafeInteger(token)||token<=0))continue;
@@ -198,12 +202,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           } : content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
           apply(target) {
             const ticket=invalidateCompletionApplication(),state=target.state,uri=session?.uri;
-            const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.main.head===context.pos&&target.state.selection.main.empty&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
+            const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.eq(contextSelection)&&target.state.selection.eq(state.selection)&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
             if(!current())return;
             void (async()=>{
               const resolved=await resolveItem();
               if(!current())return;
-              const application=completionApplication(doc,resolved,word?.from??context.pos,context.pos);
+              const application=completionApplication(doc,resolved,word?.from??context.pos,context.pos,contextSelection.main);
               if(!application)throw Error("补全或导入编辑无效，未修改源码");
               const existingSnippet=target.state.field(snippetSessionState,false);
               if(existingSnippet&&(application.format===2||application.additional.length))throw Error(existingSnippet.dirty?(existingSnippet.dormant?"请先保存当前参数修改，再应用此候选":"请先保存，再按 Esc 结束当前参数补全"):"请先按 Esc 结束当前参数补全，再应用此候选");

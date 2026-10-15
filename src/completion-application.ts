@@ -15,13 +15,14 @@ function range(doc:Text,value:unknown){
  return from!==null&&to!==null&&from<=to?{from,to}:null;
 }
 /** Shape/budget admission only; never parses source or applies an edit. */
-export function completionApplication(doc:Text,item:unknown,from:number,to:number):CompletionApplication|null{
+export function completionApplication(doc:Text,item:unknown,from:number,to:number,selection?:{from:number;to:number}):CompletionApplication|null{
  if(!object(item)||![from,to].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=doc.length)||from>to||!boundary(doc,from)||!boundary(doc,to))return null;
+ if(selection&&(![selection.from,selection.to].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=doc.length)||selection.from>selection.to||!boundary(doc,selection.from)||!boundary(doc,selection.to)))return null;
  const format=item.insertTextFormat===undefined?1:item.insertTextFormat,mode=item.insertTextMode===undefined?1:item.insertTextMode;
  if(format!==1&&format!==2||mode!==1&&mode!==2)return null;
  if(item.textEdit!==undefined&&!object(item.textEdit))return null;
  const edit=item.textEdit;
- let span=edit?range(doc,edit.range):{from,to};
+ let span=edit?range(doc,edit.range):selection&&selection.from!==selection.to?{from:selection.from,to:selection.to}:{from,to};
  if(edit&&edit.range===undefined){
   const insert=range(doc,edit.insert),replace=range(doc,edit.replace);
   if(!insert||!replace||insert.from!==replace.from||insert.to>replace.to||insert.from>to||insert.to<to)return null;
@@ -29,6 +30,7 @@ export function completionApplication(doc:Text,item:unknown,from:number,to:numbe
  }else if(edit&&(edit.insert!==undefined||edit.replace!==undefined))return null;
  const source=edit?edit.newText:item.insertText===undefined?item.label:item.insertText;
  if(!span||typeof source!=="string"||source.length>snippetLimits.source||span.from>to||span.to<to||doc.lineAt(span.from).number!==doc.lineAt(span.to).number)return null;
+ if(selection&&(span.from>selection.from||span.to<selection.to))return null;
  const primary={...span,insert:source},additional:CompletionEdit[]=[];
  let units=source.length;
  if(item.additionalTextEdits!==undefined){

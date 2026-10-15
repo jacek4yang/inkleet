@@ -54,3 +54,24 @@ test("final expanded plain text and imports share one aggregate insertion budget
  const application=completionApplication(doc,{label:"x",additionalTextEdits},0,1);assert.ok(application);
  assert.equal(completionTextChanges(application,"x".repeat(10000)),null);
 });
+
+test("label-only completion replaces a full singleton selection in either cursor direction",()=>{
+ const selection={from:0,to:5};
+ for(const position of [0,5]){
+  const application=completionApplication(doc,{label:"value"},position,position,selection);assert.ok(application);
+  assert.deepEqual(application.primary,{from:0,to:5,insert:"value"});
+  const edit=completionTextChanges(application,"value")!;assert.equal(EditorState.create({doc:"HashM"}).update({changes:edit.changes}).state.doc.toString(),"value");
+ }
+});
+test("explicit primary ranges must cover the entire selected text",()=>{
+ const partial={start:{line:0,character:0},end:{line:0,character:2}};
+ assert.equal(completionApplication(doc,{label:"x",textEdit:{range:partial,newText:"x"}},0,0,{from:0,to:5}),null);
+ assert.ok(completionApplication(doc,{label:"x",textEdit:{range:span,newText:"x"}},0,0,{from:1,to:4}));
+ assert.equal(completionApplication(doc,{label:"x"},0,0,{from:0,to:6}),null);
+});
+
+test("insert arm need only contain request position while replace covers selection",()=>{
+ const r=(a:number,b:number)=>({start:{line:0,character:a},end:{line:0,character:b}});
+ assert.ok(completionApplication(doc,{label:"x",textEdit:{insert:r(0,0),replace:r(0,5),newText:"x"}},0,0,{from:0,to:5}));
+ assert.equal(completionApplication(doc,{label:"x",textEdit:{insert:r(0,0),replace:r(0,4),newText:"x"}},0,0,{from:0,to:5}),null);
+});
