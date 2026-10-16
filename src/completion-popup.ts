@@ -1,4 +1,4 @@
-import {Direction} from "@codemirror/view";
+import {Direction,type EditorView} from "@codemirror/view";
 import {autocompletion} from "@codemirror/autocomplete";
 import {placeCompletionInfo} from "./completion-popup-placement";
 let nextId=0;
@@ -14,5 +14,9 @@ export function completionPopup(){
   const vertical=p.anchor==="top"?"top:"+y+"px;bottom:auto;":"top:auto;bottom:"+(tooltip.clientHeight-y)+"px;";
   return {style:"position:absolute;box-sizing:border-box;margin:0;min-width:0;min-height:0;left:"+x+"px;right:auto;"+vertical+"width:"+p.width/sx+"px;max-width:"+p.width/sx+"px;max-height:"+p.maxHeight/sy+"px;overflow:auto;visibility:visible;",class:"inkleet-completion-info inkleet-completion-info-"+p.mode};
  };
- return {tooltipClass:()=>"inkleet-completion "+owner,positionInfo};
+ return {tooltipClass:()=>"inkleet-completion "+owner,positionInfo,scrollDocs(view:EditorView,direction:1|-1){
+  const info=view.dom.ownerDocument.querySelector<HTMLElement>("."+owner+" .cm-completionInfo");
+  if(!view.hasFocus||!info||getComputedStyle(info).visibility==="hidden"||info.scrollHeight<=info.clientHeight)return false;
+  info.scrollTop+=direction*Math.max(24,info.clientHeight*.8);return true;
+ }};
 }

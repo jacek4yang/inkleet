@@ -570,3 +570,5 @@ body .cm-tooltip.cm-completionInfo{padding:0;max-width:min(440px,calc(100vw - 16
 @media(forced-colors:active){body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li[aria-selected]{outline:1px solid Highlight;background:Highlight;color:HighlightText}.lsp-active-parameter{outline:1px solid Highlight;color:Highlight}}
 
 .lsp-completion-summary{font:12px/1.6 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere;padding-bottom:9px;margin-bottom:9px;border-bottom:1px solid var(--line);color:var(--muted)}
+
+body .cm-tooltip.lsp-hover,body .cm-tooltip.lsp-signature{border:1px solid var(--line);border-radius:7px;background:var(--surface-editor);color:var(--ink);box-shadow:0 4px 16px #20251b18,0 1px 3px #20251b0c;text-shadow:none;font-weight:400}

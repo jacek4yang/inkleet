@@ -3133,6 +3133,10 @@ try {
     assert.ok(layout.b.left>=-1&&layout.b.right<=viewport.width+1&&layout.b.top>=-1&&layout.b.bottom<=viewport.height+1,"documentation stays inside "+JSON.stringify(viewport));
     assert.ok(layout.b.left>=layout.a.right-1||layout.b.right<=layout.a.left+1||layout.b.top>=layout.a.bottom-1||layout.b.bottom<=layout.a.top+1,"documentation never covers completion list");
     assert.equal(layout.shadow,"none");assert.equal(layout.scroll,true);
+    await presentationCode.press("Alt+PageDown");
+    assert.ok(await presentationPage.locator(".cm-completionInfo").evaluate(dom=>dom.scrollTop>0),"documentation scrolls without moving editor focus");
+    assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
+    await presentationCode.press("Alt+PageUp");
     assert.equal(await presentationPage.locator(".cm-completionInfo img,.cm-completionInfo script,.cm-completionInfo a").count(),0,"server docs contain no active HTML or navigation");
     assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] svg").count(),1);
     if(viewport.width===1200)await presentationPage.screenshot({path:"evidence/completion-documentation-polished.png"});
@@ -3155,9 +3159,19 @@ try {
   await presentationCode.press("Control+Shift+Space");
   await presentationPage.locator(".lsp-active-parameter").waitFor();
   assert.equal(await presentationPage.locator(".lsp-active-parameter").innerText(),"key: K");
+  assert.equal(await presentationPage.locator(".lsp-signature").evaluate(dom=>getComputedStyle(dom).borderRadius),"7px");
+  assert.notEqual(await presentationPage.locator(".lsp-signature").evaluate(dom=>getComputedStyle(dom).boxShadow),"none");
   assert.equal(await presentationPage.locator(".lsp-parameter-documentation strong").innerText(),"key");
   await presentationPage.screenshot({path:"evidence/signature-documentation-polished.png"});
   await presentationCode.press("Escape");
+
+  const hoverPoint=await presentationPage.evaluate(()=>{const p=window.__presentation.view().coordsAtPos(2);return {x:(p.left+p.right)/2,y:(p.top+p.bottom)/2};});
+  await presentationPage.mouse.move(hoverPoint.x,hoverPoint.y);
+  await presentationPage.locator(".lsp-hover strong").waitFor();
+  assert.equal(await presentationPage.locator(".lsp-hover").evaluate(dom=>getComputedStyle(dom).borderRadius),"7px");
+  assert.equal(await presentationPage.locator(".lsp-hover img,.lsp-hover script").count(),0);
+  await presentationPage.screenshot({path:"evidence/hover-documentation-polished.png"});
+  await presentationPage.mouse.move(900,600);await presentationCode.press("Escape");
   await presentationPage.evaluate(()=>{window.__presentation.hold=true;});
   await presentationCode.press("Control+Space");
   await presentationPage.waitForFunction(()=>typeof window.__presentation.release==="function");
