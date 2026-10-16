@@ -210,7 +210,7 @@ def fill(css, value):
             cmd("DELETE","/actions")  # release any modifier whose key-up was uncertain
             time.sleep(.3)
 
-def source_navigation_case(query, target_name, label):
+def source_navigation_case(query, target_name, label, symbol=None):
     origin=text(".source-viewer h2").strip()
     subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
     search=".source-viewer .cm-search input[name='search']"
@@ -218,7 +218,7 @@ def source_navigation_case(query, target_name, label):
     fill(search,query)
     # Right collapses the match to its end; Left enters its final identifier.
     subprocess.run(["xdotool","key","--clearmodifiers","Return","Escape","Right","Left"],check=True)
-    symbol=query.split()[-1].split(".")[-1]
+    symbol=symbol or query.split()[-1].split(".")[-1]
     previous_position=None
     def selected_identifier():
         nonlocal previous_position
@@ -1185,8 +1185,12 @@ try:
             cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-source","actions":keys}]})
             wait_for(lambda: element(".source-viewer"),f"{group} source viewer",seconds=90)
             screenshot(group+"-stdlib-native.png")
-            if group=="golang": source_navigation_case("utf8.AppendRune","utf8.go","golang")
+            if group=="golang":
+                source_navigation_case("utf8.AppendRune","utf8.go","golang")
+                assert text(".source-viewer .source-path").strip()=="go/src/unicode/utf8/utf8.go","Go source path omits private cache noise"
             if group=="rust": source_navigation_case("A: Allocator = Global","alloc.rs","rust")
+            if group=="cpp": source_navigation_case("= allocator_traits","allocator_traits.h","cpp")
+            if group=="c": source_navigation_case("extern int fprintf (FILE","FILE.h","c","FILE")
             click(".source-viewer header button[aria-label=\'返回代码\']")
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"

@@ -50,6 +50,7 @@ test("source paths remove managed-cache noise without abbreviating meaningful pa
  assert.equal(sourceDisplayPath("file:///tmp/private/tools/pyright-hash/dist/typeshed-fallback/stdlib/typing.pyi"),"typeshed/stdlib/typing.pyi");
  assert.equal(sourceDisplayPath("file:///tools/python-hash/lib/python3.14/typing.py"),"python3.14/typing.py");
  assert.equal(sourceDisplayPath("file:///tools/go-hash/go/src/unicode/utf8/utf8.go"),"go/src/unicode/utf8/utf8.go");
+ assert.equal(sourceDisplayPath("file:///tmp/test/tools/packages/go-hash/src/unicode/utf8/utf8.go"),"go/src/unicode/utf8/utf8.go");
  assert.equal(sourceDisplayPath("file:///tools/rust/lib/rustlib/src/rust/library/alloc/src/vec/mod.rs"),"rust/library/alloc/src/vec/mod.rs");
  assert.equal(sourceDisplayPath("jdt://contents/java.base/java.util/ArrayList.java?=opaque"),"java.base/java.util/ArrayList.java");
  assert.equal(sourceDisplayPath("file:///custom/a%20b.rs"),"/custom/a b.rs");

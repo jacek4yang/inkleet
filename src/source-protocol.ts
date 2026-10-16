@@ -88,6 +88,7 @@ export function sourceDisplayPath(uri:string):string{
  ]){
   const at=path.lastIndexOf(marker);if(at>=0)return label+path.slice(at+marker.length);
  }
+ const managedGo=path.match(/\/packages\/go-[^/]+\/(src\/.*)$/);if(managedGo)return "go/"+managedGo[1];
  const python=path.match(/\/lib\/(python[0-9.]+\/.*)$/);if(python)return python[1];
  return path;
 }
