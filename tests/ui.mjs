@@ -784,7 +784,7 @@ try {
   assert.equal(await lspPage.locator(".cm-tooltip img").count(), 0);
   await lspEditor.press("Control+Shift+Space");
   await lspPage.locator(".lsp-signature").waitFor();
-  assert.match(await lspPage.locator(".lsp-signature").innerText(), /当前参数：1 \/ 1/);
+  assert.equal(await lspPage.locator(".lsp-signature").getAttribute("aria-label"),"参数 1 / 1");
   assert.equal(await lspPage.locator(".lsp-signature img").count(), 0);
   await lspEditor.press("Escape");
   await lspPage.locator(".lsp-signature").waitFor({ state: "hidden" });
@@ -3080,6 +3080,95 @@ try {
   await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
   assert.deepEqual(snippetLspErrors,[],"LSP snippet lifecycle produces no page errors");
   await snippetLspPage.close();
+
+  const presentationPage=await browser.newPage({viewport:{width:1200,height:800},deviceScaleFactor:2});
+  const presentationErrors=[],externalDocRequests=[];
+  presentationPage.on("pageerror",e=>presentationErrors.push(e.message));
+  presentationPage.on("request",r=>{if(r.url().includes("invalid.example"))externalDocRequests.push(r.url());});
+  await presentationPage.route("**/presentation-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><head><link rel='stylesheet' href='/src/style.css'></head><body><div id='editor' style='height:70vh;width:100%;padding:24px'></div></body></html>"}));
+  await presentationPage.goto("http://127.0.0.1:5173/presentation-test");
+  await presentationPage.evaluate(async()=>{
+    const api=await import("/tests/snippet-session-harness.tsx");
+    const s=window.__presentation={api,value:"Hash",edits:[],statuses:[],version:1};
+    s.docs={kind:"markdown",value:"**HashMap** stores key–value pairs.\n\nUse \u0060entry\u0060 to update a value without a second lookup.\n\n\u0060\u0060\u0060rust\nuse std::collections::HashMap;\nlet mut map = HashMap::new();\n\u0060\u0060\u0060\n\n| Operation | Cost |\n| --- | --- |\n| Insert | Expected O(1) |\n\n"+("中文文档保持清晰，不应撑开弹窗。 ".repeat(40))+"\n\n<img src='https://invalid.example/track' onerror='window.__unsafe=1'><script>window.__unsafe=1</script>[link](javascript:alert(1))"};
+    window.isTauri=true;
+    window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+      if(command==="start_language_service")return {id:801,version:1,server:"presentation",uri:"file:///solution.rs",completionResolve:true,completionSnippets:true};
+      if(command==="update_language_document"){s.version=args.version;return;}
+      if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
+      if(command==="language_request"){
+        if(args.kind==="completion")return [{label:"HashMap",detail:"std::collections · map",kind:22,insertText:"HashMap",_inkleetCompletion:1},{label:"HashSet",detail:"std::collections · set",kind:22,insertText:"HashSet",_inkleetCompletion:2}];
+        if(args.kind==="hover")return {contents:s.docs};
+        if(args.kind==="signatureHelp")return {activeSignature:0,activeParameter:0,signatures:[{label:"insert(key: K, value: V) -> Option<V>",parameters:[{label:[7,13],documentation:{kind:"markdown",value:"The **key** to insert."}},{label:[15,23]}],documentation:{kind:"markdown",value:"Inserts a key–value pair into the map."}}]};
+        return null;
+      }
+      if(command==="language_completion_resolve"){
+        const item={label:args.token===1?"HashMap":"HashSet",insertTextFormat:1,insertText:args.token===1?"HashMap":"HashSet",documentation:args.token===1?s.docs:{kind:"plaintext",value:"**literal** HashSet documentation"}};
+        if(s.hold)return new Promise(resolve=>{s.release=()=>resolve(item);});
+        return item;
+      }
+      if(command==="stop_language_service"||command==="language_cancel_completion")return;
+      throw Error(command);
+    }};
+    s.mount=api.mountSnippetEditor(document.querySelector("#editor"),s);
+    s.view=()=>api.EditorView.findFromDOM(document.querySelector(".cm-editor"));
+  });
+  const presentationCode=presentationPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  await presentationCode.waitFor();await presentationPage.waitForFunction(()=>window.__presentation.statuses.some(t=>t.includes("已连接")));
+  const showPresentation=async()=>{
+    await presentationPage.evaluate(()=>{const v=window.__presentation.view();v.dispatch({selection:{anchor:v.state.doc.length}});v.focus();});
+    await presentationCode.press("Control+Space");
+    await presentationPage.locator(".lsp-completion-documentation strong").waitFor();
+  };
+  for(const viewport of [{width:1200,height:800},{width:640,height:600},{width:400,height:500}]){
+    await presentationPage.setViewportSize(viewport);await showPresentation();
+    await presentationPage.waitForTimeout(100);
+    const layout=await presentationPage.evaluate(()=>{
+      const list=document.querySelector(".inkleet-completion"),info=document.querySelector(".cm-completionInfo");
+      const a=list.getBoundingClientRect(),b=info.getBoundingClientRect(),style=getComputedStyle(info);
+      return {a:{left:a.left,right:a.right,top:a.top,bottom:a.bottom},b:{left:b.left,right:b.right,top:b.top,bottom:b.bottom},visible:style.visibility,overflow:getComputedStyle(list).overflow,scroll:info.scrollHeight>info.clientHeight,shadow:getComputedStyle(document.querySelector(".cm-content")).textShadow};
+    });
+    assert.equal(layout.visible,"visible");assert.equal(layout.overflow,"visible");
+    assert.ok(layout.b.left>=-1&&layout.b.right<=viewport.width+1&&layout.b.top>=-1&&layout.b.bottom<=viewport.height+1,"documentation stays inside "+JSON.stringify(viewport));
+    assert.ok(layout.b.left>=layout.a.right-1||layout.b.right<=layout.a.left+1||layout.b.top>=layout.a.bottom-1||layout.b.bottom<=layout.a.top+1,"documentation never covers completion list");
+    assert.equal(layout.shadow,"none");assert.equal(layout.scroll,true);
+    assert.equal(await presentationPage.locator(".cm-completionInfo img,.cm-completionInfo script,.cm-completionInfo a").count(),0,"server docs contain no active HTML or navigation");
+    assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] svg").count(),1);
+    if(viewport.width===1200)await presentationPage.screenshot({path:"evidence/completion-documentation-polished.png"});
+    if(viewport.width===400)await presentationPage.screenshot({path:"evidence/completion-documentation-narrow.png"});
+    await presentationCode.press("ArrowDown");
+    await presentationPage.waitForFunction(()=>document.querySelector(".lsp-completion-documentation")?.textContent.includes("**literal** HashSet"));
+    assert.equal(await presentationPage.locator(".lsp-completion-documentation strong").count(),0,"plaintext remains literal");
+    await presentationCode.press("Escape");
+    assert.equal(await presentationPage.locator(".inkleet-completion").count(),0);
+    assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
+  }
+  await presentationPage.setViewportSize({width:1000,height:700});
+  await presentationCode.press("Control+Shift+Space");
+  await presentationPage.locator(".lsp-active-parameter").waitFor();
+  assert.equal(await presentationPage.locator(".lsp-active-parameter").innerText(),"key: K");
+  assert.equal(await presentationPage.locator(".lsp-parameter-documentation strong").innerText(),"key");
+  await presentationPage.screenshot({path:"evidence/signature-documentation-polished.png"});
+  await presentationCode.press("Escape");
+  await presentationPage.evaluate(()=>{window.__presentation.hold=true;});
+  await presentationCode.press("Control+Space");
+  await presentationPage.waitForFunction(()=>typeof window.__presentation.release==="function");
+  await presentationCode.press("Escape");
+  await presentationPage.evaluate(()=>window.__presentation.release());
+  await presentationPage.waitForTimeout(150);
+  assert.equal(await presentationPage.locator(".cm-completionInfo").count(),0,"late resolved documentation cannot reopen dismissed popup");
+  const safe=await presentationPage.evaluate(async()=>{
+    const {renderDocumentation}=await import("/src/lsp-documentation.ts");
+    const controller=new AbortController();controller.abort();
+    return {cancelled:await renderDocumentation({kind:"markdown",value:"cancelled"},false,controller.signal)===null,unsafe:window.__unsafe??null};
+  });
+  assert.deepEqual(safe,{cancelled:true,unsafe:null});assert.deepEqual(externalDocRequests,[]);
+  await presentationPage.evaluate(()=>window.__presentation.mount.destroy());
+  assert.equal(await presentationPage.locator(".cm-tooltip").count(),0);
+  assert.deepEqual(presentationErrors,[]);
+  await writeFile("evidence/EDITOR_POPOVER_PRESENTATION_RESULT.txt","PASS: actual CodeEditor completion/documentation and active signature parameter; 1200/640/400 CSS-pixel viewports at DPR2; independent bounded scroll, no list overlap, SVG alignment, literal plaintext vs sanitized Markdown, no remote resources, keyboard selection/Escape, delayed resolve and destroyed editor cleanup. Browser mock only; real OS zoom, native screenshots, other platforms and real IME require independent qualification.\n");
+  await presentationPage.close();
+
   const providerPage=await browser.newPage();
   await providerPage.route("**/provider-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body><div id='editor'></div></body></html>"}));
   await providerPage.goto("http://127.0.0.1:5173/provider-test");
