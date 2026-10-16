@@ -1387,6 +1387,38 @@ try:
         save_editor(code)
         (evidence/"VIM_NATIVE_RESULT.txt").write_text("PASS: real Linux WebView, OS keyboard ciw, atomic undo/redo, idle canonical preservation, explicit :w, persisted toggle without document replacement. Native IME not verified.\n")
 
+        # Exercise actual native Vim navigation inside immutable library sources.
+        vim_source="fn source_probe() { let _: Vec<i32> = Vec::new(); }"
+        fill(code,vim_source)
+        wait_for(lambda:"rust-analyzer 已连接" in text(".lsp-status"),"Rust ready for native source Vim")
+        set_vim(True)
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","gg0fVgd"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="mod.rs","native main gd opens Vec source",seconds=60)
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","50","/A: Allocator = Global"],check=True)
+        search_input=".source-viewer .cm-vim-panel input"
+        wait_for(lambda:cmd("GET",f"/element/{element(search_input)}/property/value").endswith("A: Allocator = Global"),"native source Vim search input")
+        subprocess.run(["xdotool","key","--clearmodifiers","Return"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":search_input}),"native source Vim search returns to code")
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","fGgd"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="alloc.rs","native source gd reaches Global",seconds=60)
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+o"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="mod.rs","native source Vim Ctrl-O history")
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+i"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="alloc.rs","native source Vim Ctrl-I history")
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","dd"],check=True)
+        assert "pub struct Global" in text(".source-viewer .cm-content"),"native Vim delete cannot remove the library declaration"
+        assert source_text(code)==vim_source,"native source Vim preserves the editable solution"
+        assert (data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()==marker,"source navigation cannot save the solution"
+        screenshot("rust-vim-source-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),"native normal Escape closes source viewer")
+        set_vim(False)
+        fill(code,marker)
+        save_editor(code)
+        (evidence/"VIM_SOURCE_NAVIGATION_NATIVE_RESULT.txt").write_text("PASS: actual native main gd, source Vim search/gd, Ctrl-O/I source history, readonly dd, unchanged solution/canonical, normal Escape closure. Native IME remains unverified.\n")
+
         # A void-call fixture uses the normal cache, actual private Python harness and GUI.
         stop()
         original_cache=cache_path.read_text()
