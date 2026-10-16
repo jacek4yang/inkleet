@@ -1,3 +1,7 @@
+import {completionPopup} from "./completion-popup";
+import {renderDocumentation} from "./lsp-documentation";
+import {activeParameterSpan,completionKind} from "./lsp-document-model";
+import {completionIcon} from "./lsp-completion-icons";
 import {completionApplication,completionTextChanges,plainCompletionChanges as completionChanges} from "./completion-application";
 export {completionChanges};
 import {SnippetPreparationService} from "./snippet-service";
@@ -46,6 +50,7 @@ function content(value: unknown): string {
   return object(value) && typeof value.value === "string" ? value.value.slice(0, 32768) : "";
 }
 export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source) => void, metadata?: string, commandsOwned=false) {
+  const documentationLifetime=new AbortController(),popup=completionPopup();
   const serverName = { python3: "Pyright", java: "JDT LS", golang: "gopls", rust: "rust-analyzer", c: "clangd", cpp: "clangd" }[language];
   const signatureEffect = StateEffect.define<Tooltip | null>();
   const signatureField = StateField.define<Tooltip | null>({
@@ -199,15 +204,18 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           return resolution;
         };
         options.push({
-          label: typeof item.filterText === "string" ? item.filterText.slice(0, 512) : item.label.trimStart(), displayLabel: item.label.trimStart(), detail: typeof item.detail === "string" ? item.detail.slice(0, 500) : undefined,
-          info: resolve ? async()=>{
+          label: typeof item.filterText === "string" ? item.filterText.slice(0, 512) : item.label.trimStart(), displayLabel: typeof item.filterText==="string"&&item.filterText.slice(0,512)!==item.label.trimStart()?item.label.trimStart():undefined, detail: typeof item.detail === "string" ? item.detail.slice(0, 500) : undefined,
+          info: async()=>{
             try{
-              const resolved=await resolveItem();
+              const resolved=resolve?await resolveItem():item;
               if(closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return null;
-              const text=object(resolved)?content(resolved.documentation):"";if(!text)return null;
-              const dom=document.createElement("div");dom.className="lsp-completion-documentation";dom.textContent=text;return dom;
+              const dom=await renderDocumentation(object(resolved)?resolved.documentation:null,false,documentationLifetime.signal);
+              if(!dom||closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return null;
+              dom.classList.add("lsp-completion-documentation");
+              const summary=document.createElement("div");summary.className="lsp-completion-summary";summary.textContent=item.label.slice(0,512)+(typeof item.detail==="string"?"\n"+item.detail.slice(0,500):"");dom.prepend(summary);return dom;
             }catch{return null;}
-          } : content(item.documentation), type: ({ 2: "method", 3: "function", 5: "property", 6: "variable", 7: "class", 9: "namespace", 14: "keyword" } as Record<number, string>)[item.kind] ?? "text",
+          }, type: completionKind(item.kind),
+
           apply(target) {
             const ticket=invalidateCompletionApplication(),state=target.state,uri=session?.uri;
             const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.eq(contextSelection)&&target.state.selection.eq(state.selection)&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
@@ -247,10 +255,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     try {
       const result = await request("hover", pos, doc);
       if (!object(result) || closed || target.state.doc !== doc) return null;
-      const text = content(result.contents); if (!text) return null;
+      const dom=await renderDocumentation(result.contents,true,documentationLifetime.signal);
+      if(!dom||closed||view!==target||target.state.doc!==doc)return null;
+      dom.classList.add("lsp-hover");
       const span = range(doc, result.range) ?? { from: pos, to: pos };
       return { pos: span.from, end: span.to, above: true, create() {
-        const dom = document.createElement("div"); dom.className = "lsp-hover"; dom.textContent = text; return { dom };
+        return { dom };
       }};
     } catch { return null; }
   }
@@ -270,14 +280,20 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       const parameters = Array.isArray(signature.parameters) ? signature.parameters : [];
       const current = Number.isInteger(parameter) && parameter >= 0 ? parameters[parameter] : null;
       const label = signature.label.slice(0, 4096);
-      const documentation = [content(signature.documentation), object(current) ? content(current.documentation) : ""].filter(Boolean).join("\n\n").slice(0, 8192);
+      const span=activeParameterSpan(label,current);
+      const parameterDocs=await renderDocumentation(object(current)?current.documentation:null,false,documentationLifetime.signal);
+      const documentation=await renderDocumentation(signature.documentation,false,documentationLifetime.signal);
+      if(closed||generation!==signatureGeneration||view!==target||target.state.doc!==doc||target.state.selection.main.head!==pos||target.composing)return;
       target.dispatch({ effects: signatureEffect.of({ pos, above: true, create() {
         const dom = document.createElement("div"); dom.className = "lsp-signature"; dom.setAttribute("role", "status");
-        const heading = document.createElement("div"); heading.className = "lsp-signature-label"; heading.textContent = label; dom.append(heading);
+        const heading = document.createElement("div"); heading.className = "lsp-signature-label"; if(span){heading.append(label.slice(0,span.from));const active=document.createElement("mark");active.className="lsp-active-parameter";active.textContent=label.slice(span.from,span.to);heading.append(active,label.slice(span.to));}else heading.textContent=label;
+        dom.append(heading);
+        if(result.signatures.length>1){const count=document.createElement("span");count.className="lsp-overload-count";count.textContent=(index+1)+"/"+result.signatures.length;count.title="当前重载";dom.append(count);}
         if (Number.isInteger(parameter) && parameter >= 0 && parameter < parameters.length) {
-          const active = document.createElement("div"); active.textContent = "当前参数：" + (parameter + 1) + " / " + parameters.length; dom.append(active);
+          dom.setAttribute("aria-label","参数 "+(parameter+1)+" / "+parameters.length);
         }
-        if (documentation) { const details = document.createElement("div"); details.textContent = documentation; dom.append(details); }
+        if(parameterDocs){parameterDocs.classList.add("lsp-parameter-documentation");dom.append(parameterDocs);}
+        if(documentation)dom.append(documentation);
         return { dom };
       } }) });
     } catch { if (!closed && generation === signatureGeneration && view === target && target.state.doc === doc) target.dispatch({ effects: signatureEffect.of(null) }); }
@@ -331,10 +347,11 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     ...rename.extensions,
     signatureField,
     semanticField, semanticTheme,
-    autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60, defaultKeymap:false }),
+    autocompletion({ override: [complete], activateOnTyping: true, maxRenderedOptions: 60, defaultKeymap:false, icons:false, tooltipClass:popup.tooltipClass,positionInfo:popup.positionInfo, addToOptions:[{render:completionIcon,position:20}] }),
     // Keep all native completion bindings, but route explicit starts through the
     // same reset boundary as commands. Disable the earlier basicSetup copy.
     Prec.highest(keymap.of(completionKeymap.map(binding=>binding.run===startCompletion?{...binding,run:invokeCompletion}:binding))),
+    keymap.of([{key:"Alt-PageDown",run:target=>popup.scrollDocs(target,1)},{key:"Alt-PageUp",run:target=>popup.scrollDocs(target,-1)}]),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
     EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}}}),
@@ -405,7 +422,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      snippetPreparation.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      documentationLifetime.abort();snippetPreparation.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       appliedDiagnostics=null;session = null; view = null;
     },
