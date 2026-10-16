@@ -3184,6 +3184,7 @@ try {
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.longRows=false;s.manyRows=true;});
   await presentationCode.press("Control+Space");
   await presentationPage.locator(".inkleet-completion li[aria-selected]").waitFor();
+  await presentationPage.waitForTimeout(150); // Respect CodeMirror\'s initial interaction guard before testing navigation.
   const assertSelectedVisible=async()=>{
     const visible=await presentationPage.evaluate(()=>{
       const selected=document.querySelector(".inkleet-completion li[aria-selected]"),list=selected.closest("ul"),a=selected.getBoundingClientRect(),b=list.getBoundingClientRect();
@@ -3197,6 +3198,7 @@ try {
   await presentationCode.press("Escape");
   await presentationCode.press("Control+Space");
   await presentationPage.locator(".inkleet-completion li[aria-selected]").waitFor();
+  await presentationPage.waitForTimeout(150); // Respect CodeMirror\'s initial interaction guard before testing navigation.
   for(let i=0;i<71;i++)await presentationCode.press("ArrowDown");
   assert.match(await assertSelectedVisible(),/^Hash71/);
   await presentationCode.press("Escape");
@@ -3204,6 +3206,7 @@ try {
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.manyRows=false;s.oversized=true;s.oversizedLabel="Hash"+"LongIdentifier".repeat(25);s.oversizedDetail="完整类型信息 ".repeat(50)+"END_OF_SIGNATURE";});
   await presentationCode.press("Control+Space");
   await presentationPage.locator(".inkleet-completion li[aria-selected]").waitFor();
+  await presentationPage.waitForTimeout(150); // Respect CodeMirror\'s initial interaction guard before testing navigation.
   const oversizedRow=await presentationPage.evaluate(()=>{
     const s=window.__presentation,row=document.querySelector(".inkleet-completion li"),list=row.closest("ul");
     return {label:row.querySelector(".cm-completionLabel").textContent,detail:row.querySelector(".cm-completionDetail").textContent,expectedLabel:s.oversizedLabel,expectedDetail:s.oversizedDetail,height:row.getBoundingClientRect().height,listHeight:list.clientHeight};
