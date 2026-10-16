@@ -3290,6 +3290,33 @@ try {
   await presentationPage.keyboard.press("Escape");
   await reader.waitFor({state:"hidden"});
   assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true,"closing reader restores code focus");
+
+  // Keyboard reader activation and close during an owned worker's pending parse.
+  await presentationPage.evaluate(()=>{const s=window.__presentation;s.docs={kind:"markdown",value:"**Reader race**\n\n"+"bounded document ".repeat(2400)+"END_OF_RACE_DOCUMENT"};});
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".cm-completionInfo .lsp-document-limit").waitFor();
+  await presentationPage.evaluate(()=>{
+    const s=window.__presentation;s.NativeWorker=window.Worker;s.readerWorkers=[];
+    window.Worker=class {constructor(){this.terminated=0;s.readerWorkers.push(this);}postMessage(){}terminate(){this.terminated++;}};
+  });
+  await presentationCode.press("Alt+Enter");
+  await reader.waitFor();
+  assert.equal(await reader.getByLabel("文档正文",{exact:true}).getAttribute("aria-busy"),"true");
+  await presentationPage.keyboard.press("Escape");
+  await reader.waitFor({state:"hidden"});
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.readerWorkers[0].terminated),1);
+  await presentationPage.evaluate(()=>{
+    const s=window.__presentation;const worker=s.readerWorkers[0];worker.onmessage?.({data:{html:["late content"]}});window.Worker=s.NativeWorker;
+  });
+  assert.equal(await presentationPage.locator(".lsp-document-reader").count(),0,"late worker callback cannot revive closed reader");
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".cm-completionInfo .lsp-document-expand").waitFor();
+  await presentationCode.press("Alt+Enter");
+  await reader.waitFor();
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-body")?.textContent.includes("END_OF_RACE_DOCUMENT"));
+  await presentationPage.keyboard.press("Escape");
+  await reader.waitFor({state:"hidden"});
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.detailOnly=true;s.resolvedDetail="fn resolved_signature("+("parameter: VeryLongType, ".repeat(40))+") -> END_OF_RESOLVED_DETAIL";});
   await presentationCode.press("Control+Space");
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-completion-documentation")?.textContent.includes("END_OF_RESOLVED_DETAIL"));
