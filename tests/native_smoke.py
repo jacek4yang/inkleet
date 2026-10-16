@@ -369,6 +369,7 @@ def native_snippet_case(group,code):
             assert wire["item"][0]["source"]=="inkleet_test(${1:name}, ${2:i});",group+" pinned JDTLS two-argument snippet"
             assert response["request"]["line"]==3 and response["request"]["character"]==18,group+" exact editable completion cursor"
             assert wire["item"][0]["modePresent"] is True and wire["item"][0]["range"]=={"start":{"line":3,"character":8},"end":{"line":3,"character":18}},group+" explicit mode2 edit range is unchanged"
+            assert wire["item"][0]["additional"]==0,group+" local method needs no import edits"
         time.sleep(.15)
         cmd("POST",f"/element/{choice['node']}/click",{})
         wait_for(lambda:snippet_selection()["activeFields"]>0,group+" real active argument field",seconds=20)
@@ -384,10 +385,17 @@ def native_snippet_case(group,code):
             assert response["request"]["line"]==(3 if group=="java" else 0),group+" editable source position excludes virtual scaffold"
             assert selected["source"]==accepted_expected,group+" native selection covers complete visible source"
             assert selected["lineCount"]==accepted_expected.count("\n")+1,group+" all fixture lines visible"
+            if group=="java":
+                line_start=sum(len(line)+1 for line in accepted_expected.split("\n")[:3])
+                assert (selected["from"],selected["to"])==(line_start+21,line_start+25),group+" exact first argument range"
         assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
         def record_navigation(label):
-            observation.setdefault("navigation",[]).append({"label":label,"source":source_text(code),"selection":snippet_selection()})
+            selection=snippet_selection()
+            observation.setdefault("navigation",[]).append({"label":label,"source":source_text(code),"selection":selection})
             persist_observations()
+            if group=="java":
+                bounds=(21,25) if label=="previous" else (27,28)
+                assert (selection["from"],selection["to"])==(line_start+bounds[0],line_start+bounds[1]),group+" exact argument navigation range"
         if phase=="history":
             subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
             wait_for(lambda:source_text(code)==source,group+" one undo removes the entire accepted snippet")
