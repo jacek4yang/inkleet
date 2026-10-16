@@ -3145,6 +3145,13 @@ try {
     assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
   }
   await presentationPage.setViewportSize({width:1000,height:700});
+  await presentationPage.evaluate(()=>{document.body.style.zoom="1.25";});
+  await showPresentation();await presentationPage.waitForTimeout(100);
+  const zoomBounds=await presentationPage.locator(".cm-completionInfo").boundingBox();
+  assert.ok(zoomBounds&&zoomBounds.x>=-1&&zoomBounds.y>=-1&&zoomBounds.x+zoomBounds.width<=1001&&zoomBounds.y+zoomBounds.height<=701,"125% CSS zoom keeps documentation within viewport");
+  await presentationPage.screenshot({path:"evidence/completion-documentation-zoom.png"});
+  await presentationCode.press("Escape");
+  await presentationPage.evaluate(()=>{document.body.style.zoom="";});
   await presentationCode.press("Control+Shift+Space");
   await presentationPage.locator(".lsp-active-parameter").waitFor();
   assert.equal(await presentationPage.locator(".lsp-active-parameter").innerText(),"key: K");
@@ -3164,10 +3171,36 @@ try {
     return {cancelled:await renderDocumentation({kind:"markdown",value:"cancelled"},false,controller.signal)===null,unsafe:window.__unsafe??null};
   });
   assert.deepEqual(safe,{cancelled:true,unsafe:null});assert.deepEqual(externalDocRequests,[]);
+  const lifecycle=await presentationPage.evaluate(async()=>{
+    const {renderDocumentation}=await import("/src/lsp-documentation.ts");
+    const NativeWorker=window.Worker,workers=[];
+    class HeldWorker {
+      constructor(){this.terminated=0;workers.push(this);}
+      postMessage(){}
+      terminate(){this.terminated++;}
+    }
+    window.Worker=HeldWorker;
+    try{
+      const a=new AbortController(),b=new AbortController();
+      const first=renderDocumentation({kind:"markdown",value:"**held-one**"},false,a.signal);
+      const second=renderDocumentation({kind:"markdown",value:"**held-two**"},false,b.signal);
+      const saturated=await renderDocumentation({kind:"markdown",value:"**busy-fallback**"});
+      const count=workers.length;
+      a.abort();b.abort();
+      const cancelled=await Promise.all([first,second]);
+      const started=performance.now();
+      const timeout=await renderDocumentation({kind:"markdown",value:"**timeout-fallback**"});
+      return {count,saturated:saturated?.textContent,cancelled:cancelled.every(v=>v===null),terminated:workers.map(w=>w.terminated),timeout:timeout?.textContent,elapsed:performance.now()-started};
+    }finally{window.Worker=NativeWorker;}
+  });
+  assert.equal(lifecycle.count,2);assert.equal(lifecycle.saturated,"**busy-fallback**");assert.equal(lifecycle.cancelled,true);
+  assert.deepEqual(lifecycle.terminated,[1,1,1]);assert.equal(lifecycle.timeout,"**timeout-fallback**");assert.ok(lifecycle.elapsed<2000);
+  assert.equal(await presentationPage.evaluate(async()=>{const {renderDocumentation}=await import("/src/lsp-documentation.ts");const dom=await renderDocumentation({kind:"markdown",value:"**recovered-real-worker**"});return dom?.querySelector("strong")?.textContent;}),"recovered-real-worker","worker slots recover after abort and timeout");
+
   await presentationPage.evaluate(()=>window.__presentation.mount.destroy());
   assert.equal(await presentationPage.locator(".cm-tooltip").count(),0);
   assert.deepEqual(presentationErrors,[]);
-  await writeFile("evidence/EDITOR_POPOVER_PRESENTATION_RESULT.txt","PASS: actual CodeEditor completion/documentation and active signature parameter; 1200/640/400 CSS-pixel viewports at DPR2; independent bounded scroll, no list overlap, SVG alignment, literal plaintext vs sanitized Markdown, no remote resources, keyboard selection/Escape, delayed resolve and destroyed editor cleanup. Browser mock only; real OS zoom, native screenshots, other platforms and real IME require independent qualification.\n");
+  await writeFile("evidence/EDITOR_POPOVER_PRESENTATION_RESULT.txt","PASS: actual CodeEditor completion/documentation and active signature parameter; 1200/640/400 CSS-pixel viewports at DPR2 and 125% CSS zoom; controlled in-flight worker cancellation, saturation and timeout recovery plus real-worker recovery; independent bounded scroll, no list overlap, SVG alignment, literal plaintext vs sanitized Markdown, no remote resources, keyboard selection/Escape, delayed resolve and destroyed editor cleanup. Browser mock only; real OS zoom, native screenshots, other platforms and real IME require independent qualification.\n");
   await presentationPage.close();
 
   const providerPage=await browser.newPage();
