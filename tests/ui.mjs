@@ -3014,7 +3014,7 @@ try {
     assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view().state.field(s.api.snippetSessionState);}),null);
     if(boundary==="composition"){await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true})));await snippetLspPage.waitForTimeout(100);}
   }
-  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.holdPreparation=true;});
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset("call(${1:value})\n$0",true);s.omitMode=true;s.holdPreparation=true;});
   await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>typeof window.__snippetLspTest.preparedReply==="function");
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.oldView=s.view();s.mount.destroy();});
   await snippetLspCode.waitFor({state:"hidden"});
@@ -3023,9 +3023,9 @@ try {
   assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view()!==s.oldView;}),true,"recreation uses a different editor owner");
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.holdPreparation=false;s.preparedReply();s.restorePreparation();});
   await snippetLspPage.waitForTimeout(150);
-  assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),"call","destroyed editor cannot receive prepared snippet");
+  assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),"  call","destroyed default2 editor cannot receive prepared snippet");
   await writeFile("evidence/LSP_SNIPPET_APPLICATION_RESULT.txt","PASS: actual CodeEditor format2 candidate acceptance through mocked LSP resolve and real preparation worker, atomic imports/undo, linked and nested parameters, variables, mode2/final stop, plain literal dollar text, unsupported-layout atomic refusal, delayed resolve/preparation cancellation on Escape/selection/typing/blur/synthetic composition and destroy. This mocked-LSP fixture does not verify server capability negotiation, native server behavior or real IME.\n");
-  assert.equal(await snippetLspCode.innerText(),"call","replacement editor ignores old prepared result");
+  assert.equal(await snippetLspCode.innerText(),"  call","replacement default1 editor ignores old default2 prepared result");
   await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.sessionModes?.at(-1)===1);
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset("call()\n    tail",true,1,1);s.omitMode=true;});
   await acceptLspSnippet();
