@@ -3106,6 +3106,7 @@ try {
       }
       if(command==="language_completion_resolve"){
         const item={label:args.token===1?"HashMap":"HashSet",insertTextFormat:1,insertText:args.token===1?"HashMap":"HashSet",documentation:args.token===1?s.docs:{kind:"plaintext",value:"**literal** HashSet documentation"}};
+        if(s.detailOnly){item.detail=s.resolvedDetail;delete item.documentation;}
         if(s.hold)return new Promise(resolve=>{s.release=()=>resolve(item);});
         return item;
       }
@@ -3270,7 +3271,36 @@ try {
     const controller=new AbortController();controller.abort();
     return {cancelled:await renderDocumentation({kind:"markdown",value:"cancelled"},false,controller.signal)===null,unsafe:window.__unsafe??null};
   });
+
   assert.deepEqual(safe,{cancelled:true,unsafe:null});assert.deepEqual(externalDocRequests,[]);
+  await presentationPage.evaluate(()=>{const s=window.__presentation;s.hold=false;s.docs={kind:"plaintext",value:"START_OF_DOCUMENT\n"+"Documentation content ".repeat(2000)+"\nEND_OF_COMPLETE_DOCUMENT"};});
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".cm-completionInfo .lsp-document-limit").waitFor();
+  assert.equal(await presentationPage.locator(".cm-completionInfo").evaluate(dom=>dom.textContent.includes("END_OF_COMPLETE_DOCUMENT")),false,"bounded preview does not pretend to contain the tail");
+  await presentationPage.locator(".cm-completionInfo").getByRole("button",{name:"展开文档",exact:true}).click();
+  const reader=presentationPage.getByRole("dialog",{name:"文档阅读",exact:true});
+  await reader.waitFor();
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-body")?.textContent.includes("END_OF_COMPLETE_DOCUMENT"));
+  assert.equal(await reader.locator(".lsp-document-limit").count(),0,"accepted full document has no false truncation notice");
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.value),"Hash");
+  const readerBox=await reader.boundingBox(),readerViewport=presentationPage.viewportSize();
+  assert.ok(readerBox.x>=0&&readerBox.y>=0&&readerBox.x+readerBox.width<=readerViewport.width+1&&readerBox.y+readerBox.height<=readerViewport.height+1);
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+End");
+  await presentationPage.screenshot({path:"evidence/expanded-documentation-reader.png"});
+  await presentationPage.keyboard.press("Escape");
+  await reader.waitFor({state:"hidden"});
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true,"closing reader restores code focus");
+  await presentationPage.evaluate(()=>{const s=window.__presentation;s.detailOnly=true;s.resolvedDetail="fn resolved_signature("+("parameter: VeryLongType, ".repeat(40))+") -> END_OF_RESOLVED_DETAIL";});
+  await presentationCode.press("Control+Space");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-completion-documentation")?.textContent.includes("END_OF_RESOLVED_DETAIL"));
+  await presentationPage.locator(".cm-completionInfo").getByRole("button",{name:"展开文档",exact:true}).click();
+  await reader.waitFor();
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-body")?.textContent.includes("END_OF_RESOLVED_DETAIL"));
+  assert.equal(await reader.locator("img,script,a").count(),0);
+  await reader.getByRole("button",{name:"关闭文档",exact:true}).click();
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
+  await presentationPage.evaluate(()=>{window.__presentation.detailOnly=false;});
+
   const lifecycle=await presentationPage.evaluate(async()=>{
     const {renderDocumentation}=await import("/src/lsp-documentation.ts");
     const NativeWorker=window.Worker,workers=[];
@@ -3297,8 +3327,17 @@ try {
   assert.deepEqual(lifecycle.terminated,[1,1,1]);assert.equal(lifecycle.timeout,"**timeout-fallback**");assert.ok(lifecycle.elapsed<2000);
   assert.equal(await presentationPage.evaluate(async()=>{const {renderDocumentation}=await import("/src/lsp-documentation.ts");const dom=await renderDocumentation({kind:"markdown",value:"**recovered-real-worker**"});return dom?.querySelector("strong")?.textContent;}),"recovered-real-worker","worker slots recover after abort and timeout");
 
+  await presentationPage.evaluate(()=>{const s=window.__presentation;s.docs={kind:"plaintext",value:"oversized ".repeat(30000)+"UNREACHABLE_TAIL"};});
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".cm-completionInfo .lsp-document-limit").waitFor();
+  await presentationPage.locator(".cm-completionInfo").getByRole("button",{name:"展开文档",exact:true}).click();
+  await reader.waitFor();await reader.locator(".lsp-document-limit").waitFor();
+  assert.equal(await reader.locator(".lsp-document-limit").innerText(),"文档超出显示上限，当前内容不完整");
+  assert.equal(await reader.evaluate(dom=>dom.textContent.includes("UNREACHABLE_TAIL")),false);
   await presentationPage.evaluate(()=>window.__presentation.mount.destroy());
+  assert.equal(await presentationPage.locator(".lsp-document-reader").count(),0,"editor destruction owns and closes its expanded reader");
   assert.equal(await presentationPage.locator(".cm-tooltip").count(),0);
+  await writeFile("evidence/EXPANDED_DOCUMENTATION_RESULT.txt","PASS: explicit preview limits, >32K original document tail in reader, resolved-detail-only expansion past500characters, modal bounds, Escape/close restoring code focus, explicit >256K limit and owner destruction. Browser fixture, not native reader qualification.\n");
   assert.deepEqual(presentationErrors,[]);
   await writeFile("evidence/EDITOR_POPOVER_PRESENTATION_RESULT.txt","PASS: actual CodeEditor completion/documentation and active signature parameter; 1200/640/400 CSS-pixel viewports at DPR2 and 125% CSS zoom; controlled in-flight worker cancellation, saturation and timeout recovery plus real-worker recovery; independent bounded scroll, no list overlap, SVG alignment, literal plaintext vs sanitized Markdown, no remote resources, keyboard selection/Escape, delayed resolve and destroyed editor cleanup. Browser mock only; real OS zoom, native screenshots, other platforms and real IME require independent qualification.\n");
   await presentationPage.close();
