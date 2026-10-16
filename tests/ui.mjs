@@ -3457,13 +3457,16 @@ try {
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.docs={kind:"markdown",value:"**Reader race**\n\n"+"bounded document ".repeat(2400)+"END_OF_RACE_DOCUMENT"};});
   await presentationCode.press("Control+Space");
   await presentationPage.locator(".cm-completionInfo .lsp-document-limit").waitFor();
-  await presentationPage.evaluate(()=>{
-    const s=window.__presentation;s.NativeWorker=window.Worker;s.readerWorkers=[];
+  await presentationPage.evaluate(async()=>{
+    const {completionStatus}=await import("/node_modules/.vite/deps/@codemirror_autocomplete.js");
+    const s=window.__presentation;s.readerBlurState="not-blurred";s.view().contentDOM.addEventListener("blur",()=>{s.readerBlurState=completionStatus(s.view().state);},{once:true});
+    s.NativeWorker=window.Worker;s.readerWorkers=[];
     window.Worker=class {constructor(){this.terminated=0;s.readerWorkers.push(this);}postMessage(){}terminate(){this.terminated++;}};
   });
   await presentationCode.press("Alt+Enter");
   await reader.waitFor();
   assert.equal(await reader.getByLabel("文档正文",{exact:true}).getAttribute("aria-busy"),"true");
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.readerBlurState),null,"completion is closed before modal blur can schedule a stale close timer");
   await presentationPage.keyboard.press("Escape");
   await reader.waitFor({state:"hidden"});
   assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);

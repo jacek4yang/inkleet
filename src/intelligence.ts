@@ -27,7 +27,7 @@ import { renameSymbol } from "./rename";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
 import { Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
-import { autocompletion, completionKeymap, startCompletion, type Completion, type CompletionContext } from "@codemirror/autocomplete";
+import { autocompletion, completionKeymap, startCompletion, closeCompletion, type Completion, type CompletionContext } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
@@ -54,6 +54,9 @@ function content(value: unknown): string {
 }
 export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source|null) => void, metadata?: string, commandsOwned=false) {
   const documentationLifetime=new AbortController(),popup=completionPopup();
+  // Close synchronously before modal focus: CodeMirror otherwise schedules an
+  // unowned blur timeout that can close a newer completion after quick reopen.
+  function beforeReader(){if(view&&!closed)closeCompletion(view);}
   const serverName = { python3: "Pyright", java: "JDT LS", golang: "gopls", rust: "rust-analyzer", c: "clangd", cpp: "clangd" }[language];
   const signatureEffect = StateEffect.define<Tooltip | null>();
   const signatureField = StateField.define<Tooltip | null>({
@@ -218,7 +221,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
               if(!detail&&!preview.parts.length&&!preview.truncated)return null;
               const summary=item.label.slice(0,512)+(detail?"\n"+detail:"");
               const completeValue=[{kind:"plaintext",value:summary},...(Array.isArray(documentation)?documentation:documentation==null?[]:[documentation])];
-              const dom=await renderDocumentation(completeValue,false,documentationLifetime.signal,{title:item.label.slice(0,512),summaryFirst:true});
+              const dom=await renderDocumentation(completeValue,false,documentationLifetime.signal,{title:item.label.slice(0,512),summaryFirst:true,beforeOpen:beforeReader});
               if(!dom||closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return null;
               dom.classList.add("lsp-completion-documentation");return dom;
             }catch{return null;}
@@ -263,7 +266,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     try {
       const result = await request("hover", pos, doc);
       if (!object(result) || closed || target.state.doc !== doc) return null;
-      const dom=await renderDocumentation(result.contents,true,documentationLifetime.signal,{title:"符号文档"});
+      const dom=await renderDocumentation(result.contents,true,documentationLifetime.signal,{title:"符号文档",beforeOpen:beforeReader});
       if(!dom||closed||view!==target||target.state.doc!==doc)return null;
       dom.classList.add("lsp-hover");
       const span = range(doc, result.range) ?? { from: pos, to: pos };
@@ -289,8 +292,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       const current = Number.isInteger(parameter) && parameter >= 0 ? parameters[parameter] : null;
       const label = signature.label.slice(0, 4096);
       const span=activeParameterSpan(label,current);
-      const parameterDocs=await renderDocumentation(object(current)?current.documentation:null,false,documentationLifetime.signal,{title:"参数文档"});
-      const documentation=await renderDocumentation(signature.documentation,false,documentationLifetime.signal,{title:"函数文档"});
+      const parameterDocs=await renderDocumentation(object(current)?current.documentation:null,false,documentationLifetime.signal,{title:"参数文档",beforeOpen:beforeReader});
+      const documentation=await renderDocumentation(signature.documentation,false,documentationLifetime.signal,{title:"函数文档",beforeOpen:beforeReader});
       if(closed||generation!==signatureGeneration||view!==target||target.state.doc!==doc||target.state.selection.main.head!==pos||target.composing)return;
       target.dispatch({ effects: signatureEffect.of({ pos, above: true, create() {
         const dom = document.createElement("div"); dom.className = "lsp-signature"; dom.setAttribute("role", "status");
