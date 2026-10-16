@@ -3284,6 +3284,16 @@ try {
   assert.ok((await richReader.locator("pre code").innerText()).includes("HashMap::new"));
   assert.equal(await richReader.locator("img,script,a").count(),0,"expanded Markdown keeps untrusted content inert");
   await presentationPage.screenshot({path:"evidence/expanded-documentation-reader-rich.png"});
+  const beforeResize=await richReader.boundingBox();
+  await presentationPage.mouse.move(beforeResize.x+beforeResize.width-3,beforeResize.y+beforeResize.height-3);
+  await presentationPage.mouse.down();
+  await presentationPage.mouse.move(beforeResize.x+beforeResize.width-163,beforeResize.y+beforeResize.height-103,{steps:10});
+  await presentationPage.mouse.up();
+  await presentationPage.waitForFunction(width=>document.querySelector(".lsp-document-reader").getBoundingClientRect().width<width-60,beforeResize.width);
+  const afterResize=await richReader.boundingBox(),sizeViewport=presentationPage.viewportSize();
+  assert.ok(afterResize.width>=320&&afterResize.height<beforeResize.height-40,"reader resizes through the actual pointer handle");
+  assert.ok(afterResize.x>=0&&afterResize.y>=0&&afterResize.x+afterResize.width<=sizeViewport.width+1&&afterResize.y+afterResize.height<=sizeViewport.height+1);
+  await presentationPage.screenshot({path:"evidence/expanded-documentation-reader-resized.png"});
   await presentationPage.keyboard.press("Escape");await richReader.waitFor({state:"hidden"});
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.hold=false;s.docs={kind:"plaintext",value:"START_OF_DOCUMENT\n"+"Documentation content ".repeat(2000)+"\nEND_OF_COMPLETE_DOCUMENT"};});
   await presentationCode.press("Control+Space");
