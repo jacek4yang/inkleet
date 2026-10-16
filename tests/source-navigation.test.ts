@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {SourceHistory} from "../src/source-history.ts";
-import {sourceOffset,sourceSpan,sourceTargets,validSourceSnapshot} from "../src/source-protocol.ts";
+import {sourceOffset,sourceSpan,sourceTargets,validSourceSnapshot,sourceDisplayPath} from "../src/source-protocol.ts";
 const snapshot=(name:string,text="abc\ndef")=>({sourceId:1,uri:"file:///"+name,text,name,declaration:false,language:"rust"});
 const visit=(name:string,anchor=0,head=anchor)=>({source:snapshot(name),selection:{ranges:[{anchor,head}],mainIndex:0},scroll:{top:0,left:0}});
 test("source history restores full selections and both scroll axes",()=>{
@@ -44,4 +44,13 @@ test("source snapshot DTO rejects malformed or unnormalized data",()=>{
   assert.equal(validSourceSnapshot({...s,...patch},s.uri),false);
  }
  assert.equal(validSourceSnapshot(s,"file:///other"),false);
+});
+
+test("source paths remove managed-cache noise without abbreviating meaningful paths",()=>{
+ assert.equal(sourceDisplayPath("file:///tmp/private/tools/pyright-hash/dist/typeshed-fallback/stdlib/typing.pyi"),"typeshed/stdlib/typing.pyi");
+ assert.equal(sourceDisplayPath("file:///tools/python-hash/lib/python3.14/typing.py"),"python3.14/typing.py");
+ assert.equal(sourceDisplayPath("file:///tools/go-hash/go/src/unicode/utf8/utf8.go"),"go/src/unicode/utf8/utf8.go");
+ assert.equal(sourceDisplayPath("file:///tools/rust/lib/rustlib/src/rust/library/alloc/src/vec/mod.rs"),"rust/library/alloc/src/vec/mod.rs");
+ assert.equal(sourceDisplayPath("jdt://contents/java.base/java.util/ArrayList.java?=opaque"),"java.base/java.util/ArrayList.java");
+ assert.equal(sourceDisplayPath("file:///custom/a%20b.rs"),"/custom/a b.rs");
 });

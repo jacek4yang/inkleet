@@ -56,9 +56,12 @@ export function chooseSourceTarget(targets:SourceTarget[],signal:AbortSignal):Pr
   const buttons=targets.map(target=>{
    const button=document.createElement("button");button.type="button";
    const name=document.createElement("strong"),path=document.createElement("span");
-   let visible=target.uri.split("?")[0];try{visible=decodeURI(visible);}catch{}
+   const visible=sourceDisplayPath(target.uri);
    name.textContent=(visible.split("/").pop()||visible)+":"+String(target.range.start.line+1);
-   path.textContent=visible;button.append(name,path);button.onclick=()=>finish(target);dialog.append(button);return button;
+   path.textContent=visible;path.title=target.uri;
+   const icon=document.createElementNS("http://www.w3.org/2000/svg","svg");icon.setAttribute("viewBox","0 0 16 16");icon.setAttribute("width","16");icon.setAttribute("height","16");icon.setAttribute("fill","none");icon.setAttribute("stroke","currentColor");icon.setAttribute("stroke-width","1.25");icon.setAttribute("stroke-linejoin","round");icon.setAttribute("aria-hidden","true");
+   const shape=document.createElementNS("http://www.w3.org/2000/svg","path");shape.setAttribute("d","M10 2H3v12h10V5l-3-3v4h3M6 8 4.5 9.5 6 11m4-3 1.5 1.5L10 11");icon.append(shape);
+   button.append(icon,name,path);button.onclick=()=>finish(target);dialog.append(button);return button;
   });
   dialog.addEventListener("keydown",event=>{
    if(!["ArrowDown","ArrowUp","Home","End"].includes(event.key))return;
@@ -73,4 +76,18 @@ export function validSourceSnapshot(value:unknown,uri:string):value is SourceSna
  if(!value||typeof value!=="object")return false;
  const s=value as Partial<SourceSnapshot>;
  return s.uri===uri&&typeof s.sourceId==="number"&&Number.isSafeInteger(s.sourceId)&&s.sourceId>0&&typeof s.text==="string"&&s.text.length<=2*1024*1024&&!s.text.includes("\r")&&typeof s.name==="string"&&s.name.length<=4096&&typeof s.declaration==="boolean"&&typeof s.language==="string"&&["python3","java","golang","rust","c","cpp"].includes(s.language);
+}
+
+/** Human-readable toolchain-relative path; original URI stays available in title. */
+export function sourceDisplayPath(uri:string):string{
+ let path=uri.split("?")[0];
+ try{const url=new URL(uri);path=decodeURIComponent(url.pathname);if(url.protocol==="jdt:")return path.replace(/^\//,"");}catch{}
+ for(const [marker,label] of [
+  ["/typeshed-fallback/","typeshed/"],["/lib/rustlib/src/rust/library/","rust/library/"],
+  ["/go/src/","go/src/"],["/lib/libcxx/include/","libc++/"],["/lib/libc/include/","libc/"]
+ ]){
+  const at=path.lastIndexOf(marker);if(at>=0)return label+path.slice(at+marker.length);
+ }
+ const python=path.match(/\/lib\/(python[0-9.]+\/.*)$/);if(python)return python[1];
+ return path;
 }

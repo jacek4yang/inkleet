@@ -12,14 +12,14 @@ import {indentGuides} from "./indent-guides";
 import {steadyVimCursor} from "./steady-cursor";
 import {vimNavigation} from "./vim-navigation";
 import {SourceHistory} from "./source-history";
-import {chooseSourceTarget,sourceSpan,type Source} from "./source-protocol";
+import {chooseSourceTarget,sourceSpan,sourceDisplayPath,type Source} from "./source-protocol";
 function Icon({kind}:{kind:"back"|"forward"|"close"|"return"}){
  const d={back:"M10 3 5 8l5 5M5 8h9",forward:"m6 3 5 5-5 5M2 8h9",close:"m4 4 8 8M12 4l-8 8",return:"M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v2"}[kind];
  return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d}/></svg>;
 }
 export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;onClose:()=>void;vimEnabled?:boolean}){
  const dialog=useRef<HTMLDialogElement>(null),host=useRef<HTMLDivElement>(null),actions=useRef<{move:(direction:-1|1)=>void;close:()=>void;configure:(enabled:boolean)=>void}|null>(null);
- const [info,setInfo]=useState({name:source.name,path:source.uri.split("?")[0],declaration:source.declaration,back:true,forward:false,message:""});
+ const [info,setInfo]=useState({name:source.name,uri:source.uri,path:sourceDisplayPath(source.uri),declaration:source.declaration,back:true,forward:false,message:""});
  const closeCallback=useRef(onClose);closeCallback.current=onClose;
  useLayoutEffect(()=>{
   const navigation=source.navigation,element=dialog.current!,parent=host.current!;
@@ -37,8 +37,8 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   const capture=()=>history.update(selection(),pendingRestore??{top:view.scrollDOM.scrollTop,left:view.scrollDOM.scrollLeft});
   const update=(message="")=>{
    if(destroyed)return;const current=history.current.source;
-   let path=current.uri.split("?")[0];try{path=decodeURI(path);}catch{}
-   const next={name:current.name,path,declaration:current.declaration,back:history.canBack,forward:history.canForward,message};
+   const path=sourceDisplayPath(current.uri);
+   const next={name:current.name,uri:current.uri,path,declaration:current.declaration,back:history.canBack,forward:history.canForward,message};
    setInfo(previous=>Object.keys(next).every(key=>previous[key as keyof typeof next]===next[key as keyof typeof next])?previous:next);
   };
   const cancel=()=>{if(pendingRestore){view.scrollDOM.scrollTop=pendingRestore.top;view.scrollDOM.scrollLeft=pendingRestore.left;pendingRestore=null;}++generation;abort?.abort();abort=null;navigation.cancel();};
@@ -61,6 +61,7 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
    try{
     const response=await navigation.definition(origin,{line:line.number-1,character:pos-line.from},controller.signal);
     if(!valid())return;
+    if(response.locations.length>1)update();
     const target=await chooseSourceTarget(response.locations,controller.signal);
     if(!valid())return;
     if(!target){update(response.locations.length?"":"未找到定义");return;}
@@ -118,7 +119,7 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
  return <dialog className="source-viewer" ref={dialog} aria-label="源码查看" aria-labelledby="source-title" onCancel={event=>{event.preventDefault();actions.current?.close();}}>
   <header>
    <nav aria-label="源码导航"><button aria-label="后退" title="后退 · Alt+← / Ctrl+O" disabled={!info.back} onClick={()=>actions.current?.move(-1)}><Icon kind="back"/></button><button aria-label="前进" title="前进 · Alt+→ / Ctrl+I" disabled={!info.forward} onClick={()=>actions.current?.move(1)}><Icon kind="forward"/></button></nav>
-   <div className="source-heading"><h2 id="source-title">{info.name}</h2><span className="source-path">{info.path}</span></div>
+   <div className="source-heading"><h2 id="source-title">{info.name}</h2><span className="source-path" title={info.uri}>{info.path}</span></div>
    <span className="source-kind" title={info.declaration?"标准库类型声明 · .pyi 不是运行时实现源码":"只读源码"}>{info.declaration?"声明 · 只读":"只读"}</span>
    <button aria-label="返回代码" title="返回代码" onClick={()=>{source.navigation.origin();actions.current?.close();}}><Icon kind="return"/></button>
    <button aria-label="关闭源码" title="关闭 · Esc" onClick={()=>actions.current?.close()}><Icon kind="close"/></button>

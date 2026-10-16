@@ -626,3 +626,8 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 .source-target-picker button:focus,.source-target-picker button:hover{background:var(--surface-hover,#88888814)}
 .source-target-picker button strong{font-size:12px;font-weight:500}
 .source-target-picker button span{font:10px/1.5 var(--font-mono);color:var(--muted)}
+
+.source-target-picker button{display:grid;grid-template-columns:16px minmax(0,1fr);column-gap:8px;row-gap:2px}
+.source-target-picker button svg{grid-column:1;grid-row:1/3;align-self:center;color:var(--muted)}
+.source-target-picker button strong,.source-target-picker button span{grid-column:2}
+.source-target-picker button:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}

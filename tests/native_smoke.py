@@ -235,6 +235,16 @@ def source_navigation_case(query, target_name, label):
         return current if stable else None
     origin_position=wait_for(selected_identifier,label+" source caret inside selected identifier")
     subprocess.run(["xdotool","key","--clearmodifiers","F12"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name or cmd("POST","/elements",{"using":"css selector","value":".source-target-picker button"}),label+" definition response or target choice",seconds=60)
+    choices=cmd("POST","/elements",{"using":"css selector","value":".source-target-picker button"})
+    if choices:
+        labels=[cmd("GET",f"/element/{choice[EID]}/text") for choice in choices]
+        matches=[index for index,value in enumerate(labels) if value.splitlines()[0].startswith(target_name+":")]
+        assert len(matches)==1,label+" has one unambiguous requested definition target: "+repr(labels)
+        (evidence/(label+"-source-targets.json")).write_text(json.dumps(labels,ensure_ascii=False,indent=2))
+        screenshot(label+"-source-targets-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Home"]+["Down"]*matches[0]+["Return"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".source-target-picker"}),label+" target picker closes after keyboard selection")
     wait_for(lambda:text(".source-viewer h2").strip()==target_name,label+" recursive definition",seconds=60)
     screenshot(label+"-recursive-source-native.png")
     subprocess.run(["xdotool","key","--clearmodifiers","alt+Left"],check=True)
