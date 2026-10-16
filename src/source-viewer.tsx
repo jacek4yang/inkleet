@@ -26,7 +26,8 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   const history=new SourceHistory({source:navigation.primary,selection:navigation.originSelection,scroll:navigation.originScroll});
   const first=sourceSpan(source.text,source.range);
   if(!first){closeCallback.current();return;}
-  history.push({source,selection:{ranges:[first],mainIndex:0},scroll:{top:0,left:0}});
+  const initialSelection={anchor:first.anchor,head:vimEnabled?first.anchor:first.head};
+  history.push({source,selection:{ranges:[initialSelection],mainIndex:0},scroll:{top:0,left:0}});
   let destroyed=false,generation=0,abort:AbortController|null=null,swapping=false,view:EditorView;
   let pendingRestore:{top:number;left:number}|null=null;
   const vimSlot=new Compartment();
@@ -37,7 +38,8 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   const update=(message="")=>{
    if(destroyed)return;const current=history.current.source;
    let path=current.uri.split("?")[0];try{path=decodeURI(path);}catch{}
-   setInfo({name:current.name,path,declaration:current.declaration,back:history.canBack,forward:history.canForward,message});
+   const next={name:current.name,path,declaration:current.declaration,back:history.canBack,forward:history.canForward,message};
+   setInfo(previous=>Object.keys(next).every(key=>previous[key as keyof typeof next]===next[key as keyof typeof next])?previous:next);
   };
   const cancel=()=>{if(pendingRestore){view.scrollDOM.scrollTop=pendingRestore.top;view.scrollDOM.scrollLeft=pendingRestore.left;pendingRestore=null;}++generation;abort?.abort();abort=null;navigation.cancel();};
   const close=()=>{if(destroyed)return;cancel();element.close();closeCallback.current();};
@@ -67,7 +69,7 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
     if(!loaded){navigation.origin(target);return;}
     const selected=sourceSpan(loaded.text,target.range);if(!selected)throw Error("定义位置与源码内容不一致");
     capture();
-    const changed=history.push({source:loaded,selection:{ranges:[selected],mainIndex:0},scroll:{top:0,left:0}});
+    const changed=history.push({source:loaded,selection:{ranges:[{anchor:selected.anchor,head:enabled?selected.anchor:selected.head}],mainIndex:0},scroll:{top:0,left:0}});
     abort=null;
     if(changed){++generation;apply(true);}else update();
     if(response.omitted)update("部分定义结果未显示");
@@ -105,7 +107,7 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
    ]});
   }
   element.showModal();
-  view=new EditorView({state:state(source.text,source.language,EditorSelection.single(first.anchor,first.head)),parent,
+  view=new EditorView({state:state(source.text,source.language,EditorSelection.single(initialSelection.anchor,initialSelection.head)),parent,
    // readOnly is advisory in CodeMirror. This boundary also rejects Vim/API
    // edits using filter:false; trusted navigation alone may replace the state.
    dispatchTransactions(transactions,target){if(transactions.some(t=>t.docChanged))return;target.update(transactions);}

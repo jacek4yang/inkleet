@@ -752,7 +752,7 @@ try {
         if (args.kind === "hover") return { contents: { kind: "plaintext", value: "deque.popleft() -> int" } };
         if (args.kind === "definition") return [{ uri: "file:///fixture/stdlib/collections.pyi", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } } }];
       }
-      if(command==="language_cancel_source_navigation")return;
+      if(command==="language_cancel_source_navigation"){state.sourceCancels??=[];state.sourceCancels.push(args);return;}
       if(command==="acquire_language_source"){
         const source=args.uri.endsWith("collections.pyi")?{sourceId:1,name:"collections.pyi",text:"class deque:\n    def popleft(self) -> int: ...",declaration:true}:{sourceId:2,name:"_collections_abc.py",text:"class Iterable:\n    def __iter__(self):\n        return iter(())",declaration:false};
         return {...source,uri:args.uri,language:"python3"};
@@ -823,14 +823,16 @@ try {
 
   const sourceShell=lspPage.locator(".source-viewer");
   await readOnly.press("F12");
-  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  try{await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");}
+  catch(error){await writeFile("evidence/source-navigation-failure.json",JSON.stringify(await lspPage.evaluate(()=>({title:document.querySelector("#source-title")?.textContent,message:document.querySelector(".source-message")?.textContent,requests:window.__lspTest.sourceRequests,cancels:window.__lspTest.sourceCancels,active:document.activeElement?.outerHTML,source:document.querySelector(".source-viewer")?.innerText})),null,2));await lspPage.screenshot({path:"evidence/source-navigation-failure.png"});throw error;}
   assert.equal(await lspPage.evaluate(()=>window.__lspTest.sourceRequests.at(-1).sourceId),1,"second hop addresses library snapshot, not editable solution");
   const sourceCode=lspPage.getByLabel("只读标准库源码",{exact:true});
   await sourceCode.press("F12");
   await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
   assert.equal(await lspPage.evaluate(()=>window.__lspTest.sourceRequests.at(-1).sourceId),2);
   await sourceCode.press("Alt+ArrowLeft");
-  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  try{await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");}
+  catch(error){await writeFile("evidence/source-navigation-failure.json",JSON.stringify(await lspPage.evaluate(()=>({title:document.querySelector("#source-title")?.textContent,message:document.querySelector(".source-message")?.textContent,requests:window.__lspTest.sourceRequests,cancels:window.__lspTest.sourceCancels,active:document.activeElement?.outerHTML,source:document.querySelector(".source-viewer")?.innerText})),null,2));await lspPage.screenshot({path:"evidence/source-navigation-failure.png"});throw error;}
   await sourceCode.press("Alt+ArrowRight");
   await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
   await lspPage.evaluate(()=>{window.__lspTest.failSource=true;});
@@ -841,7 +843,8 @@ try {
   await sourceCode.press("F12");
   await lspPage.waitForFunction(()=>typeof window.__lspTest.sourceReply==="function");
   await sourceCode.press("Alt+ArrowLeft");
-  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  try{await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");}
+  catch(error){await writeFile("evidence/source-navigation-failure.json",JSON.stringify(await lspPage.evaluate(()=>({title:document.querySelector("#source-title")?.textContent,message:document.querySelector(".source-message")?.textContent,requests:window.__lspTest.sourceRequests,cancels:window.__lspTest.sourceCancels,active:document.activeElement?.outerHTML,source:document.querySelector(".source-viewer")?.innerText})),null,2));await lspPage.screenshot({path:"evidence/source-navigation-failure.png"});throw error;}
   await lspPage.evaluate(()=>window.__lspTest.sourceReply());
   await lspPage.waitForTimeout(80);
   assert.equal(await sourceShell.locator("#source-title").innerText(),"_collections_abc.py","late result cannot replace Back destination");
@@ -853,7 +856,8 @@ try {
   await lspPage.keyboard.down("Control");
   await lspPage.mouse.click(lineBox.x+35,lineBox.y+lineBox.height/2);
   await lspPage.keyboard.up("Control");
-  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  try{await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");}
+  catch(error){await writeFile("evidence/source-navigation-failure.json",JSON.stringify(await lspPage.evaluate(()=>({title:document.querySelector("#source-title")?.textContent,message:document.querySelector(".source-message")?.textContent,requests:window.__lspTest.sourceRequests,cancels:window.__lspTest.sourceCancels,active:document.activeElement?.outerHTML,source:document.querySelector(".source-viewer")?.innerText})),null,2));await lspPage.screenshot({path:"evidence/source-navigation-failure.png"});throw error;}
   assert.equal(await lspPage.evaluate(async()=>{
     const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
     const view=EditorView.findFromDOM(document.querySelector(".source-viewer .cm-editor")),before=view.state.doc.toString();
@@ -862,6 +866,9 @@ try {
   }),true,"readonly dispatch boundary rejects filter:false edits");
   await sourceCode.press("Alt+ArrowLeft");
   await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
+  const cancelCount=await lspPage.evaluate(()=>window.__lspTest.sourceCancels?.length??0);
+  for(let n=0;n<5;n++)await sourceCode.press("ArrowRight");
+  assert.ok((await lspPage.evaluate(()=>window.__lspTest.sourceCancels?.length??0))-cancelCount<=1,"cursor movement does not repeatedly issue cancellation IPC");
   await lspPage.screenshot({path:"evidence/recursive-source-navigation.png"});
   await sourceDialog.getByRole("button", { name: "返回代码", exact: true }).click();
   assert.equal(await lspEditor.innerText(), "items.popleft");
@@ -877,11 +884,13 @@ try {
   await lspEditor.press("F12");await sourceShell.waitFor();
   await sourceCode.focus();
   await lspPage.keyboard.type("gd");
-  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  try{await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");}
+  catch(error){await writeFile("evidence/source-navigation-failure.json",JSON.stringify(await lspPage.evaluate(()=>({title:document.querySelector("#source-title")?.textContent,message:document.querySelector(".source-message")?.textContent,requests:window.__lspTest.sourceRequests,cancels:window.__lspTest.sourceCancels,active:document.activeElement?.outerHTML,source:document.querySelector(".source-viewer")?.innerText})),null,2));await lspPage.screenshot({path:"evidence/source-navigation-failure.png"});throw error;}
   await sourceCode.press("Control+o");
   await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
   await sourceCode.press("Control+i");
-  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  try{await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");}
+  catch(error){await writeFile("evidence/source-navigation-failure.json",JSON.stringify(await lspPage.evaluate(()=>({title:document.querySelector("#source-title")?.textContent,message:document.querySelector(".source-message")?.textContent,requests:window.__lspTest.sourceRequests,cancels:window.__lspTest.sourceCancels,active:document.activeElement?.outerHTML,source:document.querySelector(".source-viewer")?.innerText})),null,2));await lspPage.screenshot({path:"evidence/source-navigation-failure.png"});throw error;}
   const immutable=await sourceCode.innerText();
   await lspPage.keyboard.type("dd");assert.equal(await sourceCode.innerText(),immutable,"Vim delete cannot mutate library source");
   await lspPage.keyboard.type("iXYZ");

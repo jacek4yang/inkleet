@@ -305,10 +305,13 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } }) });
     } catch { if (!closed && generation === signatureGeneration && view === target && target.state.doc === doc) target.dispatch({ effects: signatureEffect.of(null) }); }
   }
-  let navigationSequence=0,navigationGeneration=0,navigationAbort:AbortController|null=null;
-  function cancelSourceRequests(){
-    if(session&&navigationSequence)void invoke("language_cancel_source_navigation",{id:session.id,through:navigationSequence}).catch(()=>{});
+  let navigationSequence=0,navigationCanceledThrough=0,navigationGeneration=0,navigationAbort:AbortController|null=null;
+  function cancelSourceSequence(id:number,sequence:number){
+    if(sequence<=navigationCanceledThrough)return;
+    navigationCanceledThrough=sequence;
+    void invoke("language_cancel_source_navigation",{id,through:sequence}).catch(()=>{});
   }
+  function cancelSourceRequests(){if(session)cancelSourceSequence(session.id,navigationSequence);}
   function invalidateNavigation(close=false){
     ++navigationGeneration;navigationAbort?.abort();navigationAbort=null;cancelSourceRequests();
     if(close)showSource(null);
@@ -359,7 +362,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           let snapshot=source;
           for(let attempt=0;attempt<2;attempt++){
             ensure(signal);const sequence=++navigationSequence;
-            const cancel=()=>{void invoke("language_cancel_source_navigation",{id,through:sequence}).catch(()=>{});};
+            const cancel=()=>cancelSourceSequence(id,sequence);
             signal.addEventListener("abort",cancel,{once:true});
             try{
               const response=await invoke<{locations:SourceTarget[];omitted:number}>("language_source_definition",{id,version:askedVersion,sourceId:snapshot.sourceId,line:position.line,character:position.character,sequence});
