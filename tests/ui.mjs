@@ -3133,10 +3133,14 @@ try {
     assert.ok(layout.b.left>=-1&&layout.b.right<=viewport.width+1&&layout.b.top>=-1&&layout.b.bottom<=viewport.height+1,"documentation stays inside "+JSON.stringify(viewport));
     assert.ok(layout.b.left>=layout.a.right-1||layout.b.right<=layout.a.left+1||layout.b.top>=layout.a.bottom-1||layout.b.bottom<=layout.a.top+1,"documentation never covers completion list");
     assert.equal(layout.shadow,"none");assert.equal(layout.scroll,true);
+    const scrollSelection=await presentationPage.evaluate(()=>window.__presentation.view().state.selection.toJSON());
     await presentationCode.press("Alt+PageDown");
     assert.ok(await presentationPage.locator(".cm-completionInfo").evaluate(dom=>dom.scrollTop>0),"documentation scrolls without moving editor focus");
     assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
+    const scrolledDown=await presentationPage.locator(".cm-completionInfo").evaluate(dom=>dom.scrollTop);
     await presentationCode.press("Alt+PageUp");
+    assert.ok(await presentationPage.locator(".cm-completionInfo").evaluate((dom,before)=>dom.scrollTop<before,scrolledDown));
+    assert.deepEqual(await presentationPage.evaluate(()=>window.__presentation.view().state.selection.toJSON()),scrollSelection,"documentation scroll never moves code selection");
     assert.equal(await presentationPage.locator(".cm-completionInfo img,.cm-completionInfo script,.cm-completionInfo a").count(),0,"server docs contain no active HTML or navigation");
     assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] svg").count(),1);
     if(viewport.width===1200)await presentationPage.screenshot({path:"evidence/completion-documentation-polished.png"});

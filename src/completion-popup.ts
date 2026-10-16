@@ -17,6 +17,8 @@ export function completionPopup(){
  return {tooltipClass:()=>"inkleet-completion "+owner,positionInfo,scrollDocs(view:EditorView,direction:1|-1){
   const info=view.dom.ownerDocument.querySelector<HTMLElement>("."+owner+" .cm-completionInfo");
   if(!view.hasFocus||!info||getComputedStyle(info).visibility==="hidden"||info.scrollHeight<=info.clientHeight)return false;
+  const rect=info.getBoundingClientRect(),viewport=view.dom.ownerDocument.documentElement;
+  if(rect.bottom<=0||rect.right<=0||rect.top>=viewport.clientHeight||rect.left>=viewport.clientWidth)return false;
   info.scrollTop+=direction*Math.max(24,info.clientHeight*.8);return true;
  }};
 }
