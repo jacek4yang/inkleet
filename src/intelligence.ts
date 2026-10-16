@@ -1,3 +1,6 @@
+import {vimNavigation} from "./vim-navigation";
+import {chooseSourceTarget,sourceSpan,sourceTargets,type Source,type SourceSnapshot,type SourceTarget,type SourceNavigator} from "./source-protocol";
+export type {Source} from "./source-protocol";
 import {completionPopup} from "./completion-popup";
 import {renderDocumentation} from "./lsp-documentation";
 import {activeParameterSpan,completionKind,documentationModel} from "./lsp-document-model";
@@ -29,7 +32,6 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
 type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
-export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" | "c" | "cpp" };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 function offset(doc: Text, position: unknown): number | null {
@@ -49,7 +51,7 @@ function content(value: unknown): string {
   if (Array.isArray(value)) return value.slice(0, 20).map(content).join("\n\n").slice(0, 32768);
   return object(value) && typeof value.value === "string" ? value.value.slice(0, 32768) : "";
 }
-export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source) => void, metadata?: string, commandsOwned=false) {
+export function languageIntelligence(language: "python3" | "java" | "golang" | "rust" | "c" | "cpp", status: (text: string) => void, showSource: (source: Source|null) => void, metadata?: string, commandsOwned=false) {
   const documentationLifetime=new AbortController(),popup=completionPopup();
   const serverName = { python3: "Pyright", java: "JDT LS", golang: "gopls", rust: "rust-analyzer", c: "clangd", cpp: "clangd" }[language];
   const signatureEffect = StateEffect.define<Tooltip | null>();
@@ -303,24 +305,80 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } }) });
     } catch { if (!closed && generation === signatureGeneration && view === target && target.state.doc === doc) target.dispatch({ effects: signatureEffect.of(null) }); }
   }
+  let navigationSequence=0,navigationGeneration=0,navigationAbort:AbortController|null=null;
+  function cancelSourceRequests(){
+    if(session&&navigationSequence)void invoke("language_cancel_source_navigation",{id:session.id,through:navigationSequence}).catch(()=>{});
+  }
+  function invalidateNavigation(close=false){
+    ++navigationGeneration;navigationAbort?.abort();navigationAbort=null;cancelSourceRequests();
+    if(close)showSource(null);
+  }
   async function definition(pos: number) {
-    if (!view) return;
-    const doc = view.state.doc;
+    if(!view||!session)return;
+    invalidateNavigation();
+    const target=view,doc=target.state.doc,id=session.id,generation=navigationGeneration;
+    const selection=target.state.selection,scrollTop=target.scrollDOM.scrollTop,scrollLeft=target.scrollDOM.scrollLeft;
+    const abort=new AbortController();navigationAbort=abort;
+    const valid=()=>!closed&&view===target&&session?.id===id&&target.state.doc===doc;
     try {
-      const result = await request("definition", pos, doc);
-      const first = Array.isArray(result) ? result[0] : result;
-      if (!object(first) || !view || closed || view.state.doc !== doc) return;
-      const uri = first.uri ?? first.targetUri, location = first.range ?? first.targetSelectionRange ?? first.targetRange;
-      if (typeof uri !== "string" || !object(location) || !object(location.start)) return;
-      if (uri === session?.uri) {
-        const anchor = offset(doc, location.start);
-        if (anchor !== null) view.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: "center" }) });
-        return;
+      const result=await request("definition",pos,doc);
+      if(!valid()||generation!==navigationGeneration||abort.signal.aborted)return;
+      const location=await chooseSourceTarget(sourceTargets(result),abort.signal);
+      if(!location){if(!abort.signal.aborted)status("未找到定义");return;}
+      if(!valid()||generation!==navigationGeneration||abort.signal.aborted)return;
+      if(location.uri===session?.uri){
+        const span=range(doc,location.range);if(!span)throw Error("定义位置与当前代码不一致");
+        target.dispatch({selection:{anchor:span.from,head:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});return;
       }
-      const id = session?.id; if (!id) return;
-      const source = await invoke<Omit<Source, "line">>("read_language_source", { id, uri });
-      if (!closed && session?.id === id && view.state.doc === doc) showSource({ ...source, line: Number.isInteger(location.start.line) ? location.start.line : 0 });
-    } catch (e) { if (!closed) status(String(e)); }
+      const askedVersion=version,primary=session!.uri;
+      const current=()=>valid()&&version===askedVersion;
+      const ensure=(signal:AbortSignal)=>{if(signal.aborted||!current())throw new DOMException("导航已取消","AbortError");};
+      const primarySnapshot:SourceSnapshot={sourceId:0,uri:primary,text:snapshotText(doc),name:"当前解答",declaration:false,language};
+      const load=async(location:SourceTarget,signal:AbortSignal):Promise<SourceSnapshot|null>=>{
+        ensure(signal);if(location.uri===primary)return primarySnapshot;
+        const source=await invoke<SourceSnapshot>("acquire_language_source",{id,version:askedVersion,uri:location.uri});
+        ensure(signal);
+        if(!source||source.uri!==location.uri||!Number.isSafeInteger(source.sourceId)||source.sourceId<=0||typeof source.text!=="string"||source.text.length>2*1024*1024||!sourceSpan(source.text,location.range))throw Error("定义位置与源码内容不一致");
+        return source;
+      };
+      const navigation:SourceNavigator={
+        primary:primarySnapshot,originSelection:{ranges:selection.ranges.map(({anchor,head})=>({anchor,head})),mainIndex:selection.mainIndex},originScroll:{top:scrollTop,left:scrollLeft},current,cancel:cancelSourceRequests,load,
+        origin(location){
+          if(!current())return;
+          if(location){
+            const span=range(doc,location.range);if(!span)throw Error("定义位置与当前代码不一致");
+            showSource(null);target.dispatch({selection:{anchor:span.from,head:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});
+          }else{
+            showSource(null);target.dispatch({selection});target.scrollDOM.scrollTop=scrollTop;target.scrollDOM.scrollLeft=scrollLeft;
+          }
+          target.focus();
+        },
+        async definition(source,position,signal){
+          ensure(signal);
+          if(source.sourceId===0){const pos=offset(doc,position);if(pos===null)throw Error("定义位置无效");const result=await request("definition",pos,doc);ensure(signal);return {locations:sourceTargets(result),omitted:0};}
+          let snapshot=source;
+          for(let attempt=0;attempt<2;attempt++){
+            ensure(signal);const sequence=++navigationSequence;
+            const cancel=()=>{void invoke("language_cancel_source_navigation",{id,through:sequence}).catch(()=>{});};
+            signal.addEventListener("abort",cancel,{once:true});
+            try{
+              const response=await invoke<{locations:SourceTarget[];omitted:number}>("language_source_definition",{id,version:askedVersion,sourceId:snapshot.sourceId,line:position.line,character:position.character,sequence});
+              ensure(signal);return {locations:sourceTargets(response.locations),omitted:response.omitted};
+            }catch(error){
+              ensure(signal);
+              if(attempt!==0||String(error)!=="SOURCE_SNAPSHOT_EXPIRED")throw error;
+              const refreshed=await invoke<SourceSnapshot>("acquire_language_source",{id,version:askedVersion,uri:source.uri});
+              ensure(signal);
+              if(refreshed.uri!==source.uri||refreshed.text!==source.text)throw Error("源码已改变，请重新打开定义");
+              snapshot=refreshed;source.sourceId=refreshed.sourceId;
+            }finally{signal.removeEventListener("abort",cancel);}
+          }
+          throw Error("源码快照不可用");
+        }
+      };
+      const source=await load(location,abort.signal);
+      if(source&&valid()&&generation===navigationGeneration&&!abort.signal.aborted)showSource({...source,line:location.range.start.line,range:location.range,navigation});
+    } catch(e) {if(valid()&&generation===navigationGeneration&&!abort.signal.aborted)status(String(e));}
   }
   let appliedDiagnostics:DiagnosticSnapshot<Text>|null=null;
   async function poll() {
@@ -348,6 +406,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   const references = findReferences((pos, doc) => request("references", pos, doc), status, !commandsOwned);
   const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned);
   const extensions: Extension[] = [
+    vimNavigation({definition:target=>{void definition(target.state.selection.main.head);return true;}}),
     ...references.extensions,
     ...rename.extensions,
     signatureField,
@@ -367,6 +426,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       event.preventDefault(); void definition(pos); return true;
     }}),
     EditorView.updateListener.of(update => {
+      if(update.docChanged||update.selectionSet)invalidateNavigation(update.docChanged);
       if(update.docChanged){
         ++completionRequestGeneration;completionOwner.cancelActive();
         const changes:{from:number;to:number;text:string}[]=[];
@@ -427,7 +487,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      documentationLifetime.abort();snippetPreparation.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      invalidateNavigation(true);documentationLifetime.abort();snippetPreparation.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       appliedDiagnostics=null;session = null; view = null;
     },

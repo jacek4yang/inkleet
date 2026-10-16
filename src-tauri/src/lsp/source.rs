@@ -25,8 +25,9 @@ impl Services {
   let session=self.session(id)?;
   if uri.len()>8192||uri.chars().any(char::is_control){return Err("源码地址无效".into());}
   if primary_alias(uri,&session.uri){return Err("请在原代码编辑器中查看当前解答".into());}
-  if session.document.lock().map_err(|_|"文档状态不可用")?.version!=version{return Err("解答已更新，请重新跳转".into());}
   {
+   let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+   if document.version!=version{return Err("解答已更新，请重新跳转".into());}
    let mut sources=session.sources.lock().map_err(|_|"源码快照状态不可用")?;
    if let Some(record)=sources.find(uri,None) {
     self.session(id)?;
@@ -45,7 +46,9 @@ impl Services {
   // Lock spans only bounded queue admission, never server waits. Duplicate reads
   // publish once, and a failed didClose leaves the original open-state owned.
   let mut sources=session.sources.lock().map_err(|_|"源码快照状态不可用")?;
+  self.session(id)?;
   let (record,_)=sources.insert_with(uri.into(),Content{text:source.text,name:source.name,declaration:source.declaration,language:source.language},None,|open,record|lifecycle(&session,open,record))?;
+  self.session(id)?;
   Ok(Snapshot{source_id:record.id,uri:record.uri.clone(),content:record.content.clone()})
  }
  pub fn source_definition(&self,id:u64,source_id:u64,version:u32,line:u32,character:u32,sequence:u64)->Result<Targets> {
