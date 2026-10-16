@@ -24,7 +24,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
+type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
 export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" | "c" | "cpp" };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -136,6 +136,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   }
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
+    const advertisedSnippets=session.completionSnippets===true;
     const defaultMode=session.completionInsertTextMode===undefined?1:session.completionInsertTextMode;
     if(defaultMode!==1&&defaultMode!==2){if(context.explicit)status("语言服务补全插入模式无效");return null;}
     const contextSelection=context.state.selection;
@@ -158,7 +159,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       const deadline = Date.now() + (context.explicit ? 8000 : 1200);
       let items: unknown[] = [], isIncomplete=false;
       const needle = word?.text.toLowerCase() ?? "";
-      const requiresResolve=session.completionResolve===true,snippets=context.state.field(snippetSessionState,false)!==undefined;
+      const requiresResolve=session.completionResolve===true,snippets=advertisedSnippets&&context.state.field(snippetSessionState,false)!==undefined;
       const admissible=(items:unknown[])=>items.slice(0,5000).filter((item):item is Record<string,any>=>
         object(item)&&typeof item.label==="string"&&(!needle||String(item.filterText??item.label).toLowerCase().includes(needle))
       ).sort((a,b)=>String(a.sortText??a.label).localeCompare(String(b.sortText??b.label))).slice(0,300).filter(item=>{
@@ -219,9 +220,10 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
               const existingSnippet=target.state.field(snippetSessionState,false);
               if(existingSnippet&&(application.format===2||application.additional.length))throw Error(existingSnippet.dirty?(existingSnippet.dormant?"请先保存当前参数修改，再应用此候选":"请先保存，再按 Esc 结束当前参数补全"):"请先按 Esc 结束当前参数补全，再应用此候选");
               if(application.format===2){
+                if(!advertisedSnippets||target.state.field(snippetSessionState,false)===undefined)throw Error("此会话未启用参数补全，未修改源码");
                 const variables=snippetVariables(state,context.pos,uri);
                 const prepared=await snippetPreparation.prepare(application.primary.insert,variables);
-                if(!current())return;
+                if(!current()||target.state.field(snippetSessionState,false)===undefined)return;
                 const laid=layoutSnippet(prepared,state,context.pos,application.mode);
                 const transaction=snippetInsertion(target.state,laid.prepared,application.primary.from,application.primary.to,application.additional);
                 if(!transaction)throw Error("此参数补全结构暂不支持，未修改源码");
