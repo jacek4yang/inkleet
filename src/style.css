@@ -523,7 +523,7 @@ button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(
 
 
 /* Shared, opaque editor popovers: no backdrop filter or transform-based text rasterization. */
-body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion,body .cm-tooltip.cm-completionInfo,.cm-tooltip:has(.lsp-hover),.cm-tooltip:has(.lsp-signature){
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion,body .cm-tooltip.cm-completionInfo,body .cm-tooltip:has(.lsp-hover),body .cm-tooltip:has(.lsp-signature){
  border:1px solid var(--line);border-radius:7px;background:var(--surface-editor);color:var(--ink);
  box-shadow:0 4px 16px #20251b18,0 1px 3px #20251b0c;text-shadow:none;font-weight:400;
 }

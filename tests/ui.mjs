@@ -3172,7 +3172,8 @@ try {
   const hoverPoint=await presentationPage.evaluate(()=>{const p=window.__presentation.view().coordsAtPos(2);return {x:(p.left+p.right)/2,y:(p.top+p.bottom)/2};});
   await presentationPage.mouse.move(hoverPoint.x,hoverPoint.y);
   await presentationPage.locator(".lsp-hover strong").waitFor();
-  assert.equal(await presentationPage.locator(".lsp-hover").evaluate(dom=>getComputedStyle(dom).borderRadius),"7px");
+  assert.equal(await presentationPage.locator(".lsp-hover").evaluate(dom=>getComputedStyle(dom.closest(".cm-tooltip")).borderRadius),"7px","hover outer shell matches completion/signature radius");
+  assert.notEqual(await presentationPage.locator(".lsp-hover").evaluate(dom=>getComputedStyle(dom.closest(".cm-tooltip")).boxShadow),"none");
   assert.equal(await presentationPage.locator(".lsp-hover img,.lsp-hover script").count(),0);
   await presentationPage.screenshot({path:"evidence/hover-documentation-polished.png"});
   await presentationPage.mouse.move(900,600);await presentationCode.press("Escape");
