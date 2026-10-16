@@ -246,6 +246,30 @@ def source_navigation_case(query, target_name, label, symbol=None):
         subprocess.run(["xdotool","key","--clearmodifiers","Home"]+["Down"]*matches[0]+["Return"],check=True)
         wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".source-target-picker"}),label+" target picker closes after keyboard selection")
     wait_for(lambda:text(".source-viewer h2").strip()==target_name,label+" recursive definition",seconds=60)
+    if label=="cpp":
+        # The title updates before CodeMirror's incremental parser necessarily
+        # reaches the viewport. Qualify real keyword colors, not a timed sleep.
+        highlighting=None
+        def source_keywords_highlighted():
+            nonlocal highlighting
+            highlighting=cmd("POST","/execute/sync",{"script":"""
+              const root=document.querySelector('.source-viewer .cm-content');
+              const panel=document.querySelector('.source-viewer .cm-scroller');
+              if(!root||!panel)return null;
+              const bounds=panel.getBoundingClientRect(),base=getComputedStyle(root).color;
+              const excluded='.cm-searchMatch,.cm-selectionMatch,.cm-fat-cursor,.cm-specialChar,.cm-matchingBracket,.cm-nonmatchingBracket';
+              const visible=node=>{const b=node.getBoundingClientRect();return b.bottom>bounds.top&&b.top<bounds.bottom&&b.right>bounds.left&&b.left<bounds.right;};
+              const tokens=[...root.querySelectorAll('.cm-line span')].filter(node=>visible(node)&&!node.closest(excluded)&&/^(template|class|struct|using|typename)$/.test(node.textContent.trim())).map(node=>({text:node.textContent.trim(),className:node.className,color:getComputedStyle(node).color}));
+              return {title:document.querySelector('.source-viewer h2')?.textContent,base,tokens,lines:[...root.querySelectorAll('.cm-line')].filter(visible).map(node=>node.textContent)};
+            ""","args":[]})
+            if not highlighting:return False
+            colored={token["text"] for token in highlighting["tokens"] if token["color"]!=highlighting["base"]}
+            return "template" in colored and "struct" in colored
+        try:
+            wait_for(source_keywords_highlighted,label+" visible C++ syntax highlighting",seconds=15)
+        finally:
+            (evidence/(label+"-source-highlighting.json")).write_text(json.dumps(highlighting,ensure_ascii=False,indent=2))
+            screenshot(label+"-source-highlighting-native.png")
     screenshot(label+"-recursive-source-native.png")
     subprocess.run(["xdotool","key","--clearmodifiers","alt+Left"],check=True)
     wait_for(lambda:text(".source-viewer h2").strip()==origin,label+" source history back")
