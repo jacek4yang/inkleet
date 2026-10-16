@@ -73,7 +73,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
   useLayoutEffect(() => { callback.current = onChange; pointCallback.current = onBreakpoints; });
   useLayoutEffect(() => { onStatus?.(lspStatus); }, [lspStatus,onStatus]);
   useLayoutEffect(() => {
-    let live=true;
+    let live=true;setSource(null);
     const owner=statusOwner??JSON.stringify([documentKey,language,reconnectToken]);
     const report=(text:string)=>{if(live)setLspStatus(current=>current.owner===owner&&current.text===text?current:{owner,text});};
     const intelligence = (language !== "markdown") ? languageIntelligence(language, report, setSource, metadata, true) : null;
@@ -137,7 +137,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
     if (cached) view.scrollDOM.scrollTop = cached.scroll;
     if (intelligence) void intelligence.connect(view);
     return () => {
-      live=false;
+      live=false;setSource(null);
       liveView.current=null;
       saveReady.current?.(null);
       debugView.current = null;
@@ -150,5 +150,5 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
   }, [documentKey, language, label, connection, metadata, statusOwner]);
   useLayoutEffect(()=>{const view=liveView.current;if(view){endSnippet(view);view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});}},[vimEnabled]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection, language, label, metadata]);
-  return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} vimEnabled={vimEnabled} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }

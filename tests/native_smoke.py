@@ -177,7 +177,7 @@ def click(css):
         return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
-        closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
+        closing=css in (".source-viewer header button[aria-label=\'返回代码\']",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
         selection=(" option[value=" in css) or css in ('[data-local-tab="run"]','[data-local-tab="debug"]')
         if not (closing or selection): raise
         with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
@@ -187,7 +187,7 @@ def click(css):
         if closing and not cmd("POST","/elements",{"using":"css selector","value":css}): return
         try: return cmd("POST",f"/element/{element(css)}/click",{})
         except http.client.RemoteDisconnected:
-            if css!=".source-viewer header button": raise
+            if css!=".source-viewer header button[aria-label=\'返回代码\']": raise
             if not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}): return
             # Exercise the real dialog Escape handler, never inject JavaScript
             # or remove the viewer from the DOM to manufacture a passing test.
@@ -209,6 +209,79 @@ def fill(css, value):
             if attempt: raise
             cmd("DELETE","/actions")  # release any modifier whose key-up was uncertain
             time.sleep(.3)
+
+def source_navigation_case(query, target_name, label, symbol=None):
+    origin=text(".source-viewer h2").strip()
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+    search=".source-viewer .cm-search input[name='search']"
+    wait_for(lambda: element(search),label+" source search keyboard route")
+    fill(search,query)
+    # Right collapses the match to its end; Left enters its final identifier.
+    subprocess.run(["xdotool","key","--clearmodifiers","Return","Escape","Right","Left"],check=True)
+    symbol=symbol or query.split()[-1].split(".")[-1]
+    previous_position=None
+    def selected_identifier():
+        nonlocal previous_position
+        current=cmd("POST","/execute/sync",{"script":"""
+          const s=getSelection(),v=document.querySelector('.source-viewer .cm-scroller');
+          if(!s||!s.isCollapsed||document.activeElement?.getAttribute('aria-label')!=='只读标准库源码')return null;
+          const value=s.anchorNode?.textContent||'';
+          const start=value.indexOf(arguments[0]);
+          if(start<0||s.anchorOffset<=start||s.anchorOffset>=start+arguments[0].length)return null;
+          return {top:v.scrollTop,left:v.scrollLeft,anchor:value,offset:s.anchorOffset};
+        ""","args":[symbol]})
+        stable=current is not None and current==previous_position
+        previous_position=current
+        return current if stable else None
+    origin_position=wait_for(selected_identifier,label+" source caret inside selected identifier")
+    subprocess.run(["xdotool","key","--clearmodifiers","F12"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name or cmd("POST","/elements",{"using":"css selector","value":".source-target-picker button"}),label+" definition response or target choice",seconds=60)
+    choices=cmd("POST","/elements",{"using":"css selector","value":".source-target-picker button"})
+    if choices:
+        labels=[cmd("GET",f"/element/{choice[EID]}/text") for choice in choices]
+        matches=[index for index,value in enumerate(labels) if value.splitlines()[0].startswith(target_name+":")]
+        assert len(matches)==1,label+" has one unambiguous requested definition target: "+repr(labels)
+        (evidence/(label+"-source-targets.json")).write_text(json.dumps(labels,ensure_ascii=False,indent=2))
+        screenshot(label+"-source-targets-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Home"]+["Down"]*matches[0]+["Return"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".source-target-picker"}),label+" target picker closes after keyboard selection")
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name,label+" recursive definition",seconds=60)
+    if label=="cpp":
+        # The title updates before CodeMirror's incremental parser necessarily
+        # reaches the viewport. Qualify real keyword colors, not a timed sleep.
+        highlighting=None
+        def source_keywords_highlighted():
+            nonlocal highlighting
+            highlighting=cmd("POST","/execute/sync",{"script":"""
+              const root=document.querySelector('.source-viewer .cm-content');
+              const panel=document.querySelector('.source-viewer .cm-scroller');
+              if(!root||!panel)return null;
+              const bounds=panel.getBoundingClientRect(),base=getComputedStyle(root).color;
+              const excluded='.cm-searchMatch,.cm-selectionMatch,.cm-fat-cursor,.cm-specialChar,.cm-matchingBracket,.cm-nonmatchingBracket';
+              const visible=node=>{const b=node.getBoundingClientRect();return b.bottom>bounds.top&&b.top<bounds.bottom&&b.right>bounds.left&&b.left<bounds.right;};
+              const tokens=[...root.querySelectorAll('.cm-line span')].filter(node=>visible(node)&&!node.closest(excluded)&&/^(template|class|struct|using|typename)$/.test(node.textContent.trim())).map(node=>({text:node.textContent.trim(),className:node.className,color:getComputedStyle(node).color}));
+              return {title:document.querySelector('.source-viewer h2')?.textContent,base,tokens,lines:[...root.querySelectorAll('.cm-line')].filter(visible).map(node=>node.textContent)};
+            ""","args":[]})
+            if not highlighting:return False
+            colored={token["text"] for token in highlighting["tokens"] if token["color"]!=highlighting["base"]}
+            return "template" in colored and "struct" in colored
+        try:
+            wait_for(source_keywords_highlighted,label+" visible C++ syntax highlighting",seconds=15)
+        finally:
+            (evidence/(label+"-source-highlighting.json")).write_text(json.dumps(highlighting,ensure_ascii=False,indent=2))
+            screenshot(label+"-source-highlighting-native.png")
+    screenshot(label+"-recursive-source-native.png")
+    subprocess.run(["xdotool","key","--clearmodifiers","alt+Left"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==origin,label+" source history back")
+    wait_for(lambda:cmd("POST","/execute/sync",{"script":"""
+      const v=document.querySelector('.source-viewer .cm-scroller');
+      return !!v&&Math.abs(v.scrollTop-arguments[0])<2&&Math.abs(v.scrollLeft-arguments[1])<2;
+    ""","args":[origin_position["top"],origin_position["left"]]}),label+" exact source scroll restoration")
+    subprocess.run(["xdotool","key","--clearmodifiers","alt+Right"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name,label+" source history forward")
+    (evidence/(label.upper()+"_SOURCE_NAVIGATION_NATIVE_RESULT.txt")).write_text(
+        "PASS: actual source search and F12 to "+target_name+", Alt-Left/Right history and exact scroll restoration.\n"+json.dumps(origin_position,ensure_ascii=False)+"\n")
+
 def save_editor(css):
     node=element(css)
     if cmd("GET","/element/active").get(EID)!=node: click(css)
@@ -771,7 +844,8 @@ try:
         wait_for(lambda: element(".source-viewer"), "F12 opened a real stdlib declaration", seconds=30)
         wait_for(lambda: "只读" in text(".source-viewer header"), "source viewer is explicitly read-only")
         screenshot("python-stdlib-native.png")
-        click(".source-viewer header button")
+        source_navigation_case("def __getitem__(self, key: SupportsIndex","typing.pyi","python")
+        click(".source-viewer header button[aria-label=\'返回代码\']")
         fill(code, "sum([1, 2])")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"signature-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
@@ -1046,7 +1120,9 @@ try:
         wait_for(lambda: element(".source-viewer"), "Java standard library source viewer", seconds=45)
         wait_for(lambda: "ArrayList.java" in text(".source-viewer header"), "real ArrayList source name")
         screenshot("java-stdlib-native.png")
-        click(".source-viewer header button")
+        source_navigation_case("extends AbstractList","AbstractList.java","java")
+        assert text(code)==java_doc,"library navigation preserves editable Java solution"
+        click(".source-viewer header button[aria-label=\'返回代码\']")
         if os.environ.get("INKLEET_JAVA_SNIPPET_VALIDATION") == "1":
             native_snippet_case("java",code)
         java_solution="class Solution {\n public int solve(int[] values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n }\n}"
@@ -1133,7 +1209,13 @@ try:
             cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-source","actions":keys}]})
             wait_for(lambda: element(".source-viewer"),f"{group} source viewer",seconds=90)
             screenshot(group+"-stdlib-native.png")
-            click(".source-viewer header button")
+            if group=="golang":
+                source_navigation_case("utf8.AppendRune","utf8.go","golang")
+                assert text(".source-viewer .source-path").strip()=="go/src/unicode/utf8/utf8.go","Go source path omits private cache noise"
+            if group=="rust": source_navigation_case("A: Allocator = Global","alloc.rs","rust")
+            if group=="cpp": source_navigation_case("= allocator_traits","allocator_traits.h","cpp")
+            if group=="c": source_navigation_case("extern int fprintf (FILE","FILE.h","c","FILE")
+            click(".source-viewer header button[aria-label=\'返回代码\']")
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
@@ -1328,6 +1410,38 @@ try:
         fill(code,marker)
         save_editor(code)
         (evidence/"VIM_NATIVE_RESULT.txt").write_text("PASS: real Linux WebView, OS keyboard ciw, atomic undo/redo, idle canonical preservation, explicit :w, persisted toggle without document replacement. Native IME not verified.\n")
+
+        # Exercise actual native Vim navigation inside immutable library sources.
+        vim_source="fn source_probe() { let _: Vec<i32> = Vec::new(); }"
+        fill(code,vim_source)
+        wait_for(lambda:"rust-analyzer 已连接" in text(".lsp-status"),"Rust ready for native source Vim")
+        set_vim(True)
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","gg0fVgd"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="mod.rs","native main gd opens Vec source",seconds=60)
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","50","/A: Allocator = Global"],check=True)
+        search_input=".source-viewer .cm-vim-panel input"
+        wait_for(lambda:cmd("GET",f"/element/{element(search_input)}/property/value").endswith("A: Allocator = Global"),"native source Vim search input")
+        subprocess.run(["xdotool","key","--clearmodifiers","Return"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":search_input}),"native source Vim search returns to code")
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","fGgd"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="alloc.rs","native source gd reaches Global",seconds=60)
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+o"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="mod.rs","native source Vim Ctrl-O history")
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+i"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="alloc.rs","native source Vim Ctrl-I history")
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","dd"],check=True)
+        assert "pub struct Global" in text(".source-viewer .cm-content"),"native Vim delete cannot remove the library declaration"
+        assert source_text(code)==vim_source,"native source Vim preserves the editable solution"
+        assert (data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()==marker,"source navigation cannot save the solution"
+        screenshot("rust-vim-source-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),"native normal Escape closes source viewer")
+        set_vim(False)
+        fill(code,marker)
+        save_editor(code)
+        (evidence/"VIM_SOURCE_NAVIGATION_NATIVE_RESULT.txt").write_text("PASS: actual native main gd, source Vim search/gd, Ctrl-O/I source history, readonly dd, unchanged solution/canonical, normal Escape closure. Native IME remains unverified.\n")
 
         # A void-call fixture uses the normal cache, actual private Python harness and GUI.
         stop()

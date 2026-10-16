@@ -3,7 +3,7 @@ import {documentationModel} from "./lsp-document-model";
 let activeWorkers=0;
 const cache=new Map<string,(string|null)[]>();let cacheBytes=0;
 const tags=["p","br","hr","strong","em","del","blockquote","ul","ol","li","pre","code","table","thead","tbody","tr","th","td","h1","h2","h3","h4","h5","h6","kbd","sub","sup"];
-type DocumentOptions={expanded?:boolean;title?:string;summaryFirst?:boolean};
+type DocumentOptions={expanded?:boolean;title?:string;summaryFirst?:boolean;beforeOpen?:()=>void};
 export async function renderDocumentation(value:unknown,legacy=false,signal?:AbortSignal,options:DocumentOptions={}):Promise<HTMLElement|null>{
  const {parts,truncated}=documentationModel(value,legacy,options.expanded);if((!parts.length&&!truncated)||signal?.aborted)return null;
  const key=JSON.stringify(parts);
@@ -45,7 +45,7 @@ export async function renderDocumentation(value:unknown,legacy=false,signal?:Abo
  if(!options.expanded){
   const expand=document.createElement("button");expand.type="button";expand.className="lsp-document-expand";expand.setAttribute("aria-label","展开文档");expand.title="展开文档";
   expand.append(expandIcon());expand.addEventListener("mousedown",event=>event.preventDefault());
-  expand.addEventListener("click",()=>{void openDocumentationReader(value,legacy,signal,options);});dom.prepend(expand);
+  expand.addEventListener("click",()=>{options.beforeOpen?.();void openDocumentationReader(value,legacy,signal,options);});dom.prepend(expand);
  }
  return dom;
 }

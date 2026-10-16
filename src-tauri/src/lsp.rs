@@ -3,11 +3,14 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::{path::{Path,PathBuf}, sync::{Arc,Mutex,atomic::{AtomicBool,AtomicU64,Ordering}}, time::Duration};
 use tauri::Manager as _;
+mod source;
+pub use source::Snapshot as SourceSnapshot;
 type Result<T> = std::result::Result<T,String>;
 pub struct Services { root:PathBuf, generation:AtomicU64, starting:AtomicBool, active:Mutex<Option<Arc<Session>>> }
 struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
     id:u64, client:Client, uri:String, language:String, context:inkleet_managed_env::lsp_scaffold::Context, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
+    sources:Mutex<crate::source_navigation::Registry>, source_reads:std::sync::atomic::AtomicUsize, source_requests:Mutex<crate::completion_requests::CompletionRequests<inkleet_managed_env::rpc::RequestCanceller>>,
     diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, completion_resolve:bool, completion_insert_text_mode:u8, completion_trigger_characters:Vec<String>, completion_requests:Mutex<crate::completion_requests::CompletionRequests<inkleet_managed_env::rpc::RequestCanceller>>, completion_cache:Mutex<crate::completion_cache::CompletionCache>, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
@@ -192,7 +195,8 @@ impl Services {
             self.session(id)?;
             return Ok(Source{text:text.to_owned(),name,declaration:false,language:"java".into()});
         }
-        read_allowed_source(&session.roots,uri)
+        let source=read_allowed_source(&session.roots,uri)?;
+        self.session(id)?;Ok(source)
     }
 }
 pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Option<String>)->Result<Started>{
@@ -255,7 +259,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         let started_uri=uri.clone();
         crate::snippet_validation::started(&state.root,generation,&language,completion_insert_text_mode);
         let completion_snippets=crate::lsp_launch::snippet_support_enabled(&language);
-        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),diagnostics,roots,range_formatting,completion_resolve,completion_insert_text_mode,completion_trigger_characters:completion_trigger_characters.clone(),completion_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),sources:Mutex::new(crate::source_navigation::Registry::default()),source_reads:std::sync::atomic::AtomicUsize::new(0),source_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),diagnostics,roots,range_formatting,completion_resolve,completion_insert_text_mode,completion_trigger_characters:completion_trigger_characters.clone(),completion_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
