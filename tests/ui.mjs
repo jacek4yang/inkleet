@@ -3097,7 +3097,9 @@ try {
       if(command==="update_language_document"){s.version=args.version;return;}
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
       if(command==="language_request"){
-        if(args.kind==="completion")return [{label:"HashMap",detail:"std::collections · map",kind:22,insertText:"HashMap",_inkleetCompletion:1},{label:"HashSet",detail:"std::collections · set",kind:22,insertText:"HashSet",_inkleetCompletion:2}];
+        if(args.kind==="completion"&&s.oversized)return [{label:s.oversizedLabel,detail:s.oversizedDetail,kind:22,insertText:"HashMap",_inkleetCompletion:1}];
+        if(args.kind==="completion"&&s.manyRows)return Array.from({length:72},(_,i)=>({label:"Hash"+String(i).padStart(2,"0")+(i%2?"WithLongGenericContainerName<Key, Value>":""),detail:i%2?s.longDetail:"std::collections",kind:22,insertText:"HashMap",_inkleetCompletion:i+1}));
+        if(args.kind==="completion")return [{label:s.longRows?s.longLabel:"HashMap",detail:s.longRows?s.longDetail:"std::collections · map",kind:22,insertText:"HashMap",_inkleetCompletion:1},{label:"HashSet",detail:"std::collections · set",kind:22,insertText:"HashSet",_inkleetCompletion:2}];
         if(args.kind==="hover")return {contents:s.docs};
         if(args.kind==="signatureHelp")return {activeSignature:0,activeParameter:0,signatures:[{label:"insert(key: K, value: V) -> Option<V>",parameters:[{label:[7,13],documentation:{kind:"markdown",value:"The **key** to insert."}},{label:[15,23]}],documentation:{kind:"markdown",value:"Inserts a key–value pair into the map."}}]};
         return null;
@@ -3144,7 +3146,8 @@ try {
     assert.equal(await presentationPage.locator(".cm-completionInfo img,.cm-completionInfo script,.cm-completionInfo a").count(),0,"server docs contain no active HTML or navigation");
     assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] svg").count(),1);
     assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] .cm-completionMatchedText").innerText(),"Hash","native matching spans are retained for ordinary labels");
-    assert.equal(await presentationPage.locator(".inkleet-completion .cm-completionLabel").first().evaluate(dom=>getComputedStyle(dom).overflow),"clip");
+    assert.equal(await presentationPage.locator(".inkleet-completion .cm-completionLabel").first().evaluate(dom=>getComputedStyle(dom).textOverflow),"clip");
+    assert.equal(await presentationPage.locator(".inkleet-completion .cm-completionDetail").first().innerText(),"std::collections · map");
     if(viewport.width===1200)await presentationPage.screenshot({path:"evidence/completion-documentation-polished.png"});
     if(viewport.width===400)await presentationPage.screenshot({path:"evidence/completion-documentation-narrow.png"});
     await presentationCode.press("ArrowDown");
@@ -3154,6 +3157,82 @@ try {
     assert.equal(await presentationPage.locator(".inkleet-completion").count(),0);
     assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
   }
+
+  await presentationPage.evaluate(()=>{
+    const s=window.__presentation;s.longRows=true;
+    s.longLabel="HashMapWithAnIntentionallyLongTypeNameAndFullGenericParameters<Key, Value>";
+    s.longDetail="fn insert(&mut self, key: Key, value: Value) -> Option<Value> — std::collections::hash_map::HashMap<Key, Value>";
+  });
+  await presentationPage.setViewportSize({width:400,height:600});
+  await presentationPage.evaluate(()=>{const v=window.__presentation.view();v.dispatch({selection:{anchor:v.state.doc.length}});v.focus();});
+  await presentationCode.press("Control+Space");
+  await presentationPage.getByRole("option").first().waitFor();
+  const fullRows=await presentationPage.evaluate(()=>{
+    const s=window.__presentation,row=document.querySelector(".inkleet-completion li"),label=row.querySelector(".cm-completionLabel"),detail=row.querySelector(".cm-completionDetail");
+    return {label:label.textContent,detail:detail.textContent,labelOverflow:label.scrollWidth-label.clientWidth,detailOverflow:detail.scrollWidth-detail.clientWidth,labelHeight:label.getBoundingClientRect().height,detailHeight:detail.getBoundingClientRect().height,row:row.getBoundingClientRect().toJSON(),name:s.longLabel,signature:s.longDetail};
+  });
+  assert.equal(fullRows.label,fullRows.name);assert.equal(fullRows.detail,fullRows.signature);
+  assert.ok(fullRows.labelOverflow<=1&&fullRows.detailOverflow<=1,"full names and signatures wrap within narrow row");
+  assert.ok(fullRows.labelHeight>20&&fullRows.detailHeight>18,"long content uses actual extra lines instead of ellipsis");
+  assert.ok(fullRows.row.left>=0&&fullRows.row.right<=400);
+  await presentationPage.screenshot({path:"evidence/completion-full-content-narrow.png"});
+  await presentationCode.press("ArrowDown");
+  assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] .cm-completionLabel").innerText(),"HashSet");
+  await presentationCode.press("ArrowUp");
+  assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] .cm-completionLabel").innerText(),fullRows.name);
+  await presentationCode.press("Escape");
+  await presentationPage.evaluate(()=>{const s=window.__presentation;s.longRows=false;s.manyRows=true;});
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".inkleet-completion li[aria-selected]").waitFor();
+  await presentationPage.waitForTimeout(150); // Respect CodeMirror\'s initial interaction guard before testing navigation.
+  const assertSelectedVisible=async()=>{
+    const visible=await presentationPage.evaluate(()=>{
+      const selected=document.querySelector(".inkleet-completion li[aria-selected]"),list=selected.closest("ul"),a=selected.getBoundingClientRect(),b=list.getBoundingClientRect();
+      return {top:a.top,bottom:a.bottom,listTop:b.top,listBottom:b.bottom,label:selected.querySelector(".cm-completionLabel").textContent,focus:window.__presentation.view().hasFocus};
+    });
+    assert.ok(visible.top>=visible.listTop-1&&visible.bottom<=visible.listBottom+1,"wrapped selected row is fully scrolled into view");
+    assert.equal(visible.focus,true);return visible.label;
+  };
+  await presentationCode.press("PageDown");assert.notEqual(await assertSelectedVisible(),"Hash00");
+  await presentationCode.press("PageUp");await assertSelectedVisible();
+  await presentationCode.press("Escape");
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".inkleet-completion li[aria-selected]").waitFor();
+  await presentationPage.waitForTimeout(150); // Respect CodeMirror\'s initial interaction guard before testing navigation.
+  for(let i=0;i<71;i++)await presentationCode.press("ArrowDown");
+  assert.match(await assertSelectedVisible(),/^Hash71/);
+  await presentationCode.press("Escape");
+
+  await presentationPage.evaluate(()=>{const s=window.__presentation;s.manyRows=false;s.oversized=true;s.oversizedLabel="Hash"+"LongIdentifier".repeat(25);s.oversizedDetail="完整类型信息 ".repeat(50)+"END_OF_SIGNATURE";});
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".inkleet-completion li[aria-selected]").waitFor();
+  await presentationPage.waitForTimeout(150); // Respect CodeMirror\'s initial interaction guard before testing navigation.
+  const oversizedRow=await presentationPage.evaluate(()=>{
+    const s=window.__presentation,row=document.querySelector(".inkleet-completion li"),list=row.closest("ul");
+    return {label:row.querySelector(".cm-completionLabel").textContent,detail:row.querySelector(".cm-completionDetail").textContent,expectedLabel:s.oversizedLabel,expectedDetail:s.oversizedDetail,height:row.getBoundingClientRect().height,listHeight:list.clientHeight};
+  });
+  assert.equal(oversizedRow.label,oversizedRow.expectedLabel);assert.equal(oversizedRow.detail,oversizedRow.expectedDetail);
+  assert.ok(oversizedRow.height>oversizedRow.listHeight,"oversized row exercises bounded list scrolling");
+  const listBox=await presentationPage.locator(".inkleet-completion>ul").boundingBox();
+  await presentationPage.mouse.move(listBox.x+listBox.width/2,listBox.y+listBox.height/2);
+  await presentationPage.mouse.wheel(0,10000);
+  await presentationPage.waitForFunction(()=>{const list=document.querySelector(".inkleet-completion>ul");return list.scrollTop+list.clientHeight>=list.scrollHeight-2;});
+  await presentationPage.mouse.wheel(0,-10000);
+  await presentationPage.waitForFunction(()=>document.querySelector(".inkleet-completion>ul").scrollTop===0);
+  await presentationPage.mouse.wheel(0,10000);
+  await presentationPage.waitForFunction(()=>{const list=document.querySelector(".inkleet-completion>ul");return list.scrollTop+list.clientHeight>=list.scrollHeight-2;});
+  const detailPoint=await presentationPage.locator(".inkleet-completion .cm-completionDetail").evaluate(dom=>{
+    const a=dom.getBoundingClientRect(),b=dom.closest("ul").getBoundingClientRect();
+    return {x:Math.max(a.left,b.left)+12,y:(Math.max(a.top,b.top)+Math.min(a.bottom,b.bottom))/2};
+  });
+  await presentationPage.waitForTimeout(150);await presentationPage.mouse.click(detailPoint.x,detailPoint.y);
+  await presentationPage.waitForFunction(()=>window.__presentation.value==="HashMap");
+  await presentationCode.press("Control+z");
+  assert.equal(await presentationCode.innerText(),"Hash","clicking wrapped detail accepts the correct candidate atomically");
+  await presentationPage.evaluate(()=>{window.__presentation.oversized=false;});
+  await presentationPage.mouse.move(10,580);
+
+
   await presentationPage.setViewportSize({width:1000,height:700});
   await presentationPage.evaluate(()=>{document.body.style.zoom="1.25";});
   await showPresentation();await presentationPage.waitForTimeout(100);
