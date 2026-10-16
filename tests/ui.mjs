@@ -2884,12 +2884,13 @@ try {
     return JSON.stringify({text:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state)})===JSON.stringify(s.modeFailureBefore);
   }),true,"unsupported inherited mode2 never applies imports, text or history");
   await snippetLspPage.evaluate(()=>{window.__snippetLspTest.statuses=[];});
+  const readinessStarts=await snippetLspPage.evaluate(()=>window.__snippetLspTest.starts);
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.retryProbe=true;});
   await acceptLspSnippet();
   await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value, value)");
   assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.noiseServed),2,"explicit completion retries nonempty invalid and unmatched candidates");
   const readinessRequests=await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return {starts:s.starts,requests:s.requests.filter(r=>r.completionContext?.triggerKind===1)};});
-  assert.equal(readinessRequests.starts,1,"readiness retries never restart the server");
+  assert.equal(readinessRequests.starts,readinessStarts,"readiness retries never restart the server");
   assert.equal(readinessRequests.requests.length,3);
   for(let i=1;i<readinessRequests.requests.length;i++){
     const a=readinessRequests.requests[0],b=readinessRequests.requests[i];
