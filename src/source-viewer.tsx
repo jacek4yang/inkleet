@@ -82,8 +82,8 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
     vimNavigation({definition:target=>{void follow(target.state.selection.main.head);return true;}}),
     Prec.highest(EditorView.domEventHandlers({keydown(event,target){
      const mode=getCM(target)?.state.vim;
-     if(event.key==="Escape"&&mode&&!mode.insertMode&&!mode.visualMode&&!event.isComposing&&event.target===target.contentDOM&&!target.dom.querySelector(".cm-search")){event.preventDefault();close();return true;}
-     if(!mode||mode.insertMode||event.isComposing||!event.ctrlKey||event.altKey||event.metaKey||event.shiftKey)return false;
+     if(event.key==="Escape"&&mode&&!mode.insertMode&&!mode.visualMode&&target.state.selection.main.empty&&!event.isComposing&&event.target===target.contentDOM&&!target.dom.querySelector(".cm-search")){event.preventDefault();close();return true;}
+     if(!mode||mode.insertMode||mode.visualMode||!target.state.selection.main.empty||event.isComposing||!event.ctrlKey||event.altKey||event.metaKey||event.shiftKey)return false;
      if(event.key.toLowerCase()==="o"){event.preventDefault();move(-1);return true;}
      if(event.key.toLowerCase()==="i"){event.preventDefault();move(1);return true;}
      return false;
@@ -91,8 +91,6 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
     Prec.highest(keymap.of([
      {key:"F12",run:target=>{void follow(target.state.selection.main.head);return true;}},
      {key:"Alt-ArrowLeft",run:()=>{move(-1);return true;}},{key:"Alt-ArrowRight",run:()=>{move(1);return true;}},
-     {key:"Ctrl-o",run:target=>{const mode=getCM(target)?.state.vim;if(!mode||mode.insertMode)return false;move(-1);return true;}},
-     {key:"Ctrl-i",run:target=>{const mode=getCM(target)?.state.vim;if(!mode||mode.insertMode)return false;move(1);return true;}},
     ])),
     EditorState.readOnly.of(true),EditorView.editable.of(false),
     EditorView.contentAttributes.of({"aria-label":"只读标准库源码",tabindex:"0",spellcheck:"false"}),

@@ -750,7 +750,7 @@ try {
         if (args.kind === "signatureHelp" && state.deferSignature) return new Promise(resolve => { state.signatureReply = resolve; });
         if (args.kind === "signatureHelp") return { signatures: [{ label: "popleft(index: int) -> int", documentation: "<img src=x onerror=alert(1)>signature docs", parameters: [{ label: "index" }] }], activeSignature: 0, activeParameter: 0 };
         if (args.kind === "hover") return { contents: { kind: "plaintext", value: "deque.popleft() -> int" } };
-        if (args.kind === "definition") return [{ uri: "file:///fixture/stdlib/collections.pyi", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } } }];
+        if (args.kind === "definition") return [{ uri: state.primaryDefinition?"file:///fixture/solution.py":"file:///fixture/stdlib/collections.pyi", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } } }];
       }
       if(command==="language_cancel_source_navigation"){state.sourceCancels??=[];state.sourceCancels.push(args);return;}
       if(command==="acquire_language_source"){
@@ -760,6 +760,7 @@ try {
       if(command==="language_source_definition"){
         state.sourceRequests??=[];state.sourceRequests.push(args);
         const result={locations:[{uri:args.sourceId===1?"file:///fixture/stdlib/_collections_abc.py":"file:///fixture/stdlib/collections.pyi",range:{start:{line:0,character:6},end:{line:0,character:args.sourceId===1?14:11}}}],omitted:0};
+        if(state.multiSource)result.locations.push({uri:"file:///fixture/stdlib/collections.pyi",range:{start:{line:0,character:6},end:{line:0,character:11}}});
         if(state.holdSource)return new Promise(resolve=>{state.sourceReply=()=>resolve(result);});
         if(state.failSource)throw Error("controlled source failure");
         return result;
@@ -869,15 +870,43 @@ try {
   const cancelCount=await lspPage.evaluate(()=>window.__lspTest.sourceCancels?.length??0);
   for(let n=0;n<5;n++)await sourceCode.press("ArrowRight");
   assert.ok((await lspPage.evaluate(()=>window.__lspTest.sourceCancels?.length??0))-cancelCount<=1,"cursor movement does not repeatedly issue cancellation IPC");
+
+  await lspPage.evaluate(()=>{window.__lspTest.multiSource=true;});
+  await sourceCode.press("F12");
+  const targetPicker=lspPage.getByRole("dialog",{name:"选择定义",exact:true});
+  await targetPicker.waitFor();
+  assert.equal(await targetPicker.getByRole("button").count(),2,"all distinct definitions are offered");
+  await lspPage.keyboard.press("ArrowDown");await lspPage.keyboard.press("Enter");
+  await targetPicker.waitFor({state:"detached"});
+  assert.equal(await sourceShell.locator("#source-title").innerText(),"collections.pyi","picker can choose a same-file target");
+  await lspPage.evaluate(()=>{window.__lspTest.multiSource=false;});
   await lspPage.screenshot({path:"evidence/recursive-source-navigation.png"});
   await sourceDialog.getByRole("button", { name: "返回代码", exact: true }).click();
   assert.equal(await lspEditor.innerText(), "items.popleft");
+  await lspPage.evaluate(()=>{window.__lspTest.holdSource=true;delete window.__lspTest.sourceReply;});
+  await lspEditor.press("F12");await sourceShell.waitFor();
+  await sourceCode.press("F12");
+  await lspPage.waitForFunction(()=>typeof window.__lspTest.sourceReply==="function");
+  await sourceShell.getByRole("button",{name:"关闭源码",exact:true}).click();
+  await sourceShell.waitFor({state:"detached"});
+  await lspPage.evaluate(()=>{window.__lspTest.sourceReply();window.__lspTest.holdSource=false;});
+  await lspPage.waitForTimeout(80);
+  assert.equal(await sourceShell.count(),0,"late source response cannot reopen a dismissed reader");
   await openSettings(lspPage,"编辑器");
   await lspPage.getByRole("checkbox",{name:"Vim",exact:true}).check();
   await lspPage.getByRole("button",{name:"保存设置",exact:true}).click();
   await lspPage.waitForFunction(()=>window.__lspTest.settings.vim===true);
   await lspPage.getByRole("button",{name:"关闭设置",exact:true}).click();
-  await lspEditor.click();await lspEditor.press("Escape");await lspPage.keyboard.type("gd");
+  await lspEditor.click();await lspEditor.press("Escape");
+  await lspPage.evaluate(()=>{window.__lspTest.primaryDefinition=true;});
+  await lspEditor.press("F12");
+  await lspPage.waitForFunction(()=>window.__lspTest.requests.at(-1)?.kind==="definition");
+  assert.equal(await lspPage.evaluate(async()=>{
+    const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
+    return EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.selection.main.empty;
+  }),true,"same-document F12 in Vim uses a normal-mode caret");
+  await lspPage.evaluate(()=>{window.__lspTest.primaryDefinition=false;});
+  await lspPage.keyboard.type("gd");
   await sourceShell.waitFor();
   await sourceCode.press("Escape");
   await sourceShell.waitFor({state:"detached"});
@@ -891,6 +920,10 @@ try {
   await sourceCode.press("Control+i");
   try{await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");}
   catch(error){await writeFile("evidence/source-navigation-failure.json",JSON.stringify(await lspPage.evaluate(()=>({title:document.querySelector("#source-title")?.textContent,message:document.querySelector(".source-message")?.textContent,requests:window.__lspTest.sourceRequests,cancels:window.__lspTest.sourceCancels,active:document.activeElement?.outerHTML,source:document.querySelector(".source-viewer")?.innerText})),null,2));await lspPage.screenshot({path:"evidence/source-navigation-failure.png"});throw error;}
+  await lspPage.keyboard.type("vl");await sourceCode.press("Escape");
+  assert.equal(await sourceShell.count(),1,"visual Escape exits selection before closing the reader");
+  await lspPage.keyboard.type("gd");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
   const immutable=await sourceCode.innerText();
   await lspPage.keyboard.type("dd");assert.equal(await sourceCode.innerText(),immutable,"Vim delete cannot mutate library source");
   await lspPage.keyboard.type("iXYZ");

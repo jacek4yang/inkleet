@@ -1,3 +1,4 @@
+import {getCM} from "@replit/codemirror-vim";
 import {vimNavigation} from "./vim-navigation";
 import {chooseSourceTarget,sourceSpan,sourceTargets,validSourceSnapshot,type Source,type SourceSnapshot,type SourceTarget,type SourceNavigator} from "./source-protocol";
 export type {Source} from "./source-protocol";
@@ -331,7 +332,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if(!valid()||generation!==navigationGeneration||abort.signal.aborted)return;
       if(location.uri===session?.uri){
         const span=range(doc,location.range);if(!span)throw Error("定义位置与当前代码不一致");
-        target.dispatch({selection:{anchor:span.from,head:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});return;
+        target.dispatch({selection:{anchor:span.from,head:getCM(target)?span.from:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});return;
       }
       const askedVersion=version,primary=session!.uri;
       const current=()=>valid()&&version===askedVersion;
@@ -350,7 +351,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           if(!current())return;
           if(location){
             const span=range(doc,location.range);if(!span)throw Error("定义位置与当前代码不一致");
-            showSource(null);target.dispatch({selection:{anchor:span.from,head:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});
+            showSource(null);target.dispatch({selection:{anchor:span.from,head:getCM(target)?span.from:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});
           }else{
             showSource(null);target.dispatch({selection});target.scrollDOM.scrollTop=scrollTop;target.scrollDOM.scrollLeft=scrollLeft;
           }
