@@ -1,10 +1,10 @@
 import {Direction} from "@codemirror/view";
-import type {CompletionConfig} from "@codemirror/autocomplete";
+import {autocompletion} from "@codemirror/autocomplete";
 import {placeCompletionInfo} from "./completion-popup-placement";
 let nextId=0;
 export function completionPopup(){
  const owner="inkleet-completion-"+(++nextId);
- const positionInfo:NonNullable<CompletionConfig["positionInfo"]>=(view,list,option,_info,space)=>{
+ const positionInfo:NonNullable<NonNullable<Parameters<typeof autocompletion>[0]>["positionInfo"]>=(view,list,option,_info,space)=>{
   const tooltip=view.dom.ownerDocument.querySelector<HTMLElement>("."+owner);
   const hidden={style:"visibility:hidden;pointer-events:none;",class:"inkleet-completion-info"};
   if(!tooltip||!tooltip.offsetWidth||!tooltip.offsetHeight)return hidden;

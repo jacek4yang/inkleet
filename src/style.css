@@ -523,27 +523,27 @@ button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(
 
 
 /* Shared, opaque editor popovers: no backdrop filter or transform-based text rasterization. */
-.cm-tooltip.inkleet-completion,.cm-tooltip.cm-completionInfo,.cm-tooltip:has(.lsp-hover),.cm-tooltip:has(.lsp-signature){
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion,body .cm-tooltip.cm-completionInfo,.cm-tooltip:has(.lsp-hover),.cm-tooltip:has(.lsp-signature){
  border:1px solid var(--line);border-radius:7px;background:var(--surface-editor);color:var(--ink);
  box-shadow:0 4px 16px #20251b18,0 1px 3px #20251b0c;text-shadow:none;font-weight:400;
 }
-.cm-tooltip.inkleet-completion{overflow:visible;padding:4px;max-width:calc(100vw - 16px)}
-.cm-tooltip.inkleet-completion>ul{
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion{overflow:visible;padding:4px;max-width:calc(100vw - 16px)}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul{
  font:12px/1.5 var(--font-mono);min-width:min(280px,calc(100vw - 26px));max-width:min(480px,calc(100vw - 26px));
  max-height:min(288px,42vh);padding:0;margin:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;
 }
-.cm-tooltip.inkleet-completion>ul>li{
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li{
  display:flex;align-items:center;gap:8px;min-height:28px;padding:4px 8px;border-radius:3px;line-height:20px;white-space:nowrap;color:var(--ink);
 }
-.cm-tooltip.inkleet-completion>ul>li:hover:not([aria-selected]){background:var(--active-line)}
-.cm-tooltip.inkleet-completion>ul>li[aria-selected]{color:var(--ink);background:var(--selection);box-shadow:inset 2px 0 var(--accent)}
-.inkleet-completion .cm-completionLabel{min-width:4ch;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis}
-.inkleet-completion .cm-completionDetail{font:inherit;font-style:normal;color:var(--muted);margin:0 0 0 8px;max-width:42%;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
-.inkleet-completion .cm-completionMatchedText{font-weight:700;text-decoration:none;color:inherit}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li:hover:not([aria-selected]){background:var(--active-line)}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li[aria-selected]{color:var(--ink);background:var(--selection);box-shadow:inset 2px 0 var(--accent)}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionLabel{min-width:4ch;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionDetail{font:inherit;font-style:normal;color:var(--muted);margin:0 0 0 8px;max-width:42%;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionMatchedText{font-weight:700;text-decoration:none;color:inherit}
 .lsp-completion-icon{display:flex;align-items:center;justify-content:center;width:16px;height:20px;flex:0 0 16px;color:var(--muted)}
 .lsp-completion-icon svg{display:block}
 .inkleet-completion [aria-selected] .lsp-completion-icon{color:var(--ink)}
-.cm-tooltip.cm-completionInfo{padding:0;max-width:min(440px,calc(100vw - 16px));max-height:min(360px,48vh);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+body .cm-tooltip.cm-completionInfo{padding:0;max-width:min(440px,calc(100vw - 16px));max-height:min(360px,48vh);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .lsp-documentation{font:13px/1.6 system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif;color:var(--ink);overflow-wrap:anywhere;white-space:normal;padding:12px 14px;min-width:0}
 .lsp-document-section+.lsp-document-section{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 .lsp-document-plain{white-space:pre-wrap}
@@ -567,6 +567,6 @@ button:focus-visible,.solution-menu>summary:focus-visible{outline:2px solid var(
 .lsp-active-parameter{color:var(--accent);background:var(--selection);border-radius:2px;font-weight:700;padding:0;box-decoration-break:clone}
 .lsp-overload-count{display:block;font:11px/1.4 var(--font-mono);color:var(--muted);padding:4px 14px;border-top:1px solid var(--line)}
 .lsp-signature>.lsp-documentation{border-top:1px solid var(--line)}
-@media(forced-colors:active){.cm-tooltip.inkleet-completion>ul>li[aria-selected]{outline:1px solid Highlight;background:Highlight;color:HighlightText}.lsp-active-parameter{outline:1px solid Highlight;color:Highlight}}
+@media(forced-colors:active){body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li[aria-selected]{outline:1px solid Highlight;background:Highlight;color:HighlightText}.lsp-active-parameter{outline:1px solid Highlight;color:Highlight}}
 
 .lsp-completion-summary{font:12px/1.6 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere;padding-bottom:9px;margin-bottom:9px;border-bottom:1px solid var(--line);color:var(--muted)}

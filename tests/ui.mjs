@@ -3125,10 +3125,11 @@ try {
     await presentationPage.waitForTimeout(100);
     const layout=await presentationPage.evaluate(()=>{
       const list=document.querySelector(".inkleet-completion"),info=document.querySelector(".cm-completionInfo");
-      const a=list.getBoundingClientRect(),b=info.getBoundingClientRect(),style=getComputedStyle(info);
-      return {a:{left:a.left,right:a.right,top:a.top,bottom:a.bottom},b:{left:b.left,right:b.right,top:b.top,bottom:b.bottom},visible:style.visibility,overflow:getComputedStyle(list).overflow,scroll:info.scrollHeight>info.clientHeight,shadow:getComputedStyle(document.querySelector(".cm-content")).textShadow};
+      const a=list.getBoundingClientRect(),b=info.getBoundingClientRect(),style=getComputedStyle(info),ul=getComputedStyle(list.querySelector("ul")),row=getComputedStyle(list.querySelector("li"));
+      return {a:{left:a.left,right:a.right,top:a.top,bottom:a.bottom},b:{left:b.left,right:b.right,top:b.top,bottom:b.bottom},font:ul.fontFamily,rowPadding:row.paddingTop,rowHeight:row.lineHeight,listHeight:ul.maxHeight,visible:style.visibility,overflow:getComputedStyle(list).overflow,scroll:info.scrollHeight>info.clientHeight,shadow:getComputedStyle(document.querySelector(".cm-content")).textShadow};
     });
     assert.equal(layout.visible,"visible");assert.equal(layout.overflow,"visible");
+    assert.match(layout.font,/Intel One Mono/);assert.equal(layout.rowPadding,"4px");assert.equal(layout.rowHeight,"20px");assert.ok(parseFloat(layout.listHeight)<=288);
     assert.ok(layout.b.left>=-1&&layout.b.right<=viewport.width+1&&layout.b.top>=-1&&layout.b.bottom<=viewport.height+1,"documentation stays inside "+JSON.stringify(viewport));
     assert.ok(layout.b.left>=layout.a.right-1||layout.b.right<=layout.a.left+1||layout.b.top>=layout.a.bottom-1||layout.b.bottom<=layout.a.top+1,"documentation never covers completion list");
     assert.equal(layout.shadow,"none");assert.equal(layout.scroll,true);
