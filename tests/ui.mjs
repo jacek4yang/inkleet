@@ -2749,10 +2749,10 @@ try {
   await snippetLspPage.goto("http://127.0.0.1:5173/snippet-lsp-test");
   await snippetLspPage.evaluate(async()=>{
     const api=await import("/tests/snippet-session-harness.tsx"),d="$";
-    const s=window.__snippetLspTest={api,value:"call",edits:[],statuses:[],saves:[],errors:[],version:1,source:"call("+d+"{1:value}, "+d+"1)"+d+"0",format:2,mode:1,indented:false,deferResolve:false,resolveReply:null,holdPreparation:false,preparedReply:null};
+    const s=window.__snippetLspTest={api,value:"call",edits:[],statuses:[],saves:[],errors:[],version:1,source:"call("+d+"{1:value}, "+d+"1)"+d+"0",format:2,mode:1,indented:false,deferResolve:false,resolveReply:null,holdPreparation:false,preparedReply:null,capability:true,prepareCalls:0};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
-      if(command==="start_language_service"){s.starts=(s.starts??0)+1;const mode=s.sessionMode??2;(s.sessionModes??=[]).push(mode);return {id:109,version:1,server:"snippet-lsp-fixture",uri:"file:///solution.py",completionResolve:true,completionInsertTextMode:mode};}
+      if(command==="start_language_service"){s.starts=(s.starts??0)+1;const mode=s.sessionMode??2;(s.sessionModes??=[]).push(mode);return {id:109,version:1,server:"snippet-lsp-fixture",uri:"file:///solution.py",completionResolve:true,completionInsertTextMode:mode,...(s.capability==="omitted"?{}:{completionSnippets:s.capability})};}
       if(command==="update_language_document"){s.version=args.version;return;}
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
       if(command==="language_request"){
@@ -2764,12 +2764,17 @@ try {
         }
         const start=s.editStart??(s.indented?2:0),line=s.editLine??0;
         s.item={label:"call",insertTextFormat:s.format,insertTextMode:s.mode,textEdit:{range:{start:{line,character:start},end:{line,character:start+4}},newText:s.source},_inkleetCompletion:1};
+        if(s.capabilityProbe){
+          s.item={label:"call",insertTextFormat:1,insertTextMode:1,textEdit:{range:{start:{line:0,character:0},end:{line:0,character:4}},newText:"callPlain"},_inkleetCompletion:1};
+          return [s.item,{...s.item,label:"callSnippet",insertTextFormat:2,textEdit:{...s.item.textEdit,newText:"call("+d+"{1:value})"},_inkleetCompletion:2}];
+        }
         if(s.omitMode)delete s.item.insertTextMode;
         if(s.labelOnly){delete s.item.textEdit;s.item.insertText=s.source;}
         return [s.item];
       }
       if(command==="language_completion_resolve"){
         const result={...s.item,additionalTextEdits:[{range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"import helper\r\n"}]};
+        if(s.capabilityProbe&&s.resolveAsSnippet){result.insertTextFormat=2;result.textEdit={...result.textEdit,newText:"call("+d+"{1:value})"};}
         if(s.omitImports)result.additionalTextEdits=[];
         if(s.deferResolve)return new Promise(resolve=>{s.resolveReply=()=>resolve(result);});
         return result;
@@ -2786,6 +2791,7 @@ try {
     };
     const prototype=api.SnippetPreparationService.prototype,original=prototype.prepare;
     prototype.prepare=async function(...args){
+      s.prepareCalls++;
       const result=await original.apply(this,args);
       if(s.holdPreparation)await new Promise(resolve=>{s.preparedReply=resolve;});
       return result;
@@ -2800,6 +2806,44 @@ try {
     await snippetLspPage.getByRole("option",{name:"call",exact:true}).waitFor();
     await snippetLspPage.waitForTimeout(150);await snippetLspCode.press("Enter");
   };
+
+
+  // Capability belongs to the started session, not to the returned item or editor extension.
+  for(const capability of [false,"omitted","true"]){
+    await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
+    await snippetLspCode.waitFor({state:"hidden"});
+    await snippetLspPage.evaluate(capability=>{
+      const s=window.__snippetLspTest;s.capability=capability;s.capabilityProbe=true;s.resolveAsSnippet=false;
+      s.value="call";s.statuses=[];s.prepareCalls=0;s.mount=s.api.mountSnippetEditor(document.querySelector("#editor"),s);
+    },capability);
+    await snippetLspCode.waitFor();
+    await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("已连接")));
+    await snippetLspPage.evaluate(()=>window.__snippetLspTest.reset());
+    await snippetLspCode.press("Control+Space");
+    await snippetLspPage.getByRole("option",{name:"call",exact:true}).waitFor();
+    assert.equal(await snippetLspPage.getByRole("option",{name:"callSnippet",exact:true}).count(),0,"unadvertised format2 is filtered for "+capability);
+    assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.prepareCalls),0,"candidate filtering never prepares snippets");
+    await snippetLspPage.waitForTimeout(150);await snippetLspCode.press("Enter");
+    await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncallPlain");
+    assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.prepareCalls),0,"plaintext remains usable without snippet capability");
+    await snippetLspCode.press("Control+z");
+    assert.equal(await snippetLspCode.innerText(),"call","plaintext and import remain one undo step");
+
+    await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.resolveAsSnippet=true;s.statuses=[];});
+    const before=await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return {source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state),preparations:s.prepareCalls};});
+    await acceptLspSnippet();
+    await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("此会话未启用参数补全")));
+    assert.deepEqual(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return {source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state),preparations:s.prepareCalls};}),before,"resolved format2 refusal preserves source, selection, history and preparation count");
+  }
+  await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
+  await snippetLspCode.waitFor({state:"hidden"});
+  await snippetLspPage.evaluate(()=>{
+    const s=window.__snippetLspTest;s.capability=true;s.capabilityProbe=false;s.resolveAsSnippet=false;
+    s.value="call";s.statuses=[];s.mount=s.api.mountSnippetEditor(document.querySelector("#editor"),s);
+  });
+  await snippetLspCode.waitFor();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("已连接")));
+  await writeFile("evidence/COMPLETION_SNIPPET_CAPABILITY_RESULT.txt","PASS: fresh false, missing and malformed capability sessions reject format2 candidates and resolved format2 before preparation; plaintext plus import and undo remain usable. Source, selection and undo depth are unchanged on refusal. Subsequent positive fixture explicitly advertises true. Mocked transport only.\n");
 
 
   for(const format of [1,2]){
@@ -2840,12 +2884,13 @@ try {
     return JSON.stringify({text:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state)})===JSON.stringify(s.modeFailureBefore);
   }),true,"unsupported inherited mode2 never applies imports, text or history");
   await snippetLspPage.evaluate(()=>{window.__snippetLspTest.statuses=[];});
+  const readinessStarts=await snippetLspPage.evaluate(()=>window.__snippetLspTest.starts);
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.retryProbe=true;});
   await acceptLspSnippet();
   await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value, value)");
   assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.noiseServed),2,"explicit completion retries nonempty invalid and unmatched candidates");
   const readinessRequests=await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return {starts:s.starts,requests:s.requests.filter(r=>r.completionContext?.triggerKind===1)};});
-  assert.equal(readinessRequests.starts,1,"readiness retries never restart the server");
+  assert.equal(readinessRequests.starts,readinessStarts,"readiness retries never restart the server");
   assert.equal(readinessRequests.requests.length,3);
   for(let i=1;i<readinessRequests.requests.length;i++){
     const a=readinessRequests.requests[0],b=readinessRequests.requests[i];
