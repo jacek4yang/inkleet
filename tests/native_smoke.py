@@ -730,7 +730,28 @@ try:
         cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue009"}
         ]}]})
-        wait_for(lambda: "popleft" in text(".cm-tooltip-autocomplete"), "real stdlib member completion", seconds=30)
+        completion_observations=[]
+        def observe_python_completion():
+            started=time.monotonic()
+            sample={"utc":time.time()}
+            try:
+                sample["dom"]=cmd("POST","/execute/sync",{"script":"""
+                  const t=document.querySelector('.cm-tooltip-autocomplete');
+                  if(!t)return {present:false,focus:document.activeElement?.getAttribute('aria-label')};
+                  const r=t.getBoundingClientRect(),s=getComputedStyle(t);
+                  return {present:true,text:t.textContent,innerText:t.innerText,bounds:r.toJSON(),visibility:s.visibility,display:s.display,focus:document.activeElement?.getAttribute('aria-label'),
+                    labels:Array.from(t.querySelectorAll('.cm-completionLabel')).map(n=>({text:n.textContent,bounds:n.getBoundingClientRect().toJSON()}))};
+                ""","args":[]})
+                sample["webdriverText"]=text(".cm-tooltip-autocomplete")
+                return "popleft" in sample["webdriverText"]
+            except Exception as error:
+                sample["error"]=str(error)
+                raise
+            finally:
+                sample["elapsed"]=time.monotonic()-started
+                completion_observations.append(sample)
+                (evidence/"python-completion-observations.json").write_text(json.dumps(completion_observations[-160:],ensure_ascii=False,indent=2))
+        wait_for(observe_python_completion, "real stdlib member completion", seconds=30)
         screenshot("python-completion-native.png")
         time.sleep(.3)  # Completion widgets intentionally ignore accidental clicks immediately after opening.
         def choose_completion():
