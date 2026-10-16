@@ -24,7 +24,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean; completionTriggerCharacters?: string[] };
+type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
 export type Source = { name: string; text: string; declaration: boolean; line: number; language?: "python3" | "java" | "golang" | "rust" | "c" | "cpp" };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -136,6 +136,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   }
   async function complete(context: CompletionContext) {
     if (!session || !view) return null;
+    const defaultMode=session.completionInsertTextMode===undefined?1:session.completionInsertTextMode;
+    if(defaultMode!==1&&defaultMode!==2){if(context.explicit)status("语言服务补全插入模式无效");return null;}
     const contextSelection=context.state.selection;
     if(contextSelection.ranges.length!==1||context.state.doc.lineAt(contextSelection.main.from).number!==context.state.doc.lineAt(contextSelection.main.to).number){
       if(context.explicit)status("此选区暂不支持补全");return null;
@@ -161,7 +163,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         object(item)&&typeof item.label==="string"&&(!needle||String(item.filterText??item.label).toLowerCase().includes(needle))
       ).sort((a,b)=>String(a.sortText??a.label).localeCompare(String(b.sortText??b.label))).slice(0,300).filter(item=>{
         if(item.label.length>512||requiresResolve&&(!Number.isSafeInteger(item._inkleetCompletion)||item._inkleetCompletion<=0))return false;
-        const application=completionApplication(doc,item,word?.from??context.pos,context.pos,contextSelection.main);
+        const application=completionApplication(doc,item,word?.from??context.pos,context.pos,contextSelection.main,defaultMode);
         return !!application&&(application.format!==2||snippets);
       });
       let candidates:Record<string,any>[]=[];
@@ -212,7 +214,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
             void (async()=>{
               const resolved=await resolveItem();
               if(!current())return;
-              const application=completionApplication(doc,resolved,word?.from??context.pos,context.pos,contextSelection.main);
+              const application=completionApplication(doc,resolved,word?.from??context.pos,context.pos,contextSelection.main,defaultMode);
               if(!application)throw Error("补全或导入编辑无效，未修改源码");
               const existingSnippet=target.state.field(snippetSessionState,false);
               if(existingSnippet&&(application.format===2||application.additional.length))throw Error(existingSnippet.dirty?(existingSnippet.dormant?"请先保存当前参数修改，再应用此候选":"请先保存，再按 Esc 结束当前参数补全"):"请先按 Esc 结束当前参数补全，再应用此候选");

@@ -75,3 +75,19 @@ test("insert arm need only contain request position while replace covers selecti
  assert.ok(completionApplication(doc,{label:"x",textEdit:{insert:r(0,0),replace:r(0,5),newText:"x"}},0,0,{from:0,to:5}));
  assert.equal(completionApplication(doc,{label:"x",textEdit:{insert:r(0,0),replace:r(0,4),newText:"x"}},0,0,{from:0,to:5}),null);
 });
+
+test("effective insertion mode inherits session default without changing the item",()=>{
+ const plain={label:"x"},snippet={label:"x",insertTextFormat:2,insertText:"call("+String.fromCharCode(36)+"{1:value})"};
+ for(const item of [plain,snippet]){
+  const before=JSON.stringify(item);
+  assert.equal(completionApplication(doc,item,0,5,undefined,2)?.mode,2);
+  assert.equal(completionApplication(doc,{...item,insertTextMode:1},0,5,undefined,2)?.mode,1);
+  assert.equal(completionApplication(doc,{...item,insertTextMode:2},0,5,undefined,1)?.mode,2);
+  assert.equal(completionApplication(doc,item,0,5)?.mode,1,"legacy missing session default remains asIs");
+  assert.equal(JSON.stringify(item),before);
+  for(const invalid of [null,0,3,"2",false,NaN]){
+   assert.equal(completionApplication(doc,item,0,5,undefined,invalid),null);
+   assert.equal(completionApplication(doc,{...item,insertTextMode:invalid},0,5,undefined,2),null);
+  }
+ }
+});

@@ -15,10 +15,11 @@ function range(doc:Text,value:unknown){
  return from!==null&&to!==null&&from<=to?{from,to}:null;
 }
 /** Shape/budget admission only; never parses source or applies an edit. */
-export function completionApplication(doc:Text,item:unknown,from:number,to:number,selection?:{from:number;to:number}):CompletionApplication|null{
+export function completionApplication(doc:Text,item:unknown,from:number,to:number,selection?:{from:number;to:number},defaultMode:unknown=1):CompletionApplication|null{
+ if(defaultMode!==1&&defaultMode!==2)return null;
  if(!object(item)||![from,to].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=doc.length)||from>to||!boundary(doc,from)||!boundary(doc,to))return null;
  if(selection&&(![selection.from,selection.to].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=doc.length)||selection.from>selection.to||!boundary(doc,selection.from)||!boundary(doc,selection.to)))return null;
- const format=item.insertTextFormat===undefined?1:item.insertTextFormat,mode=item.insertTextMode===undefined?1:item.insertTextMode;
+ const format=item.insertTextFormat===undefined?1:item.insertTextFormat,mode=item.insertTextMode===undefined?defaultMode:item.insertTextMode;
  if(format!==1&&format!==2||mode!==1&&mode!==2)return null;
  if(item.textEdit!==undefined&&!object(item.textEdit))return null;
  const edit=item.textEdit;
