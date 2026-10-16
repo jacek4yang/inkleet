@@ -204,7 +204,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           return resolution;
         };
         options.push({
-          label: typeof item.filterText === "string" ? item.filterText.slice(0, 512) : item.label.trimStart(), displayLabel: item.label.trimStart(), detail: typeof item.detail === "string" ? item.detail.slice(0, 500) : undefined,
+          label: typeof item.filterText === "string" ? item.filterText.slice(0, 512) : item.label.trimStart(), displayLabel: typeof item.filterText==="string"&&item.filterText.slice(0,512)!==item.label.trimStart()?item.label.trimStart():undefined, detail: typeof item.detail === "string" ? item.detail.slice(0, 500) : undefined,
           info: async()=>{
             try{
               const resolved=resolve?await resolveItem():item;

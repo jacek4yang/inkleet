@@ -3143,6 +3143,8 @@ try {
     assert.deepEqual(await presentationPage.evaluate(()=>window.__presentation.view().state.selection.toJSON()),scrollSelection,"documentation scroll never moves code selection");
     assert.equal(await presentationPage.locator(".cm-completionInfo img,.cm-completionInfo script,.cm-completionInfo a").count(),0,"server docs contain no active HTML or navigation");
     assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] svg").count(),1);
+    assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] .cm-completionMatchedText").innerText(),"Hash","native matching spans are retained for ordinary labels");
+    assert.equal(await presentationPage.locator(".inkleet-completion .cm-completionLabel").first().evaluate(dom=>getComputedStyle(dom).overflow),"clip");
     if(viewport.width===1200)await presentationPage.screenshot({path:"evidence/completion-documentation-polished.png"});
     if(viewport.width===400)await presentationPage.screenshot({path:"evidence/completion-documentation-narrow.png"});
     await presentationCode.press("ArrowDown");

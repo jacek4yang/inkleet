@@ -537,8 +537,8 @@ body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li{
 }
 body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li:hover:not([aria-selected]){background:var(--active-line)}
 body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li[aria-selected]{color:var(--ink);background:var(--selection);box-shadow:inset 2px 0 var(--accent)}
-body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionLabel{min-width:4ch;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis}
-body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionDetail{font:inherit;font-style:normal;color:var(--muted);margin:0 0 0 8px;max-width:42%;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionLabel{min-width:4ch;flex:1 1 auto;overflow:clip;text-overflow:ellipsis}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionDetail{font:inherit;font-style:normal;color:var(--muted);margin:0 0 0 8px;max-width:42%;overflow:clip;text-overflow:ellipsis;flex:0 1 auto}
 body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionMatchedText{font-weight:700;text-decoration:none;color:inherit}
 .lsp-completion-icon{display:flex;align-items:center;justify-content:center;width:16px;height:20px;flex:0 0 16px;color:var(--muted)}
 .lsp-completion-icon svg{display:block}
