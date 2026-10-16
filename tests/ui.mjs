@@ -2752,7 +2752,7 @@ try {
     const s=window.__snippetLspTest={api,value:"call",edits:[],statuses:[],saves:[],errors:[],version:1,source:"call("+d+"{1:value}, "+d+"1)"+d+"0",format:2,mode:1,indented:false,deferResolve:false,resolveReply:null,holdPreparation:false,preparedReply:null};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
-      if(command==="start_language_service"){s.starts=(s.starts??0)+1;return {id:109,version:1,server:"snippet-lsp-fixture",uri:"file:///solution.py",completionResolve:true};}
+      if(command==="start_language_service"){s.starts=(s.starts??0)+1;const mode=s.sessionMode??2;(s.sessionModes??=[]).push(mode);return {id:109,version:1,server:"snippet-lsp-fixture",uri:"file:///solution.py",completionResolve:true,completionInsertTextMode:mode};}
       if(command==="update_language_document"){s.version=args.version;return;}
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
       if(command==="language_request"){
@@ -2762,8 +2762,9 @@ try {
           s.noiseServed++;
           return [{label:s.noiseServed===1?"call":"unrelated",insertTextFormat:1,textEdit:{range:{start:{line:0,character:0},end:{line:0,character:s.noiseServed===1?0:4}},newText:"bad"},_inkleetCompletion:1}];
         }
-        const start=s.indented?2:0;
-        s.item={label:"call",insertTextFormat:s.format,insertTextMode:s.mode,textEdit:{range:{start:{line:0,character:start},end:{line:0,character:start+4}},newText:s.source},_inkleetCompletion:1};
+        const start=s.editStart??(s.indented?2:0),line=s.editLine??0;
+        s.item={label:"call",insertTextFormat:s.format,insertTextMode:s.mode,textEdit:{range:{start:{line,character:start},end:{line,character:start+4}},newText:s.source},_inkleetCompletion:1};
+        if(s.omitMode)delete s.item.insertTextMode;
         if(s.labelOnly){delete s.item.textEdit;s.item.insertText=s.source;}
         return [s.item];
       }
@@ -2780,7 +2781,7 @@ try {
     s.mount=api.mountSnippetEditor(document.querySelector("#editor"),s);
     s.view=()=>api.EditorView.findFromDOM(document.querySelector(".cm-editor"));
     s.reset=(source="call("+d+"{1:value}, "+d+"1)"+d+"0",indented=false,mode=1,format=2)=>{
-      s.requests=[];s.retryProbe=false;s.noiseServed=0;s.labelOnly=false;s.source=source;s.indented=indented;s.mode=mode;s.format=format;s.omitImports=false;s.deferResolve=false;s.resolveReply=null;s.holdPreparation=false;s.preparedReply=null;
+      s.omitMode=false;s.editLine=0;s.editStart=null;s.requests=[];s.retryProbe=false;s.noiseServed=0;s.labelOnly=false;s.source=source;s.indented=indented;s.mode=mode;s.format=format;s.omitImports=false;s.deferResolve=false;s.resolveReply=null;s.holdPreparation=false;s.preparedReply=null;
       const v=s.view(),text=indented?"  call":"call";v.dispatch({changes:{from:0,to:v.state.doc.length,insert:text},selection:{anchor:text.length}});v.setTabFocusMode(false);v.focus();
     };
     const prototype=api.SnippetPreparationService.prototype,original=prototype.prepare;
@@ -2800,6 +2801,45 @@ try {
     await snippetLspPage.waitForTimeout(150);await snippetLspCode.press("Enter");
   };
 
+
+  for(const format of [1,2]){
+    await snippetLspPage.evaluate(format=>{
+      const s=window.__snippetLspTest;
+      s.reset(format===2?"call(self):\r\n    ${0:pass}":"call(self):\r\n    pass",false,1,format);
+      s.omitMode=true;s.editLine=1;s.editStart=8;
+      const v=s.view(),text="class Child:\n    def call";
+      v.dispatch({changes:{from:0,to:v.state.doc.length,insert:text},selection:{anchor:text.length}});v.focus();
+    },format);
+    await acceptLspSnippet();
+    await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\nclass Child:\n    def call(self):\n        pass");
+    if(format===2){
+      assert.equal(await snippetLspPage.evaluate(()=>{const v=window.__snippetLspTest.view();return v.state.sliceDoc(v.state.selection.main.from,v.state.selection.main.to);}),"pass","inherited mode2 retains complete final-default selection");
+      await snippetLspPage.keyboard.insertText("return 1");
+      assert.equal(await snippetLspCode.innerText(),"import helper\nclass Child:\n    def call(self):\n        return 1");
+      await snippetLspCode.press("Control+z");
+    }
+    await snippetLspCode.press("Control+z");
+    assert.equal(await snippetLspCode.innerText(),"class Child:\n    def call","inherited mode2 plus import undoes atomically in both formats");
+  }
+  await snippetLspPage.evaluate(()=>{
+    const s=window.__snippetLspTest;s.reset("call(self):\n        pass",false,1,1);s.editLine=1;s.editStart=8;
+    const v=s.view(),text="class Child:\n    def call";v.dispatch({changes:{from:0,to:v.state.doc.length,insert:text},selection:{anchor:text.length}});v.focus();
+  });
+  await acceptLspSnippet();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\nclass Child:\n    def call(self):\n        pass");
+  await snippetLspCode.press("Control+z");
+  assert.equal(await snippetLspCode.innerText(),"class Child:\n    def call","explicit asIs overrides default2 without double indentation");
+  await snippetLspPage.evaluate(()=>{
+    const s=window.__snippetLspTest;s.reset("call(${1:a\nb})");s.omitMode=true;s.statuses=[];
+    const v=s.view();s.modeFailureBefore={text:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state)};
+  });
+  await acceptLspSnippet();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("Multiline parameter indentation")));
+  assert.equal(await snippetLspPage.evaluate(()=>{
+    const s=window.__snippetLspTest,v=s.view();
+    return JSON.stringify({text:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state)})===JSON.stringify(s.modeFailureBefore);
+  }),true,"unsupported inherited mode2 never applies imports, text or history");
+  await snippetLspPage.evaluate(()=>{window.__snippetLspTest.statuses=[];});
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.retryProbe=true;});
   await acceptLspSnippet();
   await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncall(value, value)");
@@ -2974,18 +3014,24 @@ try {
     assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view().state.field(s.api.snippetSessionState);}),null);
     if(boundary==="composition"){await snippetLspPage.evaluate(()=>window.__snippetLspTest.view().contentDOM.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true})));await snippetLspPage.waitForTimeout(100);}
   }
-  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.holdPreparation=true;});
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset("call(${1:value})\n$0",true);s.omitMode=true;s.holdPreparation=true;});
   await acceptLspSnippet();await snippetLspPage.waitForFunction(()=>typeof window.__snippetLspTest.preparedReply==="function");
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.oldView=s.view();s.mount.destroy();});
   await snippetLspCode.waitFor({state:"hidden"});
-  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.mount=s.api.mountSnippetEditor(document.querySelector("#editor"),s);});
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.sessionMode=1;s.mount=s.api.mountSnippetEditor(document.querySelector("#editor"),s);});
   await snippetLspCode.waitFor();
   assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.view()!==s.oldView;}),true,"recreation uses a different editor owner");
   await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.holdPreparation=false;s.preparedReply();s.restorePreparation();});
   await snippetLspPage.waitForTimeout(150);
-  assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),"call","destroyed editor cannot receive prepared snippet");
+  assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.value),"  call","destroyed default2 editor cannot receive prepared snippet");
   await writeFile("evidence/LSP_SNIPPET_APPLICATION_RESULT.txt","PASS: actual CodeEditor format2 candidate acceptance through mocked LSP resolve and real preparation worker, atomic imports/undo, linked and nested parameters, variables, mode2/final stop, plain literal dollar text, unsupported-layout atomic refusal, delayed resolve/preparation cancellation on Escape/selection/typing/blur/synthetic composition and destroy. This mocked-LSP fixture does not verify server capability negotiation, native server behavior or real IME.\n");
-  assert.equal(await snippetLspCode.innerText(),"call","replacement editor ignores old prepared result");
+  assert.equal(await snippetLspCode.innerText(),"  call","replacement default1 editor ignores old default2 prepared result");
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.sessionModes?.at(-1)===1);
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset("call()\n    tail",true,1,1);s.omitMode=true;});
+  await acceptLspSnippet();
+  await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\n  call()\n    tail");
+  await writeFile("evidence/COMPLETION_DEFAULT_MODE_RESULT.txt","PASS: immutable mocked session default2 applies to plaintext and snippets, CRLF and imports, final-default selection/replacement, explicit mode1 precedence, atomic unsupported-layout refusal, and a replacement default1 session rejects old work and retains its own mode. No Python provider rollout or native default2 claim.\n");
+
   await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
   assert.deepEqual(snippetLspErrors,[],"LSP snippet lifecycle produces no page errors");
   await snippetLspPage.close();

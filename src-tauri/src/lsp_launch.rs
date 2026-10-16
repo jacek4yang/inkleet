@@ -31,6 +31,14 @@ pub(crate) fn completion_capabilities(language:&str)->Value{
     profile
 }
 
+pub(crate) fn completion_default_mode(profile:&Value)->Result<u8>{
+    if !profile.is_object(){return Err("补全插入模式配置无效".into());}
+    match profile.get("insertTextMode"){
+        None=>Ok(1),
+        Some(value)=>match value.as_u64(){Some(1)=>Ok(1),Some(2)=>Ok(2),_=>Err("补全插入模式配置无效".into())}
+    }
+}
+
 pub struct Launch{
     pub command:Command,pub settings:Value,pub initialization:Value,pub roots:Vec<PathBuf>,
     pub filename:&'static str,pub language_id:&'static str,pub server:&'static str,
@@ -169,4 +177,18 @@ mod snippet_validation_tests{
             assert!(profile["completionItem"].get("insertReplaceSupport").is_none());
         }
     }
+    #[test]
+    fn completion_default_matches_profile_and_rejects_invalid_modes(){
+        assert_eq!(completion_default_mode(&json!({})).unwrap(),1);
+        assert_eq!(completion_default_mode(&json!({"insertTextMode":2})).unwrap(),2);
+        for language in ["rust","golang","c","cpp","java","python3"]{
+            let profile=completion_capabilities(language);
+            assert_eq!(completion_default_mode(&profile).unwrap(),profile.get("insertTextMode").and_then(Value::as_u64).unwrap_or(1) as u8);
+        }
+        for value in [Value::Null,json!(0),json!(3),json!("2"),json!(true),json!(1.5)]{
+            assert!(completion_default_mode(&json!({"insertTextMode":value})).is_err());
+        }
+        assert!(completion_default_mode(&Value::Null).is_err());
+    }
+
 }

@@ -361,11 +361,13 @@ def native_snippet_case(group,code):
         assert wire and wire["session"]["snippets"] is True,group+" launched binary negotiated snippet support"
         assert (response["id"],response["version"],response["sequence"])>prior,group+" candidate trace belongs to this fresh acceptance phase"
         assert len(wire["item"])==1 and wire["item"][0]["format"]==2,group+" actual server item is format2"
-        assert wire["item"][0]["mode"]==mode,group+" actual server item has expected insertion mode"
+        assert wire["item"][0]["effectiveMode"]==mode,group+" actual server item has expected insertion mode"
         if group in ("c","cpp"):
             assert wire["item"][0]["source"]=="inkleet_add(${1:int left}, ${2:int right})",group+" pinned clangd two-argument snippet"
             assert response["request"]["character"]==len(source)-tail,group+" exact editable completion cursor"
+        assert response["defaultMode"]==1,group+" negotiated session default remains asIs"
         if group=="java":
+            assert wire["item"][0]["mode"]==2,group+" server explicitly overrides asIs with mode2"
             assert wire["item"][0]["source"]=="inkleet_test(${1:name}, ${2:i});",group+" pinned JDTLS two-argument snippet"
             assert response["request"]["line"]==3 and response["request"]["character"]==18,group+" exact editable completion cursor"
             assert wire["item"][0]["modePresent"] is True and wire["item"][0]["range"]=={"start":{"line":3,"character":8},"end":{"line":3,"character":18}},group+" explicit mode2 edit range is unchanged"
