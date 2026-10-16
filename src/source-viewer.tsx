@@ -8,6 +8,7 @@ import {cpp} from "@codemirror/lang-cpp";
 import {rust} from "@codemirror/lang-rust";
 import {java} from "@codemirror/lang-java";
 import {vim,getCM} from "@replit/codemirror-vim";
+import {indentGuides} from "./indent-guides";
 import {steadyVimCursor} from "./steady-cursor";
 import {vimNavigation} from "./vim-navigation";
 import {SourceHistory} from "./source-history";
@@ -38,12 +39,12 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
    let path=current.uri.split("?")[0];try{path=decodeURI(path);}catch{}
    setInfo({name:current.name,path,declaration:current.declaration,back:history.canBack,forward:history.canForward,message});
   };
-  const cancel=()=>{++generation;abort?.abort();abort=null;navigation.cancel();};
+  const cancel=()=>{if(pendingRestore){view.scrollDOM.scrollTop=pendingRestore.top;view.scrollDOM.scrollLeft=pendingRestore.left;pendingRestore=null;}++generation;abort?.abort();abort=null;navigation.cancel();};
   const close=()=>{if(destroyed)return;cancel();element.close();closeCallback.current();};
   const apply=(center:boolean)=>{
    const ticket=generation,visit=history.current;
    pendingRestore=center?null:{...visit.scroll};
-   swapping=true;view.setState(state(visit.source.text,visit.source.language,EditorSelection.fromJSON(visit.selection)));swapping=false;
+   swapping=true;view.setState(state(visit.source.text,visit.source.language,EditorSelection.create(visit.selection.ranges.map(r=>EditorSelection.range(r.anchor,r.head)),visit.selection.mainIndex)));swapping=false;
    update();view.focus();
    if(center)view.dispatch({effects:EditorView.scrollIntoView(visit.selection.ranges[visit.selection.mainIndex].head,{y:"center"})});
    else view.requestMeasure({read:()=>null,write:()=>{if(!destroyed&&ticket===generation){view.scrollDOM.scrollTop=visit.scroll.top;view.scrollDOM.scrollLeft=visit.scroll.left;pendingRestore=null;}}});
@@ -74,7 +75,7 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   };
   function state(text:string,language:string,selected:EditorSelection){
    return EditorState.create({doc:text,selection:selected,extensions:[
-    basicSetup,language==="java"?java():language==="golang"?go():language==="rust"?rust():language==="cpp"||language==="c"?cpp():python(),
+    basicSetup,indentGuides,EditorState.tabSize.of(4),language==="java"?java():language==="golang"?go():language==="rust"?rust():language==="cpp"||language==="c"?cpp():python(),
     vimSlot.of(vimExtensions(enabled)),
     vimNavigation({definition:target=>{void follow(target.state.selection.main.head);return true;}}),
     Prec.highest(EditorView.domEventHandlers({keydown(event,target){
@@ -93,7 +94,7 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
     ])),
     EditorState.readOnly.of(true),EditorView.editable.of(false),
     EditorView.contentAttributes.of({"aria-label":"只读标准库源码",tabindex:"0",spellcheck:"false"}),
-    EditorView.theme({"&":{height:"100%",fontSize:"13px",backgroundColor:"var(--surface-editor)"},".cm-scroller":{fontFamily:"var(--font-mono)",overflow:"auto"},".cm-content":{padding:"4px 0"},".cm-gutters":{backgroundColor:"var(--surface-editor)",border:"none"},".cm-line":{padding:"0 6px"},".cm-activeLine":{backgroundColor:"var(--editor-active-line, #8888880c)"}}),
+    EditorView.theme({"&":{height:"100%",fontSize:"13px",backgroundColor:"var(--surface-editor)",color:"var(--ink)",textShadow:"none"},".cm-scroller":{fontFamily:"var(--font-mono)",overflow:"auto",lineHeight:"1.65"},".cm-content":{padding:"4px 0"},".cm-gutters":{backgroundColor:"var(--surface-editor)",border:"none"},".cm-line":{padding:"0 6px"},".cm-activeLine, .cm-activeLineGutter":{backgroundColor:"var(--active-line)"},"&.cm-focused .cm-selectionBackground, .cm-selectionBackground":{backgroundColor:"var(--selection)"}}),
     EditorView.domEventHandlers({
      mousedown(event,target){if(!(event.ctrlKey||event.metaKey)||event.button!==0)return false;const pos=target.posAtCoords({x:event.clientX,y:event.clientY});if(pos===null)return false;event.preventDefault();void follow(pos);return true;},
      scroll(){if(!swapping&&!destroyed)capture();return false;}

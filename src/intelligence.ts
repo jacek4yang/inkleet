@@ -1,5 +1,5 @@
 import {vimNavigation} from "./vim-navigation";
-import {chooseSourceTarget,sourceSpan,sourceTargets,type Source,type SourceSnapshot,type SourceTarget,type SourceNavigator} from "./source-protocol";
+import {chooseSourceTarget,sourceSpan,sourceTargets,validSourceSnapshot,type Source,type SourceSnapshot,type SourceTarget,type SourceNavigator} from "./source-protocol";
 export type {Source} from "./source-protocol";
 import {completionPopup} from "./completion-popup";
 import {renderDocumentation} from "./lsp-documentation";
@@ -338,7 +338,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         ensure(signal);if(location.uri===primary)return primarySnapshot;
         const source=await invoke<SourceSnapshot>("acquire_language_source",{id,version:askedVersion,uri:location.uri});
         ensure(signal);
-        if(!source||source.uri!==location.uri||!Number.isSafeInteger(source.sourceId)||source.sourceId<=0||typeof source.text!=="string"||source.text.length>2*1024*1024||!sourceSpan(source.text,location.range))throw Error("定义位置与源码内容不一致");
+        if(!validSourceSnapshot(source,location.uri)||!sourceSpan(source.text,location.range))throw Error("定义位置与源码内容不一致");
         return source;
       };
       const navigation:SourceNavigator={
@@ -369,7 +369,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
               if(attempt!==0||String(error)!=="SOURCE_SNAPSHOT_EXPIRED")throw error;
               const refreshed=await invoke<SourceSnapshot>("acquire_language_source",{id,version:askedVersion,uri:source.uri});
               ensure(signal);
-              if(refreshed.uri!==source.uri||refreshed.text!==source.text)throw Error("源码已改变，请重新打开定义");
+              if(!validSourceSnapshot(refreshed,source.uri)||refreshed.text!==source.text)throw Error("源码已改变，请重新打开定义");
               snapshot=refreshed;source.sourceId=refreshed.sourceId;
             }finally{signal.removeEventListener("abort",cancel);}
           }

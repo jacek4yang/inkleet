@@ -848,6 +848,20 @@ try {
   await sourceCode.press("Alt+ArrowRight");
   await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
   await lspPage.evaluate(()=>{window.__lspTest.holdSource=false;});
+
+  const lineBox=await sourceCode.locator(".cm-line").first().boundingBox();
+  await lspPage.keyboard.down("Control");
+  await lspPage.mouse.click(lineBox.x+35,lineBox.y+lineBox.height/2);
+  await lspPage.keyboard.up("Control");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  assert.equal(await lspPage.evaluate(async()=>{
+    const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
+    const view=EditorView.findFromDOM(document.querySelector(".source-viewer .cm-editor")),before=view.state.doc.toString();
+    view.dispatch({changes:{from:0,insert:"MUTATE"},filter:false});
+    return view.state.doc.toString()===before;
+  }),true,"readonly dispatch boundary rejects filter:false edits");
+  await sourceCode.press("Alt+ArrowLeft");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
   await lspPage.screenshot({path:"evidence/recursive-source-navigation.png"});
   await sourceDialog.getByRole("button", { name: "返回代码", exact: true }).click();
   assert.equal(await lspEditor.innerText(), "items.popleft");
@@ -859,8 +873,8 @@ try {
   await lspEditor.click();await lspEditor.press("Escape");await lspPage.keyboard.type("gd");
   await sourceShell.waitFor();
   await sourceCode.press("Escape");
-  // Escape may dismiss the modal in normal mode; reopen if it did.
-  if(!await sourceShell.count()){await lspEditor.press("F12");await sourceShell.waitFor();}
+  await sourceShell.waitFor({state:"detached"});
+  await lspEditor.press("F12");await sourceShell.waitFor();
   await sourceCode.focus();
   await lspPage.keyboard.type("gd");
   await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
@@ -870,8 +884,9 @@ try {
   await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
   const immutable=await sourceCode.innerText();
   await lspPage.keyboard.type("dd");assert.equal(await sourceCode.innerText(),immutable,"Vim delete cannot mutate library source");
-  await lspPage.keyboard.type("iXYZ");await sourceCode.press("Escape");
-  if(await sourceShell.count())assert.equal(await sourceCode.innerText(),immutable,"Vim insert cannot mutate library source");
+  await lspPage.keyboard.type("iXYZ");
+  assert.equal(await sourceCode.innerText(),immutable,"Vim insert cannot mutate library source");
+  await sourceCode.press("Escape");
   if(await sourceShell.count())await sourceShell.getByRole("button",{name:"返回代码",exact:true}).click();
   assert.equal(await lspEditor.innerText(),"items.popleft","source Vim cannot mutate solution");
   await openSettings(lspPage,"编辑器");

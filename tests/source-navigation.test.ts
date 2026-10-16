@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {SourceHistory} from "../src/source-history.ts";
-import {sourceOffset,sourceSpan,sourceTargets} from "../src/source-protocol.ts";
+import {sourceOffset,sourceSpan,sourceTargets,validSourceSnapshot} from "../src/source-protocol.ts";
 const snapshot=(name:string,text="abc\ndef")=>({sourceId:1,uri:"file:///"+name,text,name,declaration:false,language:"rust"});
 const visit=(name:string,anchor=0,head=anchor)=>({source:snapshot(name),selection:{ranges:[{anchor,head}],mainIndex:0},scroll:{top:0,left:0}});
 test("source history restores full selections and both scroll axes",()=>{
@@ -35,4 +35,13 @@ test("definition normalization prefers targetSelectionRange and deduplicates exa
  const target={targetUri:"jdt://contents/A.class?=encoded%20handle",targetSelectionRange:range,targetRange:{start:{line:0,character:0},end:{line:99,character:0}}};
  assert.deepEqual(sourceTargets([target,target]),[{uri:target.targetUri,range}]);
  assert.deepEqual(sourceTargets([{uri:"https://example.invalid",range},{uri:"file:///x",range:{start:{line:-1,character:0},end:{line:0,character:0}}}]),[]);
+});
+
+test("source snapshot DTO rejects malformed or unnormalized data",()=>{
+ const s=snapshot("a");
+ assert.equal(validSourceSnapshot(s,s.uri),true);
+ for(const patch of [{sourceId:0},{name:{}},{language:"unknown"},{declaration:"false"},{text:"a\r\nb"}]){
+  assert.equal(validSourceSnapshot({...s,...patch},s.uri),false);
+ }
+ assert.equal(validSourceSnapshot(s,"file:///other"),false);
 });

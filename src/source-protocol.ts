@@ -31,7 +31,7 @@ export function sourceTargets(value:unknown):SourceTarget[]{
  for(const item of items){
   if(!item||typeof item!=="object")continue;
   const uri=item.targetUri??item.uri,range=item.targetSelectionRange??item.range;
-  if(typeof uri!=="string"||uri.length>8192||!uri.match(/^(file:\/\/|jdt:\/\/contents\/)/)||!range)continue;
+  if(typeof uri!=="string"||uri.length>8192||/[\u0000-\u001f\u007f]/.test(uri)||!uri.match(/^(file:\/\/|jdt:\/\/contents\/)/)||!range)continue;
   const points=[range.start,range.end];
   if(points.some(p=>!p||!Number.isSafeInteger(p.line)||!Number.isSafeInteger(p.character)||p.line<0||p.character<0))continue;
   if(range.start.line>range.end.line||range.start.line===range.end.line&&range.start.character>range.end.character)continue;
@@ -67,4 +67,10 @@ export function chooseSourceTarget(targets:SourceTarget[],signal:AbortSignal):Pr
   });
   document.body.append(dialog);dialog.showModal();buttons[0].focus();
  });
+}
+
+export function validSourceSnapshot(value:unknown,uri:string):value is SourceSnapshot{
+ if(!value||typeof value!=="object")return false;
+ const s=value as Partial<SourceSnapshot>;
+ return s.uri===uri&&typeof s.sourceId==="number"&&Number.isSafeInteger(s.sourceId)&&s.sourceId>0&&typeof s.text==="string"&&s.text.length<=2*1024*1024&&!s.text.includes("\r")&&typeof s.name==="string"&&s.name.length<=4096&&typeof s.declaration==="boolean"&&typeof s.language==="string"&&["python3","java","golang","rust","c","cpp"].includes(s.language);
 }
