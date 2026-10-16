@@ -3273,6 +3273,18 @@ try {
   });
 
   assert.deepEqual(safe,{cancelled:true,unsafe:null});assert.deepEqual(externalDocRequests,[]);
+
+  await presentationPage.evaluate(()=>{window.__presentation.hold=false;});
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".cm-completionInfo .lsp-document-expand").waitFor();
+  await presentationPage.locator(".cm-completionInfo").getByRole("button",{name:"展开文档",exact:true}).click();
+  const richReader=presentationPage.getByRole("dialog",{name:"文档阅读",exact:true});
+  await richReader.waitFor();
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-body")?.getAttribute("aria-busy")==="false");
+  assert.ok((await richReader.locator("pre code").innerText()).includes("HashMap::new"));
+  assert.equal(await richReader.locator("img,script,a").count(),0,"expanded Markdown keeps untrusted content inert");
+  await presentationPage.screenshot({path:"evidence/expanded-documentation-reader-rich.png"});
+  await presentationPage.keyboard.press("Escape");await richReader.waitFor({state:"hidden"});
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.hold=false;s.docs={kind:"plaintext",value:"START_OF_DOCUMENT\n"+"Documentation content ".repeat(2000)+"\nEND_OF_COMPLETE_DOCUMENT"};});
   await presentationCode.press("Control+Space");
   await presentationPage.locator(".cm-completionInfo .lsp-document-limit").waitFor();
