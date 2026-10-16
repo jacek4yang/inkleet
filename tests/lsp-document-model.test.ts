@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {documentationParts,activeParameterSpan,completionKind} from "../src/lsp-document-model.ts";
+import {documentationParts,documentationModel,activeParameterSpan,completionKind} from "../src/lsp-document-model.ts";
 test("documentation preserves plaintext vs markdown and legacy code semantics",()=>{
  assert.deepEqual(documentationParts("**literal**"),[{kind:"plaintext",text:"**literal**"}]);
  assert.deepEqual(documentationParts({kind:"markdown",value:"**bold**"}),[{kind:"markdown",text:"**bold**"}]);
@@ -22,4 +22,18 @@ test("active parameter prefers exact UTF16 offsets and refuses invalid or ambigu
 });
 test("semantic kinds preserve constructor interface struct and fall back safely",()=>{
  assert.equal(completionKind(4),"constructor");assert.equal(completionKind(8),"interface");assert.equal(completionKind(22),"struct");assert.equal(completionKind("<script>"),"text");
+});
+
+test("preview reports omitted content while expanded reading retains it within bounded limits",()=>{
+ const value={kind:"plaintext",value:"x".repeat(40000)+"TAIL"};
+ const preview=documentationModel(value),expanded=documentationModel(value,false,true);
+ assert.equal(preview.truncated,true);assert.equal(preview.parts[0].text.length,32768);
+ assert.equal(expanded.truncated,false);assert.ok(expanded.parts[0].text.endsWith("TAIL"));
+ assert.equal(documentationModel({kind:"plaintext",value:"x".repeat(300000)},false,true).truncated,true);
+ assert.equal(documentationModel(Array(21).fill("x")).truncated,true);
+ assert.equal(documentationModel(Array(21).fill("x"),false,true).truncated,false);
+});
+test("documentation limits never leave a split surrogate pair",()=>{
+ const result=documentationModel({kind:"plaintext",value:"a".repeat(32767)+"😀"});
+ assert.equal(result.truncated,true);assert.equal(result.parts[0].text,"a".repeat(32767));
 });

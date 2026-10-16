@@ -1,9 +1,10 @@
 export type DocumentationPart={kind:"markdown"|"plaintext"|"code";text:string;language?:string};
 const object=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==="object"&&!Array.isArray(v);
-export function documentationParts(value:unknown,legacy=false):DocumentationPart[]{
- const result:DocumentationPart[]=[];let remaining=32768;
- for(const part of (Array.isArray(value)?value.slice(0,20):[value])){
-  if(remaining<=0)break;
+export function documentationModel(value:unknown,legacy=false,expanded=false):{parts:DocumentationPart[];truncated:boolean}{
+ const result:DocumentationPart[]=[];let remaining=expanded?262144:32768,truncated=false;
+ const source=Array.isArray(value)?value:[value],maxParts=expanded?100:20;
+ if(source.length>maxParts)truncated=true;
+ for(const part of source.slice(0,maxParts)){
   let text:string|undefined,kind:DocumentationPart["kind"]="plaintext",language:string|undefined;
   if(typeof part==="string"){text=part;kind=legacy?"markdown":"plaintext";}
   else if(object(part)&&typeof part.value==="string"){
@@ -13,11 +14,17 @@ export function documentationParts(value:unknown,legacy=false):DocumentationPart
    else if(legacy&&typeof part.language==="string"){kind="code";language=part.language.slice(0,40);}
   }
   if(!text)continue;
-  text=text.slice(0,remaining);remaining-=text.length;
-  result.push({kind,text,...(language?{language}: {})});
+  const cut=text.length>remaining;if(cut)truncated=true;
+  if(remaining<=0)continue;
+  let count=Math.min(text.length,remaining);
+  if(count>0&&count<text.length&&/[\uD800-\uDBFF]/.test(text[count-1])&&/[\uDC00-\uDFFF]/.test(text[count]))count--;
+  text=text.slice(0,count);remaining-=text.length;
+  if(text)result.push({kind,text,...(language?{language}: {})});
+  if(cut)break;
  }
- return result;
+ return {parts:result,truncated};
 }
+export function documentationParts(value:unknown,legacy=false):DocumentationPart[]{return documentationModel(value,legacy).parts;}
 function boundary(text:string,n:number){return !(n>0&&n<text.length&&/[\uD800-\uDBFF]/.test(text[n-1])&&/[\uDC00-\uDFFF]/.test(text[n]));}
 export function activeParameterSpan(label:string,parameter:unknown):{from:number;to:number}|null{
  if(!object(parameter))return null;const value=parameter.label;

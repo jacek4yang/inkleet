@@ -589,3 +589,19 @@ body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionDetail
  grid-column:2;min-width:0;max-width:none;overflow:visible;text-overflow:clip;white-space:pre-wrap;overflow-wrap:anywhere;
  margin:0;font-size:11px;line-height:18px;
 }
+
+.lsp-documentation:has(>.lsp-document-expand){position:relative;padding-right:38px}
+.lsp-document-expand{position:absolute;right:8px;top:8px;display:grid;place-items:center;width:24px;height:24px;padding:3px;border:0;background:transparent;color:var(--muted);border-radius:4px}
+.lsp-document-expand:hover{color:var(--ink);background:var(--selection)}
+.lsp-document-expand svg{display:block}
+.lsp-document-limit{font:11px/1.5 system-ui,sans-serif;color:var(--muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.lsp-completion-summary+.lsp-document-section{border-top:0;padding-top:0}
+.lsp-document-reader{width:min(1040px,calc(100vw - 32px));height:min(800px,calc(100dvh - 32px));max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);min-width:min(320px,calc(100vw - 16px));padding:0;border:1px solid var(--line);border-radius:8px;background:var(--surface-editor);color:var(--ink);box-shadow:0 12px 48px #20251b24;resize:both;overflow:hidden}
+.lsp-document-reader[open]{display:flex;flex-direction:column}
+.lsp-document-reader::backdrop{background:#20251b30}
+.lsp-document-reader>header{display:flex;align-items:flex-start;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);flex:0 0 auto}
+.lsp-document-reader h2{font:13px/1.6 var(--font-mono);font-weight:500;white-space:pre-wrap;overflow-wrap:anywhere;max-height:20vh;overflow:auto;flex:1;min-width:0;margin:0}
+.lsp-reader-close{border:0;padding:0;width:24px;height:24px;flex:0 0 24px;font:20px/24px system-ui,sans-serif;color:var(--muted)}
+.lsp-reader-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.lsp-reader-body:focus-visible{outline:1px solid var(--accent);outline-offset:-2px}
+.lsp-reader-body>.lsp-documentation{max-width:920px;margin:0 auto;padding:20px 24px}

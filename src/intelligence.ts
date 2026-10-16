@@ -1,6 +1,6 @@
 import {completionPopup} from "./completion-popup";
 import {renderDocumentation} from "./lsp-documentation";
-import {activeParameterSpan,completionKind} from "./lsp-document-model";
+import {activeParameterSpan,completionKind,documentationModel} from "./lsp-document-model";
 import {completionIcon} from "./lsp-completion-icons";
 import {completionApplication,completionTextChanges,plainCompletionChanges as completionChanges} from "./completion-application";
 export {completionChanges};
@@ -209,10 +209,15 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
             try{
               const resolved=resolve?await resolveItem():item;
               if(closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return null;
-              const dom=await renderDocumentation(object(resolved)?resolved.documentation:null,false,documentationLifetime.signal);
+              const documentation=object(resolved)?resolved.documentation:null;
+              const detail=object(resolved)&&typeof resolved.detail==="string"?resolved.detail:typeof item.detail==="string"?item.detail:"";
+              const preview=documentationModel(documentation);
+              if(!detail&&!preview.parts.length&&!preview.truncated)return null;
+              const summary=item.label.slice(0,512)+(detail?"\n"+detail:"");
+              const completeValue=[{kind:"plaintext",value:summary},...(Array.isArray(documentation)?documentation:documentation==null?[]:[documentation])];
+              const dom=await renderDocumentation(completeValue,false,documentationLifetime.signal,{title:item.label.slice(0,512),summaryFirst:true});
               if(!dom||closed||session?.id!==id||version!==askedVersion||view?.state.doc!==doc)return null;
-              dom.classList.add("lsp-completion-documentation");
-              const summary=document.createElement("div");summary.className="lsp-completion-summary";summary.textContent=item.label.slice(0,512)+(typeof item.detail==="string"?"\n"+item.detail.slice(0,500):"");dom.prepend(summary);return dom;
+              dom.classList.add("lsp-completion-documentation");return dom;
             }catch{return null;}
           }, type: completionKind(item.kind),
 
@@ -255,7 +260,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     try {
       const result = await request("hover", pos, doc);
       if (!object(result) || closed || target.state.doc !== doc) return null;
-      const dom=await renderDocumentation(result.contents,true,documentationLifetime.signal);
+      const dom=await renderDocumentation(result.contents,true,documentationLifetime.signal,{title:"符号文档"});
       if(!dom||closed||view!==target||target.state.doc!==doc)return null;
       dom.classList.add("lsp-hover");
       const span = range(doc, result.range) ?? { from: pos, to: pos };
@@ -281,8 +286,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       const current = Number.isInteger(parameter) && parameter >= 0 ? parameters[parameter] : null;
       const label = signature.label.slice(0, 4096);
       const span=activeParameterSpan(label,current);
-      const parameterDocs=await renderDocumentation(object(current)?current.documentation:null,false,documentationLifetime.signal);
-      const documentation=await renderDocumentation(signature.documentation,false,documentationLifetime.signal);
+      const parameterDocs=await renderDocumentation(object(current)?current.documentation:null,false,documentationLifetime.signal,{title:"参数文档"});
+      const documentation=await renderDocumentation(signature.documentation,false,documentationLifetime.signal,{title:"函数文档"});
       if(closed||generation!==signatureGeneration||view!==target||target.state.doc!==doc||target.state.selection.main.head!==pos||target.composing)return;
       target.dispatch({ effects: signatureEffect.of({ pos, above: true, create() {
         const dom = document.createElement("div"); dom.className = "lsp-signature"; dom.setAttribute("role", "status");
@@ -351,7 +356,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     // Keep all native completion bindings, but route explicit starts through the
     // same reset boundary as commands. Disable the earlier basicSetup copy.
     Prec.highest(keymap.of(completionKeymap.map(binding=>binding.run===startCompletion?{...binding,run:invokeCompletion}:binding))),
-    keymap.of([{key:"Alt-PageDown",run:target=>popup.scrollDocs(target,1)},{key:"Alt-PageUp",run:target=>popup.scrollDocs(target,-1)}]),
+    keymap.of([{key:"Alt-Enter",run:target=>popup.openDocs(target)},{key:"Alt-PageDown",run:target=>popup.scrollDocs(target,1)},{key:"Alt-PageUp",run:target=>popup.scrollDocs(target,-1)}]),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
     EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}}}),

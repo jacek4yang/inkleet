@@ -14,11 +14,17 @@ export function completionPopup(){
   const vertical=p.anchor==="top"?"top:"+y+"px;bottom:auto;":"top:auto;bottom:"+(tooltip.clientHeight-y)+"px;";
   return {style:"position:absolute;box-sizing:border-box;margin:0;min-width:0;min-height:0;left:"+x+"px;right:auto;"+vertical+"width:"+p.width/sx+"px;max-width:"+p.width/sx+"px;max-height:"+p.maxHeight/sy+"px;overflow:auto;visibility:visible;",class:"inkleet-completion-info inkleet-completion-info-"+p.mode};
  };
- return {tooltipClass:()=>"inkleet-completion "+owner,positionInfo,scrollDocs(view:EditorView,direction:1|-1){
+ function visibleInfo(view:EditorView){
   const info=view.dom.ownerDocument.querySelector<HTMLElement>("."+owner+" .cm-completionInfo");
-  if(!view.hasFocus||!info||getComputedStyle(info).visibility==="hidden"||info.scrollHeight<=info.clientHeight)return false;
+  if(!view.hasFocus||!info||getComputedStyle(info).visibility==="hidden")return null;
   const rect=info.getBoundingClientRect(),viewport=view.dom.ownerDocument.documentElement;
-  if(rect.bottom<=0||rect.right<=0||rect.top>=viewport.clientHeight||rect.left>=viewport.clientWidth)return false;
+  return rect.bottom>0&&rect.right>0&&rect.top<viewport.clientHeight&&rect.left<viewport.clientWidth?info:null;
+ }
+ return {tooltipClass:()=>"inkleet-completion "+owner,positionInfo,scrollDocs(view:EditorView,direction:1|-1){
+  const info=visibleInfo(view);if(!info||info.scrollHeight<=info.clientHeight)return false;
   info.scrollTop+=direction*Math.max(24,info.clientHeight*.8);return true;
+ },openDocs(view:EditorView){
+  const button=visibleInfo(view)?.querySelector<HTMLButtonElement>(".lsp-document-expand");
+  if(!button)return false;button.click();return true;
  }};
 }
