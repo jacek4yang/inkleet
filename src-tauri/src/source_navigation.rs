@@ -111,6 +111,13 @@ pub fn targets(value:&Value,solution_uri:&str,solution_prefix:u32,solution_text:
   assert_eq!(events,vec![false,true]);assert_eq!(b.content.text,"new");
   r.insert_with("file:///a.rs".into(),content("new"),None,|_,_|panic!("duplicate lifecycle")).unwrap();
  }
+ #[test]fn successful_close_then_failed_open_leaves_no_phantom_snapshot(){
+  let mut r=Registry::default();let (old,_)=r.insert("file:///a.rs".into(),content("old"),None).unwrap();let id=old.id;drop(old);
+  let mut events=vec![];
+  assert!(r.insert_with("file:///a.rs".into(),content("new"),None,|open,_|{events.push(open);if open{Err("full".into())}else{Ok(())}}).is_err());
+  assert_eq!(events,vec![false,true]);assert!(r.get(id).is_err());assert_eq!(r.bytes,0);assert!(r.entries.is_empty());
+  events.clear();r.insert_with("file:///a.rs".into(),content("new"),None,|open,_|{events.push(open);Ok(())}).unwrap();assert_eq!(events,vec![true]);
+ }
  #[test]fn snapshots_are_not_replaced_while_a_request_pins_them(){
   let mut r=Registry::default();let (a,_)=r.insert("file:///a.rs".into(),content("old"),None).unwrap();
   assert!(r.insert("file:///a.rs".into(),content("new"),None).is_err());let old=a.id;drop(a);

@@ -177,7 +177,7 @@ def click(css):
         return click_debug_action(css)
     try: return cmd("POST",f"/element/{element(css)}/click",{})
     except http.client.RemoteDisconnected:
-        closing=css in (".source-viewer header button",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
+        closing=css in (".source-viewer header button[aria-label=\'返回代码\']",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
         selection=(" option[value=" in css) or css in ('[data-local-tab="run"]','[data-local-tab="debug"]')
         if not (closing or selection): raise
         with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
@@ -187,7 +187,7 @@ def click(css):
         if closing and not cmd("POST","/elements",{"using":"css selector","value":css}): return
         try: return cmd("POST",f"/element/{element(css)}/click",{})
         except http.client.RemoteDisconnected:
-            if css!=".source-viewer header button": raise
+            if css!=".source-viewer header button[aria-label=\'返回代码\']": raise
             if not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}): return
             # Exercise the real dialog Escape handler, never inject JavaScript
             # or remove the viewer from the DOM to manufacture a passing test.
@@ -771,7 +771,7 @@ try:
         wait_for(lambda: element(".source-viewer"), "F12 opened a real stdlib declaration", seconds=30)
         wait_for(lambda: "只读" in text(".source-viewer header"), "source viewer is explicitly read-only")
         screenshot("python-stdlib-native.png")
-        click(".source-viewer header button")
+        click(".source-viewer header button[aria-label=\'返回代码\']")
         fill(code, "sum([1, 2])")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"signature-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
@@ -1046,7 +1046,21 @@ try:
         wait_for(lambda: element(".source-viewer"), "Java standard library source viewer", seconds=45)
         wait_for(lambda: "ArrayList.java" in text(".source-viewer header"), "real ArrayList source name")
         screenshot("java-stdlib-native.png")
-        click(".source-viewer header button")
+        # Genuine second-hop definition from JDT's immutable virtual source.
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+        wait_for(lambda: element(".source-viewer .cm-search input[name='search']"),"library search keyboard route")
+        fill(".source-viewer .cm-search input[name='search']","extends AbstractList")
+        subprocess.run(["xdotool","key","--clearmodifiers","Return","Escape","Left","F12"],check=True)
+        wait_for(lambda: "AbstractList.java" in text(".source-viewer header"),"recursive JDT source definition",seconds=45)
+        screenshot("java-recursive-source-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","alt+Left"],check=True)
+        wait_for(lambda: "ArrayList.java" in text(".source-viewer header"),"native source history back")
+        subprocess.run(["xdotool","key","--clearmodifiers","alt+Right"],check=True)
+        wait_for(lambda: "AbstractList.java" in text(".source-viewer header"),"native source history forward")
+        assert text(code)==java_doc,"library navigation preserves editable Java solution"
+        (evidence/"SOURCE_NAVIGATION_NATIVE_RESULT.txt").write_text("PASS: genuine JDT ArrayList to AbstractList definition, actual keyboard source search/F12 and Alt-Left/Right history, unchanged solution. Vim and races covered by browser tests separately.\\n")
+
+        click(".source-viewer header button[aria-label=\'返回代码\']")
         if os.environ.get("INKLEET_JAVA_SNIPPET_VALIDATION") == "1":
             native_snippet_case("java",code)
         java_solution="class Solution {\n public int solve(int[] values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n }\n}"
@@ -1133,7 +1147,7 @@ try:
             cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-source","actions":keys}]})
             wait_for(lambda: element(".source-viewer"),f"{group} source viewer",seconds=90)
             screenshot(group+"-stdlib-native.png")
-            click(".source-viewer header button")
+            click(".source-viewer header button[aria-label=\'返回代码\']")
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")

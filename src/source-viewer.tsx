@@ -27,11 +27,12 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   if(!first){closeCallback.current();return;}
   history.push({source,selection:{ranges:[first],mainIndex:0},scroll:{top:0,left:0}});
   let destroyed=false,generation=0,abort:AbortController|null=null,swapping=false,view:EditorView;
+  let pendingRestore:{top:number;left:number}|null=null;
   const vimSlot=new Compartment();
   const vimExtensions=(enabled:boolean)=>enabled?[Prec.high(vim({status:false})),steadyVimCursor()]:[];
   let enabled=vimEnabled;
   const selection=()=>({ranges:view.state.selection.ranges.map(({anchor,head})=>({anchor,head})),mainIndex:view.state.selection.mainIndex});
-  const capture=()=>history.update(selection(),{top:view.scrollDOM.scrollTop,left:view.scrollDOM.scrollLeft});
+  const capture=()=>history.update(selection(),pendingRestore??{top:view.scrollDOM.scrollTop,left:view.scrollDOM.scrollLeft});
   const update=(message="")=>{
    if(destroyed)return;const current=history.current.source;
    let path=current.uri.split("?")[0];try{path=decodeURI(path);}catch{}
@@ -41,10 +42,11 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   const close=()=>{if(destroyed)return;cancel();element.close();closeCallback.current();};
   const apply=(center:boolean)=>{
    const ticket=generation,visit=history.current;
+   pendingRestore=center?null:{...visit.scroll};
    swapping=true;view.setState(state(visit.source.text,visit.source.language,EditorSelection.fromJSON(visit.selection)));swapping=false;
    update();view.focus();
    if(center)view.dispatch({effects:EditorView.scrollIntoView(visit.selection.ranges[visit.selection.mainIndex].head,{y:"center"})});
-   else view.requestMeasure({read:()=>null,write:()=>{if(!destroyed&&ticket===generation){view.scrollDOM.scrollTop=visit.scroll.top;view.scrollDOM.scrollLeft=visit.scroll.left;}}});
+   else view.requestMeasure({read:()=>null,write:()=>{if(!destroyed&&ticket===generation){view.scrollDOM.scrollTop=visit.scroll.top;view.scrollDOM.scrollLeft=visit.scroll.left;pendingRestore=null;}}});
   };
   const move=(direction:-1|1)=>{if(destroyed)return;capture();cancel();if(history.move(direction))apply(false);else update();};
   const follow=async(pos:number)=>{
@@ -75,6 +77,14 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
     basicSetup,language==="java"?java():language==="golang"?go():language==="rust"?rust():language==="cpp"||language==="c"?cpp():python(),
     vimSlot.of(vimExtensions(enabled)),
     vimNavigation({definition:target=>{void follow(target.state.selection.main.head);return true;}}),
+    Prec.highest(EditorView.domEventHandlers({keydown(event,target){
+     const mode=getCM(target)?.state.vim;
+     if(event.key==="Escape"&&mode&&!mode.insertMode&&!mode.visualMode&&!event.isComposing&&event.target===target.contentDOM&&!target.dom.querySelector(".cm-search")){event.preventDefault();close();return true;}
+     if(!mode||mode.insertMode||event.isComposing||!event.ctrlKey||event.altKey||event.metaKey||event.shiftKey)return false;
+     if(event.key.toLowerCase()==="o"){event.preventDefault();move(-1);return true;}
+     if(event.key.toLowerCase()==="i"){event.preventDefault();move(1);return true;}
+     return false;
+    }})),
     Prec.highest(keymap.of([
      {key:"F12",run:target=>{void follow(target.state.selection.main.head);return true;}},
      {key:"Alt-ArrowLeft",run:()=>{move(-1);return true;}},{key:"Alt-ArrowRight",run:()=>{move(1);return true;}},
@@ -108,7 +118,7 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   <header>
    <nav aria-label="源码导航"><button aria-label="后退" title="后退 · Alt+← / Ctrl+O" disabled={!info.back} onClick={()=>actions.current?.move(-1)}><Icon kind="back"/></button><button aria-label="前进" title="前进 · Alt+→ / Ctrl+I" disabled={!info.forward} onClick={()=>actions.current?.move(1)}><Icon kind="forward"/></button></nav>
    <div className="source-heading"><h2 id="source-title">{info.name}</h2><span className="source-path">{info.path}</span></div>
-   <span className="source-kind">{info.declaration?"声明":"只读"}</span>
+   <span className="source-kind" title={info.declaration?"标准库类型声明 · .pyi 不是运行时实现源码":"只读源码"}>{info.declaration?"声明 · 只读":"只读"}</span>
    <button aria-label="返回代码" title="返回代码" onClick={()=>{source.navigation.origin();actions.current?.close();}}><Icon kind="return"/></button>
    <button aria-label="关闭源码" title="关闭 · Esc" onClick={()=>actions.current?.close()}><Icon kind="close"/></button>
   </header>

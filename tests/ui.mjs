@@ -715,9 +715,12 @@ try {
   const lspErrors = []; lspPage.on("pageerror", error => lspErrors.push(error.message));
   await lspPage.addInitScript(() => {
     window.isTauri = true;
-    window.__lspTest = { id: 0, version: 1, text: "", stops: [], requests: [], events: [], failNextUpdate: false, holdNextUpdate: false };
+    window.__lspTest = { settings:{version:1,formatOnSave:false,vim:false,overrides:{}},revision:null,id: 0, version: 1, text: "", stops: [], requests: [], events: [], failNextUpdate: false, holdNextUpdate: false };
+    window.__vimTest=window.__lspTest;
     window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
       const state = window.__lspTest;
+      if(command==="get_editor_settings")return {settings:state.settings,revision:state.revision};
+      if(command==="save_editor_settings"){state.settings=args.settings;state.revision=JSON.stringify(args.settings);return {settings:state.settings,revision:state.revision};}
       if (command === "search_questions") return {questions:[],total:0,hasMore:false};
       if (command === "load_recent_questions") return window.__fixtureQuestions;
       if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
@@ -749,7 +752,18 @@ try {
         if (args.kind === "hover") return { contents: { kind: "plaintext", value: "deque.popleft() -> int" } };
         if (args.kind === "definition") return [{ uri: "file:///fixture/stdlib/collections.pyi", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } } }];
       }
-      if (command === "read_language_source") return { name: "collections.pyi", text: "class deque:\n    def popleft(self) -> int: ...", declaration: true };
+      if(command==="language_cancel_source_navigation")return;
+      if(command==="acquire_language_source"){
+        const source=args.uri.endsWith("collections.pyi")?{sourceId:1,name:"collections.pyi",text:"class deque:\n    def popleft(self) -> int: ...",declaration:true}:{sourceId:2,name:"_collections_abc.py",text:"class Iterable:\n    def __iter__(self):\n        return iter(())",declaration:false};
+        return {...source,uri:args.uri,language:"python3"};
+      }
+      if(command==="language_source_definition"){
+        state.sourceRequests??=[];state.sourceRequests.push(args);
+        const result={locations:[{uri:args.sourceId===1?"file:///fixture/stdlib/_collections_abc.py":"file:///fixture/stdlib/collections.pyi",range:{start:{line:0,character:6},end:{line:0,character:args.sourceId===1?14:11}}}],omitted:0};
+        if(state.holdSource)return new Promise(resolve=>{state.sourceReply=()=>resolve(result);});
+        if(state.failSource)throw Error("controlled source failure");
+        return result;
+      }
       throw new Error("Unexpected LSP fixture command: " + command);
     }};
   });
@@ -800,13 +814,71 @@ try {
   await lspEditor.press("F12");
   const sourceDialog = lspPage.getByRole("dialog", { name: "collections.pyi", exact: true });
   await sourceDialog.waitFor();
-  assert.match(await sourceDialog.innerText(), /不是运行时实现源码/);
+  assert.match(await sourceDialog.locator(".source-kind").getAttribute("title"), /不是运行时实现源码/);
+  assert.match(await sourceDialog.locator(".source-kind").innerText(), /声明.*只读/);
   const readOnly = sourceDialog.getByLabel("只读标准库源码", { exact: true });
   const beforeSource = await readOnly.innerText();
   await readOnly.click(); await readOnly.press("x");
   assert.equal(await readOnly.innerText(), beforeSource);
+
+  const sourceShell=lspPage.locator(".source-viewer");
+  await readOnly.press("F12");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  assert.equal(await lspPage.evaluate(()=>window.__lspTest.sourceRequests.at(-1).sourceId),1,"second hop addresses library snapshot, not editable solution");
+  const sourceCode=lspPage.getByLabel("只读标准库源码",{exact:true});
+  await sourceCode.press("F12");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
+  assert.equal(await lspPage.evaluate(()=>window.__lspTest.sourceRequests.at(-1).sourceId),2);
+  await sourceCode.press("Alt+ArrowLeft");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  await sourceCode.press("Alt+ArrowRight");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
+  await lspPage.evaluate(()=>{window.__lspTest.failSource=true;});
+  await sourceCode.press("F12");
+  await sourceShell.getByRole("status").filter({hasText:"controlled source failure"}).waitFor();
+  assert.equal(await sourceShell.locator("#source-title").innerText(),"collections.pyi","failed navigation leaves the current document");
+  await lspPage.evaluate(()=>{window.__lspTest.failSource=false;window.__lspTest.holdSource=true;});
+  await sourceCode.press("F12");
+  await lspPage.waitForFunction(()=>typeof window.__lspTest.sourceReply==="function");
+  await sourceCode.press("Alt+ArrowLeft");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  await lspPage.evaluate(()=>window.__lspTest.sourceReply());
+  await lspPage.waitForTimeout(80);
+  assert.equal(await sourceShell.locator("#source-title").innerText(),"_collections_abc.py","late result cannot replace Back destination");
+  await sourceCode.press("Alt+ArrowRight");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
+  await lspPage.evaluate(()=>{window.__lspTest.holdSource=false;});
+  await lspPage.screenshot({path:"evidence/recursive-source-navigation.png"});
   await sourceDialog.getByRole("button", { name: "返回代码", exact: true }).click();
   assert.equal(await lspEditor.innerText(), "items.popleft");
+  await openSettings(lspPage,"编辑器");
+  await lspPage.getByRole("checkbox",{name:"Vim",exact:true}).check();
+  await lspPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await lspPage.waitForFunction(()=>window.__lspTest.settings.vim===true);
+  await lspPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+  await lspEditor.click();await lspEditor.press("Escape");await lspPage.keyboard.type("gd");
+  await sourceShell.waitFor();
+  await sourceCode.press("Escape");
+  // Escape may dismiss the modal in normal mode; reopen if it did.
+  if(!await sourceShell.count()){await lspEditor.press("F12");await sourceShell.waitFor();}
+  await sourceCode.focus();
+  await lspPage.keyboard.type("gd");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  await sourceCode.press("Control+o");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="collections.pyi");
+  await sourceCode.press("Control+i");
+  await lspPage.waitForFunction(()=>document.querySelector("#source-title")?.textContent==="_collections_abc.py");
+  const immutable=await sourceCode.innerText();
+  await lspPage.keyboard.type("dd");assert.equal(await sourceCode.innerText(),immutable,"Vim delete cannot mutate library source");
+  await lspPage.keyboard.type("iXYZ");await sourceCode.press("Escape");
+  if(await sourceShell.count())assert.equal(await sourceCode.innerText(),immutable,"Vim insert cannot mutate library source");
+  if(await sourceShell.count())await sourceShell.getByRole("button",{name:"返回代码",exact:true}).click();
+  assert.equal(await lspEditor.innerText(),"items.popleft","source Vim cannot mutate solution");
+  await openSettings(lspPage,"编辑器");
+  await lspPage.getByRole("checkbox",{name:"Vim",exact:true}).uncheck();
+  await lspPage.getByRole("button",{name:"保存设置",exact:true}).click();
+  await lspPage.waitForFunction(()=>window.__lspTest.settings.vim===false);
+  await lspPage.getByRole("button",{name:"关闭设置",exact:true}).click();
   await lspEditor.fill("items = []\nitems.append(1)");
   await lspEditor.press("Control+Home");
   await lspEditor.press("ArrowRight");
