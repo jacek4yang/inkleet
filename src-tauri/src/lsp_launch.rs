@@ -13,9 +13,13 @@ pub(crate) fn snippet_validation_enabled()->bool{
 pub(crate) fn clang_snippet_validation_enabled()->bool{
     cfg!(all(feature="native-clang-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64"))
 }
+pub(crate) fn java_snippet_validation_enabled()->bool{
+    cfg!(all(feature="native-java-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64"))
+}
 pub(crate) fn snippet_support_enabled(language:&str)->bool{
     (cfg!(all(target_os="linux",target_arch="x86_64"))&&matches!(language,"golang"|"rust"))
         ||(clang_snippet_validation_enabled()&&matches!(language,"c"|"cpp"))
+        ||(java_snippet_validation_enabled()&&language=="java")
 }
 pub(crate) fn completion_capabilities(language:&str)->Value{
     let enabled=snippet_support_enabled(language);
@@ -136,10 +140,16 @@ mod snippet_validation_tests{
         if !cfg!(feature="native-clang-snippet-validation"){assert!(!clang_snippet_validation_enabled());}
     }
     #[test]
+    fn java_experiment_is_explicit_debug_linux_x86_64_only(){
+        assert_eq!(java_snippet_validation_enabled(),cfg!(all(feature="native-java-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64")));
+        if !cfg!(feature="native-java-snippet-validation"){assert!(!java_snippet_validation_enabled());}
+    }
+    #[test]
     fn rollout_is_language_and_platform_scoped(){
         for language in ["rust","golang"]{assert_eq!(snippet_support_enabled(language),cfg!(all(target_os="linux",target_arch="x86_64")));}
-        for language in ["python3","java","unknown"]{assert!(!snippet_support_enabled(language));}
+        for language in ["python3","unknown"]{assert!(!snippet_support_enabled(language));}
         for language in ["c","cpp"]{assert_eq!(snippet_support_enabled(language),clang_snippet_validation_enabled());}
+        assert_eq!(snippet_support_enabled("java"),java_snippet_validation_enabled());
     }
     #[test]
     fn completion_profile_preserves_resolve_and_indentation_scope(){
