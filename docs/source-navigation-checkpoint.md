@@ -34,4 +34,4 @@ The CodeMirror keymap implementation was consulted to distinguish keymap orderin
 
 ## Qualification
 
-This is a Draft PR, not a release or completed cross-platform acceptance. CI run identities, failures, artifact hashes and inspected screenshots are recorded in the PR conversation. Browser fixtures do not establish real language-server or native WebView support. The added native case targets JDT ArrayList → AbstractList with real keyboard input; other languages need independent recursive-navigation qualification.
+This is a Draft PR, not a release or completed cross-platform acceptance. CI run identities, failures, artifact hashes and inspected screenshots are recorded in the PR conversation. Browser fixtures do not establish real language-server or native WebView support. Added native cases target Python SupportsIndex, JDT ArrayList → AbstractList, Go Builder → utf8.AppendRune and Rust Vec → Global, with real keyboard input and scroll-history assertions. Their completion must be reported individually. C/C++ recursive navigation remains unqualified.

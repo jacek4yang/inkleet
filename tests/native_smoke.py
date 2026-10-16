@@ -209,6 +209,45 @@ def fill(css, value):
             if attempt: raise
             cmd("DELETE","/actions")  # release any modifier whose key-up was uncertain
             time.sleep(.3)
+
+def source_navigation_case(query, target_name, label):
+    origin=text(".source-viewer h2").strip()
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+    search=".source-viewer .cm-search input[name='search']"
+    wait_for(lambda: element(search),label+" source search keyboard route")
+    fill(search,query)
+    # Right collapses the match to its end; Left enters its final identifier.
+    subprocess.run(["xdotool","key","--clearmodifiers","Return","Escape","Right","Left"],check=True)
+    symbol=query.split()[-1].split(".")[-1]
+    previous_position=None
+    def selected_identifier():
+        nonlocal previous_position
+        current=cmd("POST","/execute/sync",{"script":"""
+          const s=getSelection(),v=document.querySelector('.source-viewer .cm-scroller');
+          if(!s||!s.isCollapsed||document.activeElement?.getAttribute('aria-label')!=='只读标准库源码')return null;
+          const value=s.anchorNode?.textContent||'';
+          const start=value.indexOf(arguments[0]);
+          if(start<0||s.anchorOffset<=start||s.anchorOffset>=start+arguments[0].length)return null;
+          return {top:v.scrollTop,left:v.scrollLeft,anchor:value,offset:s.anchorOffset};
+        ""","args":[symbol]})
+        stable=current is not None and current==previous_position
+        previous_position=current
+        return current if stable else None
+    origin_position=wait_for(selected_identifier,label+" source caret inside selected identifier")
+    subprocess.run(["xdotool","key","--clearmodifiers","F12"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name,label+" recursive definition",seconds=60)
+    screenshot(label+"-recursive-source-native.png")
+    subprocess.run(["xdotool","key","--clearmodifiers","alt+Left"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==origin,label+" source history back")
+    wait_for(lambda:cmd("POST","/execute/sync",{"script":"""
+      const v=document.querySelector('.source-viewer .cm-scroller');
+      return !!v&&Math.abs(v.scrollTop-arguments[0])<2&&Math.abs(v.scrollLeft-arguments[1])<2;
+    ""","args":[origin_position["top"],origin_position["left"]]}),label+" exact source scroll restoration")
+    subprocess.run(["xdotool","key","--clearmodifiers","alt+Right"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name,label+" source history forward")
+    (evidence/(label.upper()+"_SOURCE_NAVIGATION_NATIVE_RESULT.txt")).write_text(
+        "PASS: actual source search and F12 to "+target_name+", Alt-Left/Right history and exact scroll restoration.\n"+json.dumps(origin_position,ensure_ascii=False)+"\n")
+
 def save_editor(css):
     node=element(css)
     if cmd("GET","/element/active").get(EID)!=node: click(css)
@@ -771,6 +810,7 @@ try:
         wait_for(lambda: element(".source-viewer"), "F12 opened a real stdlib declaration", seconds=30)
         wait_for(lambda: "只读" in text(".source-viewer header"), "source viewer is explicitly read-only")
         screenshot("python-stdlib-native.png")
+        source_navigation_case("def __getitem__(self, key: SupportsIndex","typing.pyi","python")
         click(".source-viewer header button[aria-label=\'返回代码\']")
         fill(code, "sum([1, 2])")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"signature-keyboard","actions":[
@@ -1046,20 +1086,8 @@ try:
         wait_for(lambda: element(".source-viewer"), "Java standard library source viewer", seconds=45)
         wait_for(lambda: "ArrayList.java" in text(".source-viewer header"), "real ArrayList source name")
         screenshot("java-stdlib-native.png")
-        # Genuine second-hop definition from JDT's immutable virtual source.
-        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
-        wait_for(lambda: element(".source-viewer .cm-search input[name='search']"),"library search keyboard route")
-        fill(".source-viewer .cm-search input[name='search']","extends AbstractList")
-        subprocess.run(["xdotool","key","--clearmodifiers","Return","Escape","Left","F12"],check=True)
-        wait_for(lambda: "AbstractList.java" in text(".source-viewer header"),"recursive JDT source definition",seconds=45)
-        screenshot("java-recursive-source-native.png")
-        subprocess.run(["xdotool","key","--clearmodifiers","alt+Left"],check=True)
-        wait_for(lambda: "ArrayList.java" in text(".source-viewer header"),"native source history back")
-        subprocess.run(["xdotool","key","--clearmodifiers","alt+Right"],check=True)
-        wait_for(lambda: "AbstractList.java" in text(".source-viewer header"),"native source history forward")
+        source_navigation_case("extends AbstractList","AbstractList.java","java")
         assert text(code)==java_doc,"library navigation preserves editable Java solution"
-        (evidence/"SOURCE_NAVIGATION_NATIVE_RESULT.txt").write_text("PASS: genuine JDT ArrayList to AbstractList definition, actual keyboard source search/F12 and Alt-Left/Right history, unchanged solution. Vim and races covered by browser tests separately.\\n")
-
         click(".source-viewer header button[aria-label=\'返回代码\']")
         if os.environ.get("INKLEET_JAVA_SNIPPET_VALIDATION") == "1":
             native_snippet_case("java",code)
@@ -1147,6 +1175,8 @@ try:
             cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-source","actions":keys}]})
             wait_for(lambda: element(".source-viewer"),f"{group} source viewer",seconds=90)
             screenshot(group+"-stdlib-native.png")
+            if group=="golang": source_navigation_case("utf8.AppendRune","utf8.go","golang")
+            if group=="rust": source_navigation_case("A: Allocator = Global","alloc.rs","rust")
             click(".source-viewer header button[aria-label=\'返回代码\']")
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
