@@ -572,3 +572,20 @@ body .cm-tooltip.cm-completionInfo{padding:0;max-width:min(440px,calc(100vw - 16
 .lsp-completion-summary{font:12px/1.6 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere;padding-bottom:9px;margin-bottom:9px;border-bottom:1px solid var(--line);color:var(--muted)}
 
 body .cm-tooltip.lsp-hover,body .cm-tooltip.lsp-signature{border:1px solid var(--line);border-radius:7px;background:var(--surface-editor);color:var(--ink);box-shadow:0 4px 16px #20251b18,0 1px 3px #20251b0c;text-shadow:none;font-weight:400}
+
+/* Readable completion content: wrapping replaces CSS ellipsis, without changing CM selection ownership. */
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul{
+ min-width:min(320px,calc(100vw - 26px));max-width:min(560px,calc(100vw - 26px));
+}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion>ul>li{
+ display:grid;grid-template-columns:16px minmax(0,1fr);column-gap:8px;row-gap:0;
+ align-items:start;white-space:normal;
+}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .lsp-completion-icon{grid-column:1;grid-row:1;align-self:start}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionLabel{
+ grid-column:2;min-width:0;max-width:none;overflow:visible;text-overflow:clip;white-space:pre-wrap;overflow-wrap:anywhere;
+}
+body .cm-tooltip.cm-tooltip-autocomplete.inkleet-completion .cm-completionDetail{
+ grid-column:2;min-width:0;max-width:none;overflow:visible;text-overflow:clip;white-space:pre-wrap;overflow-wrap:anywhere;
+ margin:0;font-size:11px;line-height:18px;
+}
