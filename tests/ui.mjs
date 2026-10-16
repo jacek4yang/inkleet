@@ -3298,6 +3298,17 @@ try {
   const readerBox=await reader.boundingBox(),readerViewport=presentationPage.viewportSize();
   assert.ok(readerBox.x>=0&&readerBox.y>=0&&readerBox.x+readerBox.width<=readerViewport.width+1&&readerBox.y+readerBox.height<=readerViewport.height+1);
   await reader.getByLabel("文档正文",{exact:true}).press("Control+End");
+  await presentationPage.waitForFunction(()=>{const body=document.querySelector(".lsp-reader-body");return body.scrollTop+body.clientHeight>=body.scrollHeight-2;});
+  const tailVisible=await reader.evaluate(dialog=>{
+    const body=dialog.querySelector(".lsp-reader-body"),walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);let node;
+    while(node=walker.nextNode()){
+      const at=node.textContent.indexOf("END_OF_COMPLETE_DOCUMENT");if(at<0)continue;
+      const range=document.createRange();range.setStart(node,at);range.setEnd(node,at+"END_OF_COMPLETE_DOCUMENT".length);
+      const a=range.getBoundingClientRect(),b=body.getBoundingClientRect();return a.top>=b.top-1&&a.bottom<=b.bottom+1;
+    }
+    return false;
+  });
+  assert.equal(tailVisible,true,"keyboard can reveal the complete document tail, not just retain it in DOM");
   await presentationPage.screenshot({path:"evidence/expanded-documentation-reader.png"});
   await presentationPage.keyboard.press("Escape");
   await reader.waitFor({state:"hidden"});

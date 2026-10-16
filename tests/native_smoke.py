@@ -1026,6 +1026,19 @@ try:
         cmd("POST","/actions",{"actions":[{"type":"key","id":"java-completion","actions":keys}]})
         wait_for(lambda: "add(" in text(".cm-tooltip-autocomplete"), "real Java ArrayList member completion", seconds=45)
         screenshot("java-completion-native.png")
+        wait_for(lambda:element(".cm-completionInfo .lsp-document-expand"),"real Java completion has expandable details",seconds=30)
+        expected_detail=cmd("GET",f"/element/{element('.cm-completionInfo .lsp-completion-summary')}/property/textContent")
+        assert "add" in expected_detail,"expanded reader targets the selected real Java completion"
+        subprocess.run(["xdotool","key","--clearmodifiers","alt+Return"],check=True)
+        wait_for(lambda:element(".lsp-document-reader[open]"),"native AltEnter expands actual server details")
+        wait_for(lambda:expected_detail in cmd("GET",f"/element/{element('.lsp-reader-body')}/property/textContent"),"native reader retains selected signature details")
+        assert source_text(code)==java_doc,"reading details never mutates Java source"
+        screenshot("java-expanded-documentation-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-document-reader"}),"native Escape closes documentation")
+        wait_for(lambda:cmd("GET",f"/element/{cmd('GET','/element/active')[EID]}/attribute/aria-label")=="代码编辑器","native documentation returns keyboard focus to code")
+        (evidence/"EXPANDED_DOCUMENTATION_NATIVE_RESULT.txt").write_text("PASS: genuine JDTLS selected completion detail, actual AltEnter reader activation, exact accepted detail retained, unchanged source, native Escape and focus restoration. Long-document limits and worker-race cases are browser-qualified separately.\\n")
+
         keys=[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
         for _ in range(java_doc.index("ArrayList")+3): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
         keys += [{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}]
