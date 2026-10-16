@@ -8,6 +8,8 @@ edition = "2021"
 native-snippet-validation = []
 # Temporary C/C++ acceptance experiment, debug Linux x86_64 only.
 native-clang-snippet-validation = ["native-snippet-validation"]
+# Includes existing gated clang checks in the same full native validation build.
+native-java-snippet-validation = ["native-clang-snippet-validation"]
 
 [lib]
 name = "inkleet_lib"

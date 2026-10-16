@@ -285,15 +285,24 @@ def snippet_trace():
 def snippet_selection():
     return cmd("POST","/execute/sync",{"script":r"""
       const content=document.querySelector('.code-pane .cm-content'),selection=window.getSelection();
-      let offset=null;
-      if(content&&selection?.focusNode&&content.contains(selection.focusNode)){
-        const range=document.createRange();range.selectNodeContents(content);range.setEnd(selection.focusNode,selection.focusOffset);offset=range.toString().length;
+      const lines=content?[...content.children].filter(node=>node.matches('.cm-line')):[];
+      const texts=lines.map(line=>line.textContent??"");
+      function endpoint(node,at){
+        if(!node||!content?.contains(node))return null;
+        const element=node.nodeType===Node.ELEMENT_NODE?node:node.parentElement;
+        const line=element?.closest('.cm-line'),index=lines.indexOf(line);
+        if(index<0)return null;
+        const range=document.createRange();range.selectNodeContents(line);range.setEnd(node,at);
+        return texts.slice(0,index).reduce((sum,text)=>sum+text.length+1,0)+range.toString().length;
       }
-      return {text:String(selection??""),offset,focus:document.activeElement?.getAttribute("aria-label"),activeFields:document.querySelectorAll(".code-pane .cm-snippet-field-active").length};
+      const anchor=selection?endpoint(selection.anchorNode,selection.anchorOffset):null;
+      const focus=selection?endpoint(selection.focusNode,selection.focusOffset):null;
+      return {text:String(selection??""),offset:focus,anchor,head:focus,from:anchor===null||focus===null?null:Math.min(anchor,focus),to:anchor===null||focus===null?null:Math.max(anchor,focus),collapsed:selection?.isCollapsed??false,source:texts.join("\n"),lineCount:texts.length,focus:document.activeElement?.getAttribute("aria-label"),activeFields:document.querySelectorAll(".code-pane .cm-snippet-field-active").length};
     ""","args":[]})
 
 def native_snippet_case(group,code):
     tail=2
+    mode=1
     selections=None
     accepted_expected=None
     if group=="rust":
@@ -313,8 +322,15 @@ def native_snippet_case(group,code):
         member="inkleet_add";replacements=["7","9"];selections=["int left","int right"];tail=3
         accepted_expected=prefix+"inkleet_add(int left, int right); }"
         expected=prefix+"inkleet_add(7, 9); }"
+    elif group=="java":
+        source="class Solution {\n    static void inkleet_test(String name, int i) {}\n    void run() {\n        inkleet_te\n    }\n}"
+        member="inkleet_test";replacements=['"ok"',"7"];selections=["name","i"];tail=8;mode=2
+        accepted_expected=source.replace("inkleet_te\n","inkleet_test(name, i);\n")
+        expected=source.replace("inkleet_te\n",'inkleet_test("ok", 7);\n')
     else: raise AssertionError("unsupported native snippet fixture")
-    argument_sources=[expected] if group not in ("c","cpp") else [prefix+"inkleet_add(7, int right); }",expected]
+    argument_sources=[expected]
+    if group in ("c","cpp"): argument_sources=[prefix+"inkleet_add(7, int right); }",expected]
+    elif group=="java": argument_sources=[source.replace("inkleet_te\n",'inkleet_test("ok", i);\n'),expected]
     observations=[]
     def persist_observations():
         (evidence/(group.upper()+"_SNIPPET_NATIVE_EVIDENCE.json")).write_text(json.dumps(observations,ensure_ascii=False,indent=2))
@@ -345,10 +361,14 @@ def native_snippet_case(group,code):
         assert wire and wire["session"]["snippets"] is True,group+" launched binary negotiated snippet support"
         assert (response["id"],response["version"],response["sequence"])>prior,group+" candidate trace belongs to this fresh acceptance phase"
         assert len(wire["item"])==1 and wire["item"][0]["format"]==2,group+" actual server item is format2"
-        assert wire["item"][0]["mode"]==1,group+" actual server item uses supported asIs mode"
+        assert wire["item"][0]["mode"]==mode,group+" actual server item has expected insertion mode"
         if group in ("c","cpp"):
             assert wire["item"][0]["source"]=="inkleet_add(${1:int left}, ${2:int right})",group+" pinned clangd two-argument snippet"
             assert response["request"]["character"]==len(source)-tail,group+" exact editable completion cursor"
+        if group=="java":
+            assert wire["item"][0]["source"]=="inkleet_test(${1:name}, ${2:i});",group+" pinned JDTLS two-argument snippet"
+            assert response["request"]["line"]==3 and response["request"]["character"]==18,group+" exact editable completion cursor"
+            assert wire["item"][0]["modePresent"] is True and wire["item"][0]["range"]=={"start":{"line":3,"character":8},"end":{"line":3,"character":18}},group+" explicit mode2 edit range is unchanged"
         time.sleep(.15)
         cmd("POST",f"/element/{choice['node']}/click",{})
         wait_for(lambda:snippet_selection()["activeFields"]>0,group+" real active argument field",seconds=20)
@@ -361,7 +381,9 @@ def native_snippet_case(group,code):
         if accepted_expected is not None:
             assert accepted==accepted_expected,group+" exact two-argument rendered snippet"
             assert selected["text"]==selections[0],group+" exact first placeholder selection"
-            assert response["request"]["line"]==0,group+" editable source position excludes virtual scaffold"
+            assert response["request"]["line"]==(3 if group=="java" else 0),group+" editable source position excludes virtual scaffold"
+            assert selected["source"]==accepted_expected,group+" native selection covers complete visible source"
+            assert selected["lineCount"]==accepted_expected.count("\n")+1,group+" all fixture lines visible"
         assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
         def record_navigation(label):
             observation.setdefault("navigation",[]).append({"label":label,"source":source_text(code),"selection":snippet_selection()})
@@ -404,11 +426,11 @@ def native_snippet_case(group,code):
             subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
             wait_for(lambda:snippet_selection()["activeFields"]==0,group+" final snippet stop")
             final=snippet_selection()
-            assert final["focus"]=="代码编辑器" and final["text"]=="" and final["offset"]==len(expected)-tail,group+" final caret follows completed call"
+            assert final["focus"]=="代码编辑器" and final["text"]=="" and final["collapsed"] and final["anchor"]==final["offset"]==len(expected)-tail and final["source"]==expected,group+" final caret follows completed call"
             observation["final"]=final
             screenshot(group+"-snippet-native.png")
         persist_observations()
-    scope="debug-only C/C++ capability experiment" if group in ("c","cpp") else "Linux x86_64 default capability with debug-only evidence tracing"
+    scope="debug-only "+group+" capability experiment" if group in ("c","cpp","java") else "Linux x86_64 default capability with debug-only evidence tracing"
     (evidence/(group.upper()+"_SNIPPET_NATIVE_RESULT.txt")).write_text("PASS: real Linux WebView and application-owned language server format2 item, worker application, selected argument replacement, Tab final caret, isolated undo/redo. "+scope+"; not release-binary or cross-platform qualification.\n")
 
 
@@ -981,6 +1003,8 @@ try:
         wait_for(lambda: "ArrayList.java" in text(".source-viewer header"), "real ArrayList source name")
         screenshot("java-stdlib-native.png")
         click(".source-viewer header button")
+        if os.environ.get("INKLEET_JAVA_SNIPPET_VALIDATION") == "1":
+            native_snippet_case("java",code)
         java_solution="class Solution {\n public int solve(int[] values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n }\n}"
         fill(code,java_solution)
         save_editor(code)

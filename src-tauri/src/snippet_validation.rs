@@ -3,12 +3,24 @@ use serde_json::{json,Value};
 use std::{collections::VecDeque,io::Write,path::Path,sync::Mutex};
 static RECORDS:Mutex<VecDeque<Value>>=Mutex::new(VecDeque::new());
 
+
+fn point(value:&Value)->Option<Value>{
+    let line=value.get("line")?.as_u64()?;
+    let character=value.get("character")?.as_u64()?;
+    if line>u32::MAX as u64||character>u32::MAX as u64{return None;}
+    Some(json!({"line":line,"character":character}))
+}
+fn edit_range(value:&Value)->Option<Value>{
+    Some(json!({"start":point(value.get("start")?)?,"end":point(value.get("end")?)?}))
+}
+
 fn item(value:&Value)->Option<Value>{
     let label=value.get("label")?.as_str()?.trim_start();
-    if label.len()>512||!["push","WriteString","HashMap","inkleet_add"].iter().any(|name|label==*name||label.strip_prefix(*name).is_some_and(|tail|tail.starts_with('(')||tail.starts_with('<'))){return None;}
+    if label.len()>512||!["push","WriteString","HashMap","inkleet_add","inkleet_test"].iter().any(|name|label==*name||label.strip_prefix(*name).is_some_and(|tail|tail.starts_with('(')||tail.starts_with('<'))){return None;}
     let source=value.pointer("/textEdit/newText").or_else(||value.get("insertText")).and_then(Value::as_str).map(|text|text.chars().take(512).collect::<String>());
     Some(json!({"label":label,"format":value.get("insertTextFormat").map(|v|v.as_u64()).unwrap_or(Some(1)),
         "mode":value.get("insertTextMode").map(|v|v.as_u64()).unwrap_or(Some(1)),
+        "modePresent":value.get("insertTextMode").is_some(),"range":value.pointer("/textEdit/range").and_then(edit_range),
         "token":value.get("_inkleetCompletion").and_then(Value::as_u64),"source":source,
         "additional":value.get("additionalTextEdits").and_then(Value::as_array).map_or(0,Vec::len)}))
 }
@@ -72,6 +84,15 @@ mod tests{
             assert_eq!(entry["labels"][0].as_str().unwrap().len(),64);assert_eq!(entry["items"],json!([]));
             assert_eq!(entry["request"]["character"],json!(60));assert!(entry.get("data").is_none());
         }else{assert!(!file.exists());}
+    }
+
+    #[test]fn trace_retains_only_bounded_explicit_edit_coordinates(){
+        let value=item(&json!({"label":"inkleet_test","insertTextFormat":2,"insertTextMode":2,"textEdit":{"range":{"start":{"line":3,"character":8,"extra":"not copied"},"end":{"line":3,"character":18}},"newText":"inkleet_test();"},"documentation":"not copied"})).unwrap();
+        assert_eq!(value["mode"],json!(2));assert_eq!(value["modePresent"],json!(true));
+        assert_eq!(value["range"],json!({"start":{"line":3,"character":8},"end":{"line":3,"character":18}}));
+        assert!(value.get("documentation").is_none());
+        assert!(point(&json!({"line":-1,"character":0})).is_none());
+        assert!(point(&json!({"line":0,"character":4294967296u64})).is_none());
     }
 
 }
