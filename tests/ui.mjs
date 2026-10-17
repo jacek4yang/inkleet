@@ -1005,6 +1005,22 @@ try {
 
   const runPage = await testPage({ viewport: { width: 1440, height: 900 } });
   const runErrors = []; runPage.on("pageerror", error => runErrors.push(error.message));
+
+  await runPage.route("**/src/snapshot-text.ts",async route=>{
+    const response=await route.fetch();let body=await response.text();
+    const marker="const text = doc.toString();";
+    assert.equal(body.split(marker).length,2,"instrument one snapshot cache miss");
+    body=body.replace(marker,'const text = window.__inputCostMeasure ? window.__inputCostMeasure("snapshot", () => doc.toString()) : doc.toString();');
+    await route.fulfill({response,body});
+  });
+  await runPage.route("**/src/editor.tsx",async route=>{
+    const response=await route.fetch();let body=await response.text();
+    const marker=/if\s*\(update\.docChanged\)\s*callback\.current\(snapshotText\(update\.state\.doc\)\);/g;
+    assert.equal([...body.matchAll(marker)].length,1,"instrument one actual editor onChange callback");
+    body=body.replace(marker,'if (update.docChanged) { const text = snapshotText(update.state.doc); if (window.__inputCostMeasure) window.__inputCostMeasure("onChange", () => callback.current(text)); else callback.current(text); }');
+    await route.fulfill({response,body});
+  });
+
   // Test-only instrumentation of the served module; production has no counters.
   await runPage.route("**/src/main.tsx",async route=>{
     const response=await route.fetch();let body=await response.text();
@@ -1514,6 +1530,52 @@ try {
   await summary.getByText("未返回 2",{exact:true}).waitFor();
   assert.equal(await runPanel.getByText("符合预期",{exact:true}).count(),0);
   assert.equal(await runPage.evaluate(()=>window.__runTest.starts.length),15);
+  assert.deepEqual(runErrors, []);
+
+  // Attribute synchronous input work separately from display-frame scheduling.
+  // These are authored test documents and mocked IPC, never live user code.
+  const inputCosts=[],inputProbeText=" // phase probe 01234567890123456789";
+  for(const lines of [50,1000,10000]){
+    const source=Array.from({length:lines},(_,i)=>"// input cost row "+i+": authored fixture").join("\n");
+    const inputEditor=runPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+    await inputEditor.click();await inputEditor.press("Control+a");
+    await inputEditor.evaluate((el,value)=>{
+      const data=new DataTransfer();data.setData("text/plain",value);
+      el.dispatchEvent(new ClipboardEvent("paste",{clipboardData:data,bubbles:true,cancelable:true}));
+    },source);
+    await inputEditor.press("Control+End");
+    await runPage.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    await runPage.evaluate(async()=>{
+      const {inputCostProbe}=await import("/tests/input-cost-probe.ts");
+      window.__inputCostProbe=inputCostProbe(document.querySelector(".code-pane .cm-editor"));
+      window.__appCommits=0;window.__checkpointEnqueues=0;
+    });
+    let sample;
+    try{
+      await inputEditor.pressSequentially(inputProbeText,{delay:20});
+      await runPage.waitForFunction(count=>window.__inputCostProbe.read().length===count,inputProbeText.length);
+      sample=await runPage.evaluate(async()=>{
+        const {EditorView}=await import("/tests/input-harness.ts");
+        return {phases:window.__inputCostProbe.read(),appCommits:window.__appCommits,checkpointEnqueues:window.__checkpointEnqueues,text:EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.doc.toString()};
+      });
+    }finally{await runPage.evaluate(()=>window.__inputCostProbe?.dispose());}
+    assert.equal(sample.text,source+inputProbeText,"phase instrumentation preserves all typed source");
+    assert.equal(sample.checkpointEnqueues,inputProbeText.length,"instrumented edits retain every recovery enqueue");
+    assert.ok(sample.phases.every(item=>item.updates>0),"each input has a real document update");
+    assert.ok(sample.appCommits<=3,"large already-dirty source must not rerender App per character");
+    const stats=field=>{
+      const values=sample.phases.map(item=>item[field]).sort((a,b)=>a-b);
+      return {p50:values[Math.floor(values.length*.5)],p95:values[Math.floor(values.length*.95)],max:values.at(-1)};
+    };
+    inputCosts.push({lines,initialCharacters:source.length,inputCount:sample.phases.length,appCommits:sample.appCommits,checkpointEnqueues:sample.checkpointEnqueues,updateMs:stats("updateMs"),snapshotMs:stats("snapshotMs"),onChangeMs:stats("onChangeMs"),inputToRafMs:stats("inputToRafMs"),samples:sample.phases});
+  }
+  await writeFile("evidence/EDITOR_INPUT_COST.json",JSON.stringify({
+    environment:"GitHub Actions headless Chromium development React; actual App; mocked IPC; language service intentionally absent",
+    cpu:os.cpus()[0]?.model,logicalCpus:os.cpus().length,viewport:"1440x900",
+    meaning:"EditorView.update synchronous wall time includes nested snapshot cache-miss flattening and onChange callback. Do not sum overlapping phases. Does not measure input queueing, completed paint, native IPC serialization, disk or LSP. All measured edits are already dirty.",
+    samples:inputCosts
+  },null,2));
+
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");
