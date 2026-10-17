@@ -1,5 +1,6 @@
 import {snippetSession,moveSnippetField,endSnippet,discardSnippet,snippetChoiceOpen,moveSnippetChoice,acceptSnippetChoice,settleSnippetForAction} from "./snippet-session";
 import {snapshotText} from "./snapshot-text";
+import {createEditorSessionCache} from "./editor-session-cache";
 import {editorStatus} from "./editor-status";
 import {vimEditing,vimNormal,getCM} from "./vim";
 import {indentGuides} from "./indent-guides";
@@ -27,7 +28,8 @@ import { SourceViewer } from "./source-viewer";
 
 // 仅保存本次运行的编辑器状态；正文持久化由原生存储负责。
 // 切换题目/语言时保留各自的撤销历史、光标与滚动位置。
-const sessions = new Map<string, { state: EditorState; scroll: number }>();
+// Retain only recent inactive states; evictions never change workspace drafts.
+const sessions = createEditorSessionCache<{ state: EditorState; scroll: number }>();
 const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "var(--surface-editor)", color: "var(--ink)", fontSize: "14px", fontWeight:"400", textShadow:"none" },
   ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", lineHeight: "1.75" },
@@ -125,7 +127,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       }),
       ...(language === "markdown" ? [EditorView.lineWrapping] : []),
     ];
-    const cached = sessions.get(documentKey);
+    const cached = sessions.take(documentKey);
     // 外部正文变化时重新建状态，不能将另一个版本的撤销历史套上去。
     const state = cached && snapshotText(cached.state.doc) === value
       ? cached.state.update({ effects: StateEffect.reconfigure.of(extensions) }).state

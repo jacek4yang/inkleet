@@ -2547,6 +2547,53 @@ try {
   await serializationPage.close();
 
 
+
+  // The real React CodeEditor remounts with fresh extension owners while recent
+  // immutable states retain history. Eviction must never replace workspace text.
+  const sessionPage=await browser.newPage({viewport:{width:900,height:500}});
+  await sessionPage.route("**/session-cache-test",route=>route.fulfill({contentType:"text/html",body:'<!doctype html><html><head><style>#editor{height:240px;display:flex;flex-direction:column}.editor-host{flex:1;min-height:0;overflow:hidden}</style></head><body><div id="editor"></div></body></html>'}));
+  await sessionPage.goto("http://127.0.0.1:5173/session-cache-test");
+  const sessionOriginal=Array.from({length:120},(_,i)=>"value_"+i+" = "+i).join("\n");
+  await sessionPage.evaluate(async text=>{
+    const {mountSessionEditor}=await import("/tests/session-cache-harness.tsx");
+    window.__sessionCache=mountSessionEditor(document.querySelector("#editor"));
+    window.__sessionCache.open("retained",text);
+  },sessionOriginal);
+  const sessionCode=sessionPage.getByRole("textbox",{name:"会话代码",exact:true});
+  await sessionCode.click();await sessionCode.press("Control+End");await sessionCode.press("End");
+  await sessionCode.press("X");
+  await sessionPage.waitForFunction(()=>window.__sessionCache.inspect().top>0&&window.__sessionCache.inspect().text.endsWith("X"));
+  const sessionBefore=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
+  await sessionPage.evaluate(()=>{window.__sessionCache.open("other","other = 1");window.__sessionCache.open("retained");});
+  await sessionPage.waitForFunction(top=>Math.abs(window.__sessionCache.inspect().top-top)<2,sessionBefore.top);
+  const sessionRestored=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
+  assert.equal(sessionRestored.text,sessionOriginal+"X");
+  assert.equal(sessionRestored.draft,sessionOriginal+"X");
+  assert.equal(sessionRestored.anchor,sessionBefore.anchor);assert.equal(sessionRestored.head,sessionBefore.head);
+  assert.equal(sessionRestored.undo,sessionBefore.undo);
+  await sessionCode.focus();await sessionCode.press("Control+z");
+  assert.equal((await sessionPage.evaluate(()=>window.__sessionCache.inspect())).text,sessionOriginal);
+  await sessionCode.press("Control+Shift+z");
+  assert.equal((await sessionPage.evaluate(()=>window.__sessionCache.inspect())).text,sessionOriginal+"X");
+  await sessionPage.evaluate(()=>{window.__sessionCache.open("other");window.__sessionCache.open("retained","external = 42");});
+  const sessionExternal=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
+  assert.equal(sessionExternal.text,"external = 42");assert.equal(sessionExternal.undo,0,"external content rejects old undo state");
+  await sessionPage.evaluate(()=>window.__sessionCache.open("evicted","draft = 1"));
+  await sessionCode.focus();await sessionCode.press("Control+End");await sessionCode.press("X");
+  const sessionEvictBefore=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
+  assert.equal(sessionEvictBefore.text,"draft = 1X");assert.ok(sessionEvictBefore.undo>0);
+  await sessionPage.evaluate(()=>{
+    for(let i=0;i<13;i++)window.__sessionCache.open("inactive-"+i,"value = "+i);
+    window.__sessionCache.open("evicted");
+  });
+  const sessionEvicted=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
+  assert.equal(sessionEvicted.text,"draft = 1X");assert.equal(sessionEvicted.draft,"draft = 1X","eviction does not discard the canonical draft");
+  assert.equal(sessionEvicted.undo,0,"evicted in-memory history is not resurrected");
+  await sessionCode.focus();await sessionCode.press("Control+z");
+  assert.equal((await sessionPage.evaluate(()=>window.__sessionCache.inspect())).text,"draft = 1X");
+  await writeFile("evidence/EDITOR_SESSION_CACHE_RESULT.json",JSON.stringify({environment:"Chromium React CodeEditor; in-memory workspace drafts; no native IPC",retained:sessionRestored,external:sessionExternal,evicted:sessionEvicted},null,2));
+  await sessionPage.evaluate(()=>window.__sessionCache.dispose());await sessionPage.close();
+
   const snippetWorkerPage=await browser.newPage();
   await snippetWorkerPage.route("**/snippet-worker-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body>Snippet worker fixture</body></html>"}));
   await snippetWorkerPage.goto("http://127.0.0.1:5173/snippet-worker-test");
