@@ -1213,6 +1213,76 @@ try:
             cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-completion","actions":keys}]})
             wait_for(lambda: member in text(".cm-tooltip-autocomplete"),f"real {group} member completion",seconds=90)
             screenshot(group+"-completion-native.png")
+            # Insert immediately after screenshot(group+"-completion-native.png").
+            # Real rust-analyzer output and native keyboard only; DOM probes are passive.
+            if group=="rust":
+                wait_for(lambda:element(".cm-completionInfo .lsp-document-expand"),"real Rust completion documentation resolved",seconds=30)
+                preview_nodes=cmd("POST","/elements",{"using":"css selector","value":".cm-completionInfo pre code"})
+                preview_codes=[cmd("GET",f"/element/{node[EID]}/property/textContent") for node in preview_nodes]
+                expected_rust_example=next((value for value in preview_codes if "let mut vec = vec![1, 2];" in value and "vec.push(3);" in value),None)
+                assert expected_rust_example,"genuine Vec::push preview contains its known Rust example"
+                subprocess.run(["xdotool","key","--clearmodifiers","alt+Return"],check=True)
+                wait_for(lambda:element(".lsp-document-reader[open]"),"genuine Rust documentation reader")
+                wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-body')}/attribute/aria-busy")=="false","Rust reader finished optional syntax work")
+                trace=cmd("POST","/execute/sync",{"script":r"""
+                  return [...document.querySelectorAll('.lsp-reader-body pre code')].map(code=>({
+                    text:code.textContent,
+                    keywords:[...code.querySelectorAll('.lsp-code-keyword')].map(node=>({text:node.textContent,color:getComputedStyle(node).color,plainColor:getComputedStyle(code).color,display:getComputedStyle(node).display,visibility:getComputedStyle(node).visibility})),
+                    classes:[...code.querySelectorAll('span')].map(node=>node.className)
+                  }));
+                ""","args":[]})
+                (evidence/"RUST_DOCUMENT_CODE_NATIVE_TRACE.json").write_text(json.dumps(trace,ensure_ascii=False,indent=2))
+                assert trace,"genuine Vec::push reader must retain its code blocks"
+                assert any(block["text"]==expected_rust_example and block["keywords"] for block in trace),"genuine Vec::push reader must preserve exact server example with highlighted Rust keywords"
+                result=cmd("POST","/execute/sync",{"script":r"""
+                  const blocks=[...document.querySelectorAll('.lsp-reader-body pre code')];
+                  const code=blocks.find(node=>node.textContent===arguments[0]&&node.querySelector('.lsp-code-keyword'));
+                  if(!code)return null;
+                  // Pick a line that truly spans a keyword and another original
+                  // text node; do not count duplicate single-node matches as proof.
+                  const walker=document.createTreeWalker(code,NodeFilter.SHOW_TEXT),segments=[];let node,offset=0;
+                  while(node=walker.nextNode()){segments.push({node,from:offset,to:offset+node.length});offset+=node.length;}
+                  let query=null;
+                  for(const token of code.querySelectorAll('.lsp-code-keyword')){
+                    const segment=segments.find(part=>token.contains(part.node));if(!segment)continue;
+                    const from=segment.from,to=Math.min(code.textContent.indexOf('\n',from)<0?code.textContent.length:code.textContent.indexOf('\n',from),from+100);
+                    if(to>segment.to&&segments.some(part=>part.from>=segment.to&&part.from<to)){
+                      query=code.textContent.slice(from,to);break;
+                    }
+                  }
+                  const allWalker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];
+                  while(node=allWalker.nextNode())nodes.push(node);
+                  window.__nativeHighlightCode=code;window.__nativeHighlightNodes=nodes;
+                  window.__nativeHighlightBlocks=blocks;window.__nativeHighlightTexts=blocks.map(node=>node.textContent);
+                  const token=code.querySelector('.lsp-code-keyword'),style=getComputedStyle(token);
+                  return {query,painted:style.color!==getComputedStyle(code).color&&style.display!=='none'&&style.visibility==='visible'};
+                ""","args":[expected_rust_example]})
+                assert result and result["painted"],"genuine Rust code must have visible keyword color"
+                assert result["query"],"genuine Rust example must provide a cross-token search query"
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+                fill(".lsp-reader-find input",result["query"])
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":r"""
+                  const code=window.__nativeHighlightCode;
+                  return code.querySelectorAll('.lsp-reader-search-match').length>1&&
+                    window.__nativeHighlightBlocks.every((block,i)=>block.textContent===window.__nativeHighlightTexts[i]);
+                ""","args":[]}),"native query crosses real syntax-token boundaries and preserves all code text")
+                assert source_text(code)==code_text,"native syntax search preserves solution"
+                screenshot("rust-document-code-highlight-native.png")
+                subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+                wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-find')}/property/hidden")==True,"native Escape hides syntax search")
+                assert cmd("POST","/execute/sync",{"script":r"""
+                  const code=window.__nativeHighlightCode,walker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];let node;
+                  while(node=walker.nextNode())nodes.push(node);
+                  const blocks=[...document.querySelectorAll('.lsp-reader-body pre code')];
+                  return code.isConnected&&blocks.length===window.__nativeHighlightBlocks.length&&
+                    blocks.every((block,i)=>block===window.__nativeHighlightBlocks[i]&&block.textContent===window.__nativeHighlightTexts[i])&&
+                    nodes.length===window.__nativeHighlightNodes.length&&nodes.every((node,i)=>node===window.__nativeHighlightNodes[i]);
+                ""","args":[]}),"native Escape restores syntax/text-node identity and every complete code block"
+                (evidence/"RUST_DOCUMENT_CODE_NATIVE_RESULT.txt").write_text("PASS: genuine rust-analyzer Vec::push documentation code, visible keyword color, native cross-token search, full code text and original node restoration after Escape, unchanged solution. No language-server or worker responses substituted.\n")
+                subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+                wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-document-reader"}),"native syntax reader closes")
+                assert source_text(code)==code_text,"native syntax reader preserves source on close"
+
             keys=[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
             for _ in range(code_text.index(definition_word)+1): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
             keys += [{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}]
