@@ -1535,8 +1535,10 @@ try {
   // Attribute synchronous input work separately from display-frame scheduling.
   // These are authored test documents and mocked IPC, never live user code.
   const inputCosts=[],inputProbeText=" // phase probe 01234567890123456789";
-  for(const {lines,warm} of [{lines:50,warm:false},{lines:1000,warm:false},{lines:10000,warm:false},{lines:10000,warm:true}]){
-    const source=Array.from({length:lines},(_,i)=>"// input cost row "+i+": authored fixture").join("\n");
+  assert.equal(await runPage.getByRole("combobox",{name:"编程语言"}).inputValue(),"java");
+  for(const {lines,warm,kind} of [{lines:50,warm:false,kind:"comments"},{lines:1000,warm:false,kind:"comments"},{lines:10000,warm:false,kind:"comments"},{lines:10000,warm:true,kind:"comments"},{lines:1000,warm:true,kind:"java"},{lines:10000,warm:true,kind:"java"}]){
+    const source=kind==="comments"?Array.from({length:lines},(_,i)=>"// input cost row "+i+": authored fixture").join("\n"):["class InputCostFixture {","  static int calculate(int x) {",...Array.from({length:lines-5},(_,i)=>"    int value_"+i+" = x + "+i+";"),"    return x;","  }","}"].join("\n");
+    const insertion=kind==="comments"?source.length:source.lastIndexOf("return x;")+"return x;".length;
     const inputEditor=runPage.getByRole("textbox",{name:"代码编辑器",exact:true});
     await inputEditor.click();await inputEditor.press("Control+a");
     await inputEditor.evaluate((el,value)=>{
@@ -1544,6 +1546,7 @@ try {
       el.dispatchEvent(new ClipboardEvent("paste",{clipboardData:data,bubbles:true,cancelable:true}));
     },source);
     await inputEditor.press("Control+End");
+    if(kind==="java"){await inputEditor.press("ArrowUp");await inputEditor.press("ArrowUp");await inputEditor.press("End");}
     await runPage.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     await runPage.evaluate(async()=>{
       const {inputCostProbe}=await import("/tests/input-cost-probe.ts");
@@ -1560,7 +1563,7 @@ try {
         return {phases:window.__inputCostProbe.read(),appCommits:window.__appCommits,checkpointEnqueues:window.__checkpointEnqueues,text:EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.doc.toString()};
       });
     }finally{await runPage.evaluate(()=>window.__inputCostProbe?.dispose());}
-    assert.equal(sample.text,source+inputProbeText,"phase instrumentation preserves all typed source");
+    assert.equal(sample.text,source.slice(0,insertion)+inputProbeText+source.slice(insertion),"phase instrumentation preserves all typed source");
     assert.equal(sample.checkpointEnqueues,inputProbeText.length,"instrumented edits retain every recovery enqueue");
     assert.ok(sample.phases.every(item=>item.updates>0),"each input has a real document update");
     assert.ok(sample.appCommits<=3,"large already-dirty source must not rerender App per character");
@@ -1568,7 +1571,7 @@ try {
       const values=sample.phases.map(item=>item[field]).sort((a,b)=>a-b);
       return {p50:values[Math.floor(values.length*.5)],p95:values[Math.floor(values.length*.95)],max:values.at(-1)};
     };
-    inputCosts.push({lines,warm,initialCharacters:source.length,inputCount:sample.phases.length,appCommits:sample.appCommits,checkpointEnqueues:sample.checkpointEnqueues,updateMs:stats("updateMs"),snapshotMs:stats("snapshotMs"),onChangeMs:stats("onChangeMs"),inputToRafMs:stats("inputToRafMs"),samples:sample.phases});
+    inputCosts.push({lines,warm,kind,initialCharacters:source.length,inputCount:sample.phases.length,appCommits:sample.appCommits,checkpointEnqueues:sample.checkpointEnqueues,updateMs:stats("updateMs"),snapshotMs:stats("snapshotMs"),onChangeMs:stats("onChangeMs"),inputToRafMs:stats("inputToRafMs"),samples:sample.phases});
   }
   await writeFile("evidence/EDITOR_INPUT_COST.json",JSON.stringify({
     environment:"GitHub Actions headless Chromium development React; actual App; mocked IPC; language service intentionally absent",
@@ -1582,10 +1585,11 @@ try {
   const profiler=await runPage.context().newCDPSession(runPage);
   const cpuEditor=runPage.getByRole("textbox",{name:"代码编辑器",exact:true});
   const cpuProbe=" // CPU attribution 0123456789012345678901234567890123456789";
-  await cpuEditor.focus();await cpuEditor.press("Control+End");
+  await cpuEditor.focus();await cpuEditor.press("Control+End");await cpuEditor.press("ArrowUp");await cpuEditor.press("ArrowUp");await cpuEditor.press("End");
   const cpuBefore=await runPage.evaluate(async()=>{
     const {EditorView}=await import("/tests/input-harness.ts");
-    return EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.doc.toString();
+    const state=EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state;
+    return {text:state.doc.toString(),position:state.selection.main.head};
   });
   await profiler.send("Profiler.enable");
   await profiler.send("Profiler.setSamplingInterval",{interval:1000});
@@ -1600,11 +1604,11 @@ try {
     const {EditorView}=await import("/tests/input-harness.ts");
     return EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.doc.toString();
   });
-  assert.equal(cpuAfter,cpuBefore+cpuProbe,"CPU profiling preserves complete input");
+  assert.equal(cpuAfter,cpuBefore.text.slice(0,cpuBefore.position)+cpuProbe+cpuBefore.text.slice(cpuBefore.position),"CPU profiling preserves complete input");
   await writeFile("evidence/EDITOR_INPUT_CPU.cpuprofile",JSON.stringify(cpuProfile));
   await writeFile("evidence/EDITOR_INPUT_CPU_CONTEXT.json",JSON.stringify({
-    environment:"Headless Chromium development App; mocked IPC; no LSP/native disk; 10000 authored comment lines",
-    samplingIntervalUs:1000,inputCharacters:cpuProbe.length,initialCharacters:cpuBefore.length,
+    environment:"Headless Chromium development App; mocked IPC; no LSP/native disk; 10000 authored Java lines, editing inside method",
+    samplingIntervalUs:1000,inputCharacters:cpuProbe.length,initialCharacters:cpuBefore.text.length,
     meaning:"Separate CPU sampling pass after phase measurements; not a native performance trace. Includes typing gaps and background tasks. Analyze stacks, not total duration as per-key cost."
   },null,2));
 
