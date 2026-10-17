@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify";
+import {documentReaderSearch} from "./lsp-document-search";
 import {documentationModel} from "./lsp-document-model";
 let activeWorkers=0;
 const cache=new Map<string,(string|null)[]>();let cacheBytes=0;
@@ -62,9 +63,10 @@ async function openDocumentationReader(value:unknown,legacy:boolean,owner:AbortS
  title.textContent=options.title??"文档";close.type="button";close.className="lsp-reader-close";close.append(expandIcon("M4 4l8 8M12 4l-8 8"));close.setAttribute("aria-label","关闭文档");
  body.className="lsp-reader-body";body.tabIndex=0;body.setAttribute("aria-label","文档正文");body.setAttribute("aria-busy","true");body.textContent="正在载入文档";
  header.append(title,close);dialog.append(header,body);
+ const search=documentReaderSearch(dialog,body,header);
  let disposed=false;
- const dispose=()=>{if(disposed)return;disposed=true;lifetime.abort();owner?.removeEventListener("abort",dispose);if(dialog.open)dialog.close();dialog.remove();if(closeReader===dispose)closeReader=undefined;if(previous?.isConnected)previous.focus({preventScroll:true});};
- closeReader=dispose;close.addEventListener("click",dispose);dialog.addEventListener("cancel",event=>{event.preventDefault();dispose();});owner?.addEventListener("abort",dispose,{once:true});
+ const dispose=()=>{if(disposed)return;disposed=true;search.destroy();lifetime.abort();owner?.removeEventListener("abort",dispose);if(dialog.open)dialog.close();dialog.remove();if(closeReader===dispose)closeReader=undefined;if(previous?.isConnected)previous.focus({preventScroll:true});};
+ closeReader=dispose;close.addEventListener("click",dispose);dialog.addEventListener("cancel",event=>{event.preventDefault();if(!search.cancel())dispose();});owner?.addEventListener("abort",dispose,{once:true});
  document.body.append(dialog);
  try{
   dialog.showModal();body.focus();
@@ -72,6 +74,7 @@ async function openDocumentationReader(value:unknown,legacy:boolean,owner:AbortS
   if(disposed)return;
   body.replaceChildren();body.setAttribute("aria-busy","false");
   if(content)body.append(content);else body.textContent="无文档内容";
+  search.refresh();
  }catch{dispose();}
 }
 

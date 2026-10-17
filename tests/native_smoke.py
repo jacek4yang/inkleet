@@ -1108,6 +1108,16 @@ try:
         wait_for(lambda:expected_detail in cmd("GET",f"/element/{element('.lsp-reader-body')}/property/textContent"),"native reader retains selected signature details")
         assert source_text(code)==java_doc,"reading details never mutates Java source"
         screenshot("java-expanded-documentation-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+        wait_for(lambda:element(".lsp-reader-find input"),"native reader search control")
+        fill(".lsp-reader-find input","add")
+        wait_for(lambda:"add" in text(".lsp-reader-search-match").lower(),"native search highlights actual JDT detail")
+        assert source_text(code)==java_doc,"reader search never mutates Java source"
+        screenshot("java-documentation-search-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-find')}/property/hidden")==True,"first native Escape hides search")
+        assert element(".lsp-document-reader[open]"),"first Escape retains documentation reader"
+
         subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
         wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-document-reader"}),"native Escape closes documentation")
         wait_for(lambda:cmd("GET",f"/element/{cmd('GET','/element/active')[EID]}/attribute/aria-label")=="代码编辑器","native documentation returns keyboard focus to code")

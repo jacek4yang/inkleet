@@ -3581,6 +3581,24 @@ try {
   assert.equal(await presentationPage.evaluate(()=>window.__presentation.value),"Hash");
   const readerBox=await reader.boundingBox(),readerViewport=presentationPage.viewportSize();
   assert.ok(readerBox.x>=0&&readerBox.y>=0&&readerBox.x+readerBox.width<=readerViewport.width+1&&readerBox.y+readerBox.height<=readerViewport.height+1);
+
+  const originalReaderText=await reader.getByLabel("文档正文",{exact:true}).textContent();
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
+  const readerFind=reader.getByRole("searchbox",{name:"查找文档内容",exact:true});
+  await readerFind.fill("Documentation content");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 2000");
+  await readerFind.press("Shift+Enter");
+  assert.equal(await reader.locator(".lsp-reader-find-count").innerText(),"2000 / 2000","all matches beyond 1000 remain reachable");
+  await readerFind.press("Enter");
+  assert.equal(await reader.locator(".lsp-reader-find-count").innerText(),"1 / 2000");
+  await readerFind.fill("END_OF_COMPLETE_DOCUMENT");
+  await reader.locator(".lsp-reader-search-match").filter({hasText:"END_OF_COMPLETE_DOCUMENT"}).waitFor();
+  assert.equal(await reader.getByLabel("文档正文",{exact:true}).textContent(),originalReaderText,"search retains full original text");
+  await presentationPage.screenshot({path:"evidence/document-reader-search-tail.png"});
+  await readerFind.press("Escape");
+  assert.equal(await reader.isVisible(),true,"first Escape hides search only");
+  assert.equal(await reader.locator(".lsp-reader-find").isVisible(),false);
+
   await reader.getByLabel("文档正文",{exact:true}).press("Control+End");
   await presentationPage.waitForFunction(()=>{const body=document.querySelector(".lsp-reader-body");return body.scrollTop+body.clientHeight>=body.scrollHeight-2;});
   const tailVisible=await reader.evaluate(dialog=>{
@@ -3598,6 +3616,61 @@ try {
   await reader.waitFor({state:"hidden"});
   assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true,"closing reader restores code focus");
 
+
+  // Search across inline markup without re-rendering or changing text-node identity.
+  await presentationPage.evaluate(async()=>{
+    const {renderDocumentation}=await import("/src/lsp-documentation.ts");
+    const owner=new AbortController();window.__readerSearchOwner=owner;
+    const node=await renderDocumentation({kind:"markdown",value:"Ha**sh**Map and HASHMAP. 😀\n\nHash\n\nMap\n\nliteral [x]+.*\n\n<blockquote>alpha<hr>beta</blockquote>\n\n<blockquote>alpha<p></p>beta</blockquote>\n\n<div><em>inline</em> <strong>space</strong></div>"},false,owner.signal);
+    node.id="reader-search-fixture";document.body.append(node);
+  });
+  await presentationPage.locator("#reader-search-fixture .lsp-document-expand").click();
+  await reader.waitFor();await reader.locator("strong").first().waitFor();
+  const searchMarkup=await reader.getByLabel("文档正文",{exact:true}).innerHTML();
+  await reader.evaluate(dialog=>{window.__readerOriginalStrong=dialog.querySelector("strong");window.__readerOriginalText=dialog.querySelector("strong").firstChild;});
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
+  await readerFind.fill("hashmap");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 2");
+  assert.equal(await reader.locator(".lsp-reader-search-match").count(),3,"one active result can span inline text and bold nodes");
+  await readerFind.press("Enter");assert.equal(await reader.locator(".lsp-reader-find-count").innerText(),"2 / 2");
+  await readerFind.press("Shift+Enter");assert.equal(await reader.locator(".lsp-reader-find-count").innerText(),"1 / 2");
+  await readerFind.fill("HashMapHash");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="0 / 0");
+  await readerFind.fill("alphabeta");await readerFind.press("Enter");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="0 / 0");
+  await readerFind.fill("inline space");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
+  assert.equal((await reader.locator(".lsp-reader-search-match").allTextContents()).join(""),"inline space","visible inline whitespace remains searchable after sanitizer removes wrappers");
+  await readerFind.fill("😀");
+  await reader.locator(".lsp-reader-search-match").filter({hasText:"😀"}).waitFor();
+  await readerFind.evaluate(input=>{
+    input.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true}));
+    input.value="Hash";input.dispatchEvent(new InputEvent("input",{bubbles:true,isComposing:true}));
+    input.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true,isComposing:true}));
+    input.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true,isComposing:true}));
+  });
+  assert.equal(await reader.locator(".lsp-reader-search-match").innerText(),"😀","composition does not navigate or apply partial query");
+  assert.equal(await reader.isVisible(),true);
+  await reader.evaluate(dialog=>dialog.dispatchEvent(new Event("cancel",{cancelable:true})));
+  assert.equal(await reader.isVisible(),true,"composition also owns native-style dialog cancel events");
+  await readerFind.evaluate(input=>input.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true,data:"Hash"})));
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 3");
+  await readerFind.press("Escape");
+  assert.equal(await reader.getByLabel("文档正文",{exact:true}).innerHTML(),searchMarkup,"search teardown preserves sanitized markup exactly");
+  assert.equal(await reader.evaluate(dialog=>dialog.querySelector("strong")===window.__readerOriginalStrong&&dialog.querySelector("strong").firstChild===window.__readerOriginalText),true,"original inline nodes are restored");
+  await presentationPage.setViewportSize({width:390,height:844});
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
+  await readerFind.fill("literal [x]+.*");
+  await reader.locator(".lsp-reader-search-match").filter({hasText:"literal [x]+.*"}).waitFor();
+  assert.equal(await reader.evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth+1),true,"search controls fit narrow reader");
+  await presentationPage.screenshot({path:"evidence/document-reader-search-narrow.png"});
+  await readerFind.fill("pending debounce");
+  await reader.getByRole("button",{name:"关闭文档",exact:true}).click();
+  await presentationPage.waitForTimeout(150);
+  assert.equal(await presentationPage.locator(".lsp-reader-find,.lsp-reader-search-match").count(),0,"close owns pending search work");
+  await presentationPage.evaluate(()=>{window.__readerSearchOwner.abort();document.getElementById("reader-search-fixture").remove();});
+  await presentationPage.setViewportSize({width:1200,height:800});
+
   // Keyboard reader activation and close during an owned worker's pending parse.
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.docs={kind:"markdown",value:"**Reader race**\n\n"+"bounded document ".repeat(2400)+"END_OF_RACE_DOCUMENT"};});
   await presentationCode.press("Control+Space");
@@ -3611,6 +3684,7 @@ try {
   await presentationCode.press("Alt+Enter");
   await reader.waitFor();
   assert.equal(await reader.getByLabel("文档正文",{exact:true}).getAttribute("aria-busy"),"true");
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");await readerFind.fill("Reader race");await readerFind.press("Escape");
   assert.equal(await presentationPage.evaluate(()=>window.__presentation.readerBlurState),null,"completion is closed before modal blur can schedule a stale close timer");
   await presentationPage.keyboard.press("Escape");
   await reader.waitFor({state:"hidden"});
@@ -3627,6 +3701,37 @@ try {
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-body")?.textContent.includes("END_OF_RACE_DOCUMENT"));
   await presentationPage.keyboard.press("Escape");
   await reader.waitFor({state:"hidden"});
+
+  // Query entered while the expanded worker is held applies on successful mount.
+  await presentationPage.evaluate(()=>{window.__presentation.docs={kind:"markdown",value:"Reader loading\n\n"+"bounded ".repeat(5000)+" END_OF_READY_DOCUMENT"};});
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".cm-completionInfo .lsp-document-expand").waitFor();
+  const waitingSearch=await presentationPage.evaluate(()=>{
+    const NativeWorker=window.Worker;
+    window.Worker=class{constructor(){this.terminated=0;window.__readyReaderWorker=this;}postMessage(value){this.parts=value.parts;}terminate(){this.terminated++;}};
+    try{
+      document.querySelector(".cm-completionInfo .lsp-document-expand").click();
+      const dialog=document.querySelector(".lsp-document-reader"),body=dialog.querySelector(".lsp-reader-body");
+      body.dispatchEvent(new KeyboardEvent("keydown",{key:"f",ctrlKey:true,bubbles:true,cancelable:true}));
+      const input=dialog.querySelector(".lsp-reader-find input");input.value="END_OF_READY_DOCUMENT";
+      input.dispatchEvent(new InputEvent("input",{bubbles:true}));
+      input.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true}));
+      const pending={busy:body.getAttribute("aria-busy"),count:dialog.querySelector(".lsp-reader-find-count").textContent,marks:dialog.querySelectorAll(".lsp-reader-search-match").length,focused:document.activeElement===input};
+      const worker=window.__readyReaderWorker;
+      worker.onmessage({data:{html:worker.parts.map(part=>{if(part.kind!=="markdown")return null;const p=document.createElement("p");p.textContent=part.text;return p.outerHTML;})}});
+      return pending;
+    }finally{window.Worker=NativeWorker;}
+  });
+  assert.deepEqual(waitingSearch,{busy:"true",count:"载入中",marks:0,focused:true});
+  await reader.locator(".lsp-reader-search-match").filter({hasText:"END_OF_READY_DOCUMENT"}).waitFor();
+  assert.equal(await readerFind.inputValue(),"END_OF_READY_DOCUMENT");
+  assert.equal(await reader.locator(".lsp-reader-find-count").innerText(),"1 / 1");
+  assert.equal(await readerFind.evaluate(input=>input===document.activeElement),true);
+  assert.equal(await presentationPage.evaluate(()=>window.__readyReaderWorker.terminated),1);
+  await readerFind.press("Escape");assert.equal(await reader.isVisible(),true);
+  await presentationPage.keyboard.press("Escape");await reader.waitFor({state:"hidden"});
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
+
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.detailOnly=true;s.resolvedDetail="fn resolved_signature("+("parameter: VeryLongType, ".repeat(40))+") -> END_OF_RESOLVED_DETAIL";});
   await presentationCode.press("Control+Space");
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-completion-documentation")?.textContent.includes("END_OF_RESOLVED_DETAIL"));
@@ -3670,6 +3775,7 @@ try {
   await presentationPage.locator(".cm-completionInfo").getByRole("button",{name:"展开文档",exact:true}).click();
   await reader.waitFor();await reader.locator(".lsp-document-limit").waitFor();
   assert.equal(await reader.locator(".lsp-document-limit").innerText(),"文档超出显示上限，当前内容不完整");
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");await readerFind.fill("文档超出显示上限");await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="0 / 0");await readerFind.press("Escape");
   assert.equal(await reader.evaluate(dom=>dom.textContent.includes("UNREACHABLE_TAIL")),false);
   await presentationPage.evaluate(()=>window.__presentation.mount.destroy());
   assert.equal(await presentationPage.locator(".lsp-document-reader").count(),0,"editor destruction owns and closes its expanded reader");
