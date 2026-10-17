@@ -1576,6 +1576,37 @@ try {
     samples:inputCosts
   },null,2));
 
+
+  // Separate sampled CPU pass: keep profiler overhead out of phase timings.
+  const profiler=await runPage.context().newCDPSession(runPage);
+  const cpuEditor=runPage.getByRole("textbox",{name:"代码编辑器",exact:true});
+  const cpuProbe=" // CPU attribution 0123456789012345678901234567890123456789";
+  await cpuEditor.focus();await cpuEditor.press("Control+End");
+  const cpuBefore=await runPage.evaluate(async()=>{
+    const {EditorView}=await import("/tests/input-harness.ts");
+    return EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.doc.toString();
+  });
+  await profiler.send("Profiler.enable");
+  await profiler.send("Profiler.setSamplingInterval",{interval:1000});
+  await profiler.send("Profiler.start");
+  let cpuProfile;
+  try{await cpuEditor.pressSequentially(cpuProbe,{delay:20});}
+  finally{
+    cpuProfile=(await profiler.send("Profiler.stop")).profile;
+    await profiler.detach();
+  }
+  const cpuAfter=await runPage.evaluate(async()=>{
+    const {EditorView}=await import("/tests/input-harness.ts");
+    return EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.doc.toString();
+  });
+  assert.equal(cpuAfter,cpuBefore+cpuProbe,"CPU profiling preserves complete input");
+  await writeFile("evidence/EDITOR_INPUT_CPU.cpuprofile",JSON.stringify(cpuProfile));
+  await writeFile("evidence/EDITOR_INPUT_CPU_CONTEXT.json",JSON.stringify({
+    environment:"Headless Chromium development App; mocked IPC; no LSP/native disk; 10000 authored comment lines",
+    samplingIntervalUs:1000,inputCharacters:cpuProbe.length,initialCharacters:cpuBefore.length,
+    meaning:"Separate CPU sampling pass after phase measurements; not a native performance trace. Includes typing gaps and background tasks. Analyze stacks, not total duration as per-key cost."
+  },null,2));
+
   assert.deepEqual(runErrors, []);
   await runPage.close();
   await writeFile("evidence/LOCAL_RUN_UI_RESULT.txt", "PASS: mocked IPC only; duplicate start prevention, immutable snapshot staleness, close/reopen ongoing job, cancellation, explicit manual rerun and plain-text output. Actual Python execution is independently verified.\n");
