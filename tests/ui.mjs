@@ -3671,6 +3671,196 @@ try {
   await presentationPage.evaluate(()=>{window.__readerSearchOwner.abort();document.getElementById("reader-search-fixture").remove();});
   await presentationPage.setViewportSize({width:1200,height:800});
 
+  // Insert after the reader-search fixture cleanup/viewport reset, before Reader race.
+  // Uses the real Markdown and language workers; no synthetic token replies here.
+  const highlightCases = [
+    ["rust", 'fn highlight_probe() { let answer = 42; println!("rust"); }\n'],
+    ["python", 'def highlight_probe():\n    return "python", 42\n'],
+    ["go", 'package main\nfunc highlight_probe() string { return "go" }\n'],
+    ["c", 'int highlight_probe(void) { return 42; }\n'],
+    ["c++", 'int highlight_probe() { return 42; }\n'],
+    ["java", 'class HighlightProbe { int answer() { return 42; } }\n'],
+    ["", 'fn untagged_plain() { return 42; }\n'],
+    ["unknown_language", 'fn unknown_plain() { return 42; }\n'],
+    ["rust", 'let unsafe_text = "<img src=https://invalid.example/code onerror=window.__highlightUnsafe=1>";\n'],
+  ];
+  const mountHighlightFixture = async (value, legacy = false) => {
+    await presentationPage.evaluate(async ({value,legacy}) => {
+      const {renderDocumentation}=await import("/src/lsp-documentation.ts");
+      const owner=new AbortController(),host=document.createElement("div");
+      host.id="reader-highlight-fixture";document.body.append(host);
+      window.__highlightFixture={owner,host};
+      host.append(await renderDocumentation(value,legacy,owner.signal));
+    },{value,legacy});
+    await presentationPage.locator("#reader-highlight-fixture .lsp-document-expand").click();
+    await reader.waitFor();
+    await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-body")?.getAttribute("aria-busy")==="false");
+  };
+  const removeHighlightFixture = async () => {
+    await reader.getByRole("button",{name:"关闭文档",exact:true}).click();
+    await presentationPage.evaluate(()=>{window.__highlightFixture.owner.abort();window.__highlightFixture.host.remove();});
+  };
+  await mountHighlightFixture({kind:"markdown",value:highlightCases.map(([language,code])=>"```"+language+"\n"+code+"```").join("\n\n")});
+  assert.deepEqual(await reader.locator("pre code").allTextContents(),highlightCases.map(([,code])=>code),"highlighting preserves every code point and newline");
+  for(let i=0;i<6;i++){
+    const code=reader.locator("pre code").nth(i),keyword=code.locator(".lsp-code-keyword").first();
+    assert.ok(await keyword.count(),highlightCases[i][0]+" has real parser keyword tokens");
+    await keyword.scrollIntoViewIfNeeded();
+    assert.equal(await keyword.isVisible(),true);
+    assert.equal(await keyword.evaluate(node=>getComputedStyle(node).color!==getComputedStyle(node.closest("code")).color),true,highlightCases[i][0]+" token has visible syntax color");
+  }
+  for(const i of [6,7])assert.equal(await reader.locator("pre code").nth(i).locator("span").count(),0,"unknown and untagged fences remain plain");
+  assert.equal(await reader.locator("img,script,iframe,a").count(),0,"code resembling HTML stays inert");
+  assert.equal(await presentationPage.evaluate(()=>window.__highlightUnsafe??null),null);
+  assert.deepEqual(externalDocRequests,[]);
+  const beforeHighlightSearch=await reader.getByLabel("文档正文",{exact:true}).innerHTML();
+  await reader.evaluate(dialog=>{
+    const code=dialog.querySelector("pre code"),walker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];let node;
+    while(node=walker.nextNode())nodes.push(node);
+    window.__highlightOriginal={code,nodes};
+  });
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
+  await readerFind.fill("let answer = 42");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
+  assert.ok(await reader.locator(".lsp-reader-search-match").count()>1,"one search result crosses token and plain-text boundaries");
+  assert.equal((await reader.locator(".lsp-reader-search-match").allTextContents()).join(""),"let answer = 42");
+  await presentationPage.screenshot({path:"evidence/document-reader-highlight-search.png"});
+  await readerFind.press("Escape");
+  assert.equal(await reader.isVisible(),true);
+  assert.equal(await reader.getByLabel("文档正文",{exact:true}).innerHTML(),beforeHighlightSearch);
+  assert.equal(await reader.evaluate(dialog=>{
+    const old=window.__highlightOriginal,code=dialog.querySelector("pre code"),walker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];let node;
+    while(node=walker.nextNode())nodes.push(node);
+    return code===old.code&&nodes.length===old.nodes.length&&nodes.every((node,i)=>node===old.nodes[i]);
+  }),true,"Escape restores original token spans and text nodes by identity");
+  await removeHighlightFixture();
+
+  // Reopening identical Markdown exercises the sanitized cache plus fence sidecar.
+  await mountHighlightFixture({kind:"markdown",value:highlightCases.map(([language,code])=>"```"+language+"\n"+code+"```").join("\n\n")});
+  assert.deepEqual(await reader.locator("pre code").allTextContents(),highlightCases.map(([,code])=>code));
+  assert.ok(await reader.locator("pre code").first().locator(".lsp-code-keyword").count(),"cache hit retains trusted fence metadata");
+  await presentationPage.setViewportSize({width:390,height:844});
+  assert.equal(await reader.evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth+1),true,"highlighted code does not expand narrow dialog");
+  await presentationPage.screenshot({path:"evidence/document-reader-highlight-narrow.png"});
+  await presentationPage.emulateMedia({forcedColors:"active"});
+  const forcedKeyword=reader.locator("pre code").first().locator(".lsp-code-keyword").first();
+  await forcedKeyword.scrollIntoViewIfNeeded();
+  assert.equal(await forcedKeyword.isVisible(),true);
+  assert.equal(await forcedKeyword.evaluate(node=>matchMedia("(forced-colors: active)").matches&&getComputedStyle(node).forcedColorAdjust!=="none"&&getComputedStyle(node).opacity!=="0"),true,"tokens remain visible and allow the system high-contrast palette");
+  await presentationPage.screenshot({path:"evidence/document-reader-highlight-forced-colors.png"});
+  await presentationPage.emulateMedia({forcedColors:"none"});
+  await presentationPage.setViewportSize({width:1200,height:800});
+  await removeHighlightFixture();
+
+  const legacyHighlightText='fn legacy_probe() {\n\tlet label = "中文 😀";\n}\n';
+  await mountHighlightFixture([{language:"RuSt",value:legacyHighlightText},{language:"not-a-language",value:legacyHighlightText}],true);
+  assert.deepEqual(await reader.locator("pre code").allTextContents(),[legacyHighlightText,legacyHighlightText],"legacy MarkedString preserves tabs, Unicode and line endings");
+  assert.ok(await reader.locator("pre code").first().locator(".lsp-code-keyword").count(),"legacy language alias receives real parser tokens");
+  assert.equal(await reader.locator("pre code").nth(1).locator("span").count(),0,"unknown legacy label stays plain");
+  await removeHighlightFixture();
+
+  const largeHighlightCode='// large code stays complete\n'+"let repeated = 1;\n".repeat(700)+"// HIGHLIGHT_FALLBACK_TAIL\n";
+  await mountHighlightFixture({kind:"markdown",value:"```rust\n"+largeHighlightCode+"```"});
+  assert.equal(await reader.locator("pre code").textContent(),largeHighlightCode);
+  assert.equal(await reader.locator("pre code span").count(),0,"oversized code skips optional highlighting");
+  assert.equal(await reader.locator(".lsp-document-limit").count(),0,"highlight limit does not truncate accepted documentation");
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
+  await readerFind.fill("HIGHLIGHT_FALLBACK_TAIL");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
+  await reader.locator(".lsp-reader-search-match").waitFor({state:"visible"});
+  await readerFind.press("Escape");
+  assert.equal(await reader.locator("pre code").textContent(),largeHighlightCode);
+  await removeHighlightFixture();
+
+  const markerValidation=await presentationPage.evaluate(async()=>{
+    const {collectCodeFences,highlightDocumentCode}=await import("/src/document-code-highlight.ts");
+    const {CODE_MARKER}=await import("/src/document-code-model.ts");
+    const section=document.createElement("div"),id="f-"+"a".repeat(32)+"-0",fence={id,part:0,language:"rust",text:"fn x() {}\n"};
+    section.innerHTML='<pre><code class="lsp-code-keyword" '+CODE_MARKER+'="'+id+'">spoof</code></pre>';
+    const wrong=collectCodeFences([section],[fence]).length,remaining=section.querySelectorAll("["+CODE_MARKER+"]").length;
+    section.replaceChildren();
+    for(let i=0;i<2;i++){const pre=document.createElement("pre"),code=document.createElement("code");code.setAttribute(CODE_MARKER,id);code.textContent=fence.text;pre.append(code);section.append(pre);}
+    const duplicate=collectCodeFences([section],[fence]).length;
+    const dom=document.createElement("div"),code=document.createElement("code");code.textContent=fence.text;dom.append(code);
+    const frag=document.createDocumentFragment();for(let i=0;i<28001;i++)frag.append(document.createElement("br"));dom.append(frag);
+    await highlightDocumentCode(dom,[{...fence,node:code}]);
+    return {wrong,remaining,duplicate,text:code.textContent,spans:code.children.length};
+  });
+  assert.deepEqual(markerValidation,{wrong:0,remaining:0,duplicate:0,text:"fn x() {}\n",spans:0},"untrusted/duplicate markers rejected; node budget preserves plain code");
+  const denseHighlightCode="let x=1;\n".repeat(600);
+  await mountHighlightFixture({kind:"markdown",value:"\`\`\`rust\n"+denseHighlightCode+"\`\`\`"});
+  assert.equal(await reader.locator("pre code").textContent(),denseHighlightCode);
+  assert.equal(await reader.locator("pre code span").count(),0,"token budget never produces partial highlighted code");
+  await removeHighlightFixture();
+
+  // Deterministic close before optional worker delivery. Close in the same browser
+  // turn as postMessage, so a short fallback timeout cannot win this regression.
+  const highlightRace=await presentationPage.evaluate(async()=>{
+    const {renderDocumentation}=await import("/src/lsp-documentation.ts");
+    const NativeWorker=window.Worker,owner=new AbortController(),host=document.createElement("div");
+    const before=window.__presentation.view().state.doc.toString();document.body.append(host);
+    let held,lateHandler;
+    window.Worker=class {
+      constructor(url,options){
+        if(!String(url).includes("document-code.worker"))return new NativeWorker(url,options);
+        held=this;this.terminated=0;
+      }
+      postMessage(message){
+        this.message=message;lateHandler=this.onmessage;
+        document.querySelector('.lsp-document-reader [aria-label="关闭文档"]').click();
+      }
+      terminate(){this.terminated++;}
+    };
+    try{
+      host.append(await renderDocumentation({language:"rust",value:"fn race_probe() { let answer = 42; }"},true,owner.signal));
+      host.querySelector(".lsp-document-expand").click();
+      await Promise.resolve();await Promise.resolve();
+      if(!held)throw Error("Expected optional highlight worker");
+      const candidate=held.message.candidates[0];
+      lateHandler({data:{highlights:[{id:candidate.id,ranges:[{from:0,to:2,token:"keyword"}]}]}});
+      await Promise.resolve();await Promise.resolve();
+      return {terminated:held.terminated,readers:document.querySelectorAll(".lsp-document-reader").length,unchanged:window.__presentation.view().state.doc.toString()===before};
+    }finally{window.Worker=NativeWorker;owner.abort();host.remove();}
+  });
+  assert.deepEqual(highlightRace,{terminated:1,readers:0,unchanged:true},"late syntax reply cannot revive closed reader or change source");
+  // Isolated failure-path fixtures only: timeout, worker error, and invalid ranges
+  // all preserve plain content and immediately release the single optional slot.
+  const highlightFallbacks=await presentationPage.evaluate(async()=>{
+    const {renderDocumentation}=await import("/src/lsp-documentation.ts");
+    const NativeWorker=window.Worker,records=[];
+    let mode="timeout";
+    window.Worker=class {
+      constructor(url,options){
+        if(!String(url).includes("document-code.worker"))return new NativeWorker(url,options);
+        this.mode=mode;this.terminated=0;records.push(this);
+      }
+      postMessage({candidates}){
+        const candidate=candidates[0];
+        if(this.mode==="timeout")return;
+        queueMicrotask(()=>{
+          if(this.mode==="error"){this.onerror?.(new Event("error"));return;}
+          const ranges=this.mode==="malformed"?[{from:0,to:candidate.text.length+1,token:"keyword"}]:[{from:0,to:2,token:"keyword"}];
+          this.onmessage?.({data:{highlights:[{id:candidate.id,ranges}]}});
+        });
+      }
+      terminate(){this.terminated++;}
+    };
+    try{
+      const results=[],value={language:"rust",value:'fn fallback_probe() { let label = "😀"; }'};
+      for(const failure of ["timeout","error","malformed"]){
+        mode=failure;
+        const plain=await renderDocumentation(value,true,undefined,{expanded:true});
+        mode="success";
+        const recovered=await renderDocumentation(value,true,undefined,{expanded:true});
+        results.push({failure,text:plain.querySelector("code").textContent,plain:plain.querySelectorAll("code span").length===0,recovered:recovered.querySelector(".lsp-code-keyword")?.textContent});
+      }
+      return {results,terminated:records.map(worker=>worker.terminated)};
+    }finally{window.Worker=NativeWorker;}
+  });
+  assert.deepEqual(highlightFallbacks.results,["timeout","error","malformed"].map(failure=>({failure,text:'fn fallback_probe() { let label = "😀"; }',plain:true,recovered:"fn"})));
+  assert.deepEqual(highlightFallbacks.terminated,[1,1,1,1,1,1],"every fallback and recovery worker terminates exactly once");
+  await writeFile("evidence/DOCUMENT_CODE_HIGHLIGHT_RESULT.txt","PASS: real parser workers for Rust/Python/Go/C/C++/Java; exact code text, visibly colored keywords, unknown/untagged plain fallback, inert HTML-like code, search across token boundaries with original-node restoration, oversized-code tail search, and close-before-late-reply ownership. Browser fixture only.\n");
+
   // Keyboard reader activation and close during an owned worker's pending parse.
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.docs={kind:"markdown",value:"**Reader race**\n\n"+"bounded document ".repeat(2400)+"END_OF_RACE_DOCUMENT"};});
   await presentationCode.press("Control+Space");

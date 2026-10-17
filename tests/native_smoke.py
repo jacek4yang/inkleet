@@ -1213,6 +1213,64 @@ try:
             cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-completion","actions":keys}]})
             wait_for(lambda: member in text(".cm-tooltip-autocomplete"),f"real {group} member completion",seconds=90)
             screenshot(group+"-completion-native.png")
+            # Insert immediately after screenshot(group+"-completion-native.png").
+            # This observes genuine worker inputs; it never supplies LSP/doc replies.
+            if group=="rust":
+                wait_for(lambda:element(".cm-completionInfo .lsp-document-expand"),"real Rust completion documentation resolved",seconds=30)
+                cmd("POST","/execute/sync",{"script":r"""
+                  window.__nativeHighlightTrace=[];
+                  window.__nativeHighlightWorker=window.Worker;
+                  window.Worker=class extends window.__nativeHighlightWorker {
+                    constructor(url,options){super(url,options);this.__code=String(url).includes('document-code.worker');}
+                    postMessage(value,...rest){
+                      if(this.__code&&Array.isArray(value?.candidates))window.__nativeHighlightTrace.push(...value.candidates.map(({id,language,text})=>({id,language,text})));
+                      return super.postMessage(value,...rest);
+                    }
+                  };
+                ""","args":[]})
+                try:
+                    subprocess.run(["xdotool","key","--clearmodifiers","alt+Return"],check=True)
+                    wait_for(lambda:element(".lsp-document-reader[open]"),"genuine Rust documentation reader")
+                    wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-body')}/attribute/aria-busy")=="false","Rust reader finished optional syntax work")
+                    trace=cmd("POST","/execute/sync",{"script":"return window.__nativeHighlightTrace;","args":[]})
+                    (evidence/"RUST_DOCUMENT_CODE_NATIVE_TRACE.json").write_text(json.dumps(trace,ensure_ascii=False,indent=2))
+                    eligible=[item for item in trace if item["language"]=="rust"]
+                    if not eligible:
+                        (evidence/"RUST_DOCUMENT_CODE_NATIVE_RESULT.txt").write_text("UNVERIFIED: genuine selected Rust completion yielded no eligible language-tagged code block. Browser fixtures separately cover syntax highlighting. No native highlighting pass claimed.\n")
+                    else:
+                        result=cmd("POST","/execute/sync",{"script":r"""
+                          const candidates=window.__nativeHighlightTrace.filter(x=>x.language==='rust');
+                          const blocks=[...document.querySelectorAll('.lsp-reader-body pre code')];
+                          const code=blocks.find(node=>candidates.some(c=>c.text===node.textContent)&&node.querySelector('.lsp-code-keyword'));
+                          if(!code)return null;
+                          const token=code.querySelector('.lsp-code-keyword');
+                          window.__nativeHighlightCode=code;window.__nativeHighlightText=code.textContent;
+                          const walker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];let node;
+                          while(node=walker.nextNode())nodes.push(node);window.__nativeHighlightNodes=nodes;
+                          const at=code.textContent.indexOf(token.textContent);
+                          const query=code.textContent.slice(at).split('\n')[0].slice(0,100);
+                          return {query,painted:getComputedStyle(token).color!==getComputedStyle(code).color};
+                        ""","args":[]})
+                        assert result and result["painted"],"genuine eligible Rust fence must retain exact text and visible keyword color"
+                        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+                        fill(".lsp-reader-find input",result["query"])
+                        wait_for(lambda:cmd("POST","/execute/sync",{"script":"return document.querySelectorAll('.lsp-reader-search-match').length>1;","args":[]}),"native query crosses real syntax-token boundaries")
+                        assert source_text(code)==code_text,"native syntax search preserves solution"
+                        screenshot("rust-document-code-highlight-native.png")
+                        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+                        wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-find')}/property/hidden")==True,"native Escape hides syntax search")
+                        assert cmd("POST","/execute/sync",{"script":r"""
+                          const code=window.__nativeHighlightCode,walker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];let node;
+                          while(node=walker.nextNode())nodes.push(node);
+                          return code.isConnected&&code.textContent===window.__nativeHighlightText&&nodes.length===window.__nativeHighlightNodes.length&&nodes.every((node,i)=>node===window.__nativeHighlightNodes[i]);
+                        ""","args":[]}),"native Escape restores syntax and text-node identity"
+                        (evidence/"RUST_DOCUMENT_CODE_NATIVE_RESULT.txt").write_text("PASS: genuine rust-analyzer completion fenced-code input, exact accepted code text and visible keyword color, native cross-token search and Escape node restoration, unchanged solution.\n")
+                    subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+                    wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-document-reader"}),"native syntax reader closes")
+                    assert source_text(code)==code_text,"native syntax reader preserves source on close"
+                finally:
+                    cmd("POST","/execute/sync",{"script":"window.Worker=window.__nativeHighlightWorker;delete window.__nativeHighlightWorker;","args":[]})
+
             keys=[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
             for _ in range(code_text.index(definition_word)+1): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
             keys += [{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}]
