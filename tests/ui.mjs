@@ -1535,7 +1535,7 @@ try {
   // Attribute synchronous input work separately from display-frame scheduling.
   // These are authored test documents and mocked IPC, never live user code.
   const inputCosts=[],inputProbeText=" // phase probe 01234567890123456789";
-  for(const lines of [50,1000,10000]){
+  for(const {lines,warm} of [{lines:50,warm:false},{lines:1000,warm:false},{lines:10000,warm:false},{lines:10000,warm:true}]){
     const source=Array.from({length:lines},(_,i)=>"// input cost row "+i+": authored fixture").join("\n");
     const inputEditor=runPage.getByRole("textbox",{name:"代码编辑器",exact:true});
     await inputEditor.click();await inputEditor.press("Control+a");
@@ -1552,6 +1552,7 @@ try {
     });
     let sample;
     try{
+      if(warm)await runPage.waitForFunction(()=>window.__inputCostProbe.ready(),{},{timeout:30000});
       await inputEditor.pressSequentially(inputProbeText,{delay:20});
       await runPage.waitForFunction(count=>window.__inputCostProbe.read().length===count,inputProbeText.length);
       sample=await runPage.evaluate(async()=>{
@@ -1567,7 +1568,7 @@ try {
       const values=sample.phases.map(item=>item[field]).sort((a,b)=>a-b);
       return {p50:values[Math.floor(values.length*.5)],p95:values[Math.floor(values.length*.95)],max:values.at(-1)};
     };
-    inputCosts.push({lines,initialCharacters:source.length,inputCount:sample.phases.length,appCommits:sample.appCommits,checkpointEnqueues:sample.checkpointEnqueues,updateMs:stats("updateMs"),snapshotMs:stats("snapshotMs"),onChangeMs:stats("onChangeMs"),inputToRafMs:stats("inputToRafMs"),samples:sample.phases});
+    inputCosts.push({lines,warm,initialCharacters:source.length,inputCount:sample.phases.length,appCommits:sample.appCommits,checkpointEnqueues:sample.checkpointEnqueues,updateMs:stats("updateMs"),snapshotMs:stats("snapshotMs"),onChangeMs:stats("onChangeMs"),inputToRafMs:stats("inputToRafMs"),samples:sample.phases});
   }
   await writeFile("evidence/EDITOR_INPUT_COST.json",JSON.stringify({
     environment:"GitHub Actions headless Chromium development React; actual App; mocked IPC; language service intentionally absent",

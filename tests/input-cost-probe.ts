@@ -1,5 +1,6 @@
 import {EditorView} from "@codemirror/view";
-type Sample={updateMs:number;snapshotMs:number;onChangeMs:number;updates:number;inputToRafMs:number};
+import {syntaxTreeAvailable,syntaxParserRunning} from "@codemirror/language";
+type Sample={parsedBefore:boolean;parsedAfter:boolean;updateMs:number;snapshotMs:number;onChangeMs:number;updates:number;inputToRafMs:number};
 declare global{interface Window{__inputCostMeasure?:<T>(phase:"snapshot"|"onChange",work:()=>T)=>T;}}
 /** Test-only synchronous phase probe. Nested phases are included in updateMs. */
 export function inputCostProbe(parent:HTMLElement){
@@ -20,17 +21,18 @@ export function inputCostProbe(parent:HTMLElement){
  const input=(event:Event)=>{
   const typed=event as InputEvent;
   if(typed.inputType!=="insertText"||!view.contentDOM.contains(typed.target as Node))return;
-  const sample:Sample={updateMs:0,snapshotMs:0,onChangeMs:0,updates:0,inputToRafMs:0},start=performance.now();
+  const sample:Sample={parsedBefore:syntaxTreeAvailable(view.state,view.state.doc.length),parsedAfter:false,updateMs:0,snapshotMs:0,onChangeMs:0,updates:0,inputToRafMs:0},start=performance.now();
   current=sample;
   const frame=requestAnimationFrame(()=>{
    frames.delete(frame);if(closed)return;
-   sample.inputToRafMs=performance.now()-start;samples.push(sample);if(current===sample)current=null;
+   sample.inputToRafMs=performance.now()-start;sample.parsedAfter=syntaxTreeAvailable(view.state,view.state.doc.length);samples.push(sample);if(current===sample)current=null;
   });
   frames.add(frame);
  };
  document.addEventListener("beforeinput",input,true);
  return {
   read:()=>samples.map(sample=>({...sample})),
+  ready:()=>syntaxTreeAvailable(view.state,view.state.doc.length)&&!syntaxParserRunning(view),
   dispose(){
    closed=true;current=null;document.removeEventListener("beforeinput",input,true);
    for(const frame of frames)cancelAnimationFrame(frame);frames.clear();
