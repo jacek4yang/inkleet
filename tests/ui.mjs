@@ -2557,14 +2557,14 @@ try {
   await sessionPage.evaluate(async text=>{
     const {mountSessionEditor}=await import("/tests/session-cache-harness.tsx");
     window.__sessionCache=mountSessionEditor(document.querySelector("#editor"));
-    window.__sessionCache.open("retained",text);
+    await window.__sessionCache.open("retained",text);
   },sessionOriginal);
   const sessionCode=sessionPage.getByRole("textbox",{name:"会话代码",exact:true});
   await sessionCode.click();await sessionCode.press("Control+End");await sessionCode.press("End");
   await sessionCode.press("X");
   await sessionPage.waitForFunction(()=>window.__sessionCache.inspect().top>0&&window.__sessionCache.inspect().text.endsWith("X"));
   const sessionBefore=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
-  await sessionPage.evaluate(()=>{window.__sessionCache.open("other","other = 1");window.__sessionCache.open("retained");});
+  await sessionPage.evaluate(async()=>{await window.__sessionCache.open("other","other = 1");await window.__sessionCache.open("retained");});
   await sessionPage.waitForFunction(top=>Math.abs(window.__sessionCache.inspect().top-top)<2,sessionBefore.top);
   const sessionRestored=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
   assert.equal(sessionRestored.text,sessionOriginal+"X");
@@ -2575,16 +2575,16 @@ try {
   assert.equal((await sessionPage.evaluate(()=>window.__sessionCache.inspect())).text,sessionOriginal);
   await sessionCode.press("Control+Shift+z");
   assert.equal((await sessionPage.evaluate(()=>window.__sessionCache.inspect())).text,sessionOriginal+"X");
-  await sessionPage.evaluate(()=>{window.__sessionCache.open("other");window.__sessionCache.open("retained","external = 42");});
+  await sessionPage.evaluate(async()=>{await window.__sessionCache.open("other");await window.__sessionCache.open("retained","external = 42");});
   const sessionExternal=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
   assert.equal(sessionExternal.text,"external = 42");assert.equal(sessionExternal.undo,0,"external content rejects old undo state");
   await sessionPage.evaluate(()=>window.__sessionCache.open("evicted","draft = 1"));
   await sessionCode.focus();await sessionCode.press("Control+End");await sessionCode.press("X");
   const sessionEvictBefore=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
   assert.equal(sessionEvictBefore.text,"draft = 1X");assert.ok(sessionEvictBefore.undo>0);
-  await sessionPage.evaluate(()=>{
-    for(let i=0;i<13;i++)window.__sessionCache.open("inactive-"+i,"value = "+i);
-    window.__sessionCache.open("evicted");
+  await sessionPage.evaluate(async()=>{
+    for(let i=0;i<13;i++)await window.__sessionCache.open("inactive-"+i,"value = "+i);
+    await window.__sessionCache.open("evicted");
   });
   const sessionEvicted=await sessionPage.evaluate(()=>window.__sessionCache.inspect());
   assert.equal(sessionEvicted.text,"draft = 1X");assert.equal(sessionEvicted.draft,"draft = 1X","eviction does not discard the canonical draft");
