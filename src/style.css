@@ -631,3 +631,13 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 .source-target-picker button svg{grid-column:1;grid-row:1/3;align-self:center;color:var(--muted)}
 .source-target-picker button strong,.source-target-picker button span{grid-column:2}
 .source-target-picker button:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+
+/* Reader-local search stays hidden until requested; no document-wide find UI. */
+.lsp-reader-find[hidden]{display:none}
+.lsp-reader-find{display:flex;align-items:center;gap:5px;padding:5px 10px;border-bottom:1px solid var(--line);flex:0 0 auto;min-width:0}
+.lsp-reader-find input{flex:1;min-width:0;width:0;padding:4px 7px;border:1px solid var(--line);border-radius:4px;background:var(--surface-editor);color:var(--ink);font:12px/1.5 var(--font-mono)}
+.lsp-reader-find-count{flex:0 0 auto;color:var(--muted);font:11px/1.5 var(--font-mono);white-space:nowrap}
+.lsp-reader-find button,.lsp-reader-find-trigger{display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px;padding:0;border:0;color:var(--muted);background:transparent}
+.lsp-reader-find button:disabled{opacity:.35}
+.lsp-reader-search-match{background:var(--selection);color:inherit;outline:1px solid var(--accent);border-radius:1px}
+@media(forced-colors:active){.lsp-reader-search-match{background:Highlight;color:HighlightText;outline:1px solid Highlight}}
