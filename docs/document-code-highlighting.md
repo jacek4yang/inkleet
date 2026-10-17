@@ -30,7 +30,7 @@ No syntax parsing runs on the main thread. The detached DOM is decorated once, t
 5. Open long blocks and many fences; text and full-tail search remain available even when color budgets are exceeded.
 6. Close while the optional worker is held, deliver a late reply, then reopen. No old content or focus takeover.
 7. Exercise cache hits, malformed ranges, worker error/timeout, narrow viewport and forced colors.
-8. Native Linux uses genuine Rust completion documentation when it contains eligible fences; missing eligible input is recorded as unverified, never a native highlighting pass.
+8. Native Linux checks the genuine Rust Vec::push example against the full reader, verifies visible token colors, then searches across token nodes and restores their identities. Missing example or colors is a failure, not a native pass. No worker or server responses are substituted.
 
 ## Verification
 Pending GitHub Actions on the submitted commit. Browser results cannot replace native or cross-platform qualification. Windows/macOS/Android, native Chinese IME and live Chinese-site account flows are not covered by this checkpoint. No package, release or merge is authorized by these tests.
