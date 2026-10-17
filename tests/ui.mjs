@@ -3636,7 +3636,7 @@ try {
   await readerFind.press("Shift+Enter");assert.equal(await reader.locator(".lsp-reader-find-count").innerText(),"1 / 2");
   await readerFind.fill("HashMapHash");
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="0 / 0");
-  await readerFind.fill("alphabeta");
+  await readerFind.fill("alphabeta");await readerFind.press("Enter");
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="0 / 0");
   await readerFind.fill("inline space");
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
@@ -3701,6 +3701,37 @@ try {
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-body")?.textContent.includes("END_OF_RACE_DOCUMENT"));
   await presentationPage.keyboard.press("Escape");
   await reader.waitFor({state:"hidden"});
+
+  // Query entered while the expanded worker is held applies on successful mount.
+  await presentationPage.evaluate(()=>{window.__presentation.docs={kind:"markdown",value:"Reader loading\n\n"+"bounded ".repeat(5000)+" END_OF_READY_DOCUMENT"};});
+  await presentationCode.press("Control+Space");
+  await presentationPage.locator(".cm-completionInfo .lsp-document-expand").waitFor();
+  const waitingSearch=await presentationPage.evaluate(()=>{
+    const NativeWorker=window.Worker;
+    window.Worker=class{constructor(){this.terminated=0;window.__readyReaderWorker=this;}postMessage(value){this.parts=value.parts;}terminate(){this.terminated++;}};
+    try{
+      document.querySelector(".cm-completionInfo .lsp-document-expand").click();
+      const dialog=document.querySelector(".lsp-document-reader"),body=dialog.querySelector(".lsp-reader-body");
+      body.dispatchEvent(new KeyboardEvent("keydown",{key:"f",ctrlKey:true,bubbles:true,cancelable:true}));
+      const input=dialog.querySelector(".lsp-reader-find input");input.value="END_OF_READY_DOCUMENT";
+      input.dispatchEvent(new InputEvent("input",{bubbles:true}));
+      input.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true}));
+      const pending={busy:body.getAttribute("aria-busy"),count:dialog.querySelector(".lsp-reader-find-count").textContent,marks:dialog.querySelectorAll(".lsp-reader-search-match").length,focused:document.activeElement===input};
+      const worker=window.__readyReaderWorker;
+      worker.onmessage({data:{html:worker.parts.map(part=>{if(part.kind!=="markdown")return null;const p=document.createElement("p");p.textContent=part.text;return p.outerHTML;})}});
+      return pending;
+    }finally{window.Worker=NativeWorker;}
+  });
+  assert.deepEqual(waitingSearch,{busy:"true",count:"载入中",marks:0,focused:true});
+  await reader.locator(".lsp-reader-search-match").filter({hasText:"END_OF_READY_DOCUMENT"}).waitFor();
+  assert.equal(await readerFind.inputValue(),"END_OF_READY_DOCUMENT");
+  assert.equal(await reader.locator(".lsp-reader-find-count").innerText(),"1 / 1");
+  assert.equal(await readerFind.evaluate(input=>input===document.activeElement),true);
+  assert.equal(await presentationPage.evaluate(()=>window.__readyReaderWorker.terminated),1);
+  await readerFind.press("Escape");assert.equal(await reader.isVisible(),true);
+  await presentationPage.keyboard.press("Escape");await reader.waitFor({state:"hidden"});
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
+
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.detailOnly=true;s.resolvedDetail="fn resolved_signature("+("parameter: VeryLongType, ".repeat(40))+") -> END_OF_RESOLVED_DETAIL";});
   await presentationCode.press("Control+Space");
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-completion-documentation")?.textContent.includes("END_OF_RESOLVED_DETAIL"));
