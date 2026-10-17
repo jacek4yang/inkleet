@@ -3038,6 +3038,23 @@ try {
         }
         const start=s.editStart??(s.indented?2:0),line=s.editLine??0;
         s.item={label:"call",insertTextFormat:s.format,insertTextMode:s.mode,textEdit:{range:{start:{line,character:start},end:{line,character:start+4}},newText:s.source},_inkleetCompletion:1};
+        if(s.admissionProbe){
+          s.item={label:"call",sortText:"99999",insertTextFormat:1,insertTextMode:1,textEdit:{range:{start:{line:0,character:0},end:{line:0,character:4}},newText:"callPlain"},_inkleetCompletion:6000};
+          const count=s.admissionProbe==="input-limit"?4999:300;
+          const rejected=Array.from({length:count},(_,i)=>{
+            const item={...s.item,label:"callRejected"+i,sortText:String(i).padStart(5,"0"),_inkleetCompletion:i+1};
+            if(s.admissionProbe==="invalid-range")item.textEdit={range:{start:{line:0,character:0},end:{line:0,character:0}},newText:"bad"};
+            else if(s.admissionProbe==="missing-token")delete item._inkleetCompletion;
+            else item.insertTextFormat=s.admissionProbe==="disabled-snippets"?2:3;
+            return item;
+          });
+          if(s.admissionProbe==="accepted-limit")return Array.from({length:301},(_,i)=>({...s.item,label:"call"+String(i).padStart(3,"0"),sortText:String(i).padStart(5,"0"),_inkleetCompletion:i+1}));
+          if(s.admissionProbe==="input-limit"){
+            const outside={};Object.defineProperty(outside,"label",{get(){s.outsideAdmissionReads++;return "callOutside";}});
+            return [...rejected,s.item,outside];
+          }
+          return [...rejected,s.item];
+        }
         if(s.capabilityProbe){
           s.item={label:"call",insertTextFormat:1,insertTextMode:1,textEdit:{range:{start:{line:0,character:0},end:{line:0,character:4}},newText:"callPlain"},_inkleetCompletion:1};
           return [s.item,{...s.item,label:"callSnippet",insertTextFormat:2,textEdit:{...s.item.textEdit,newText:"call("+d+"{1:value})"},_inkleetCompletion:2}];
@@ -3060,6 +3077,7 @@ try {
     s.mount=api.mountSnippetEditor(document.querySelector("#editor"),s);
     s.view=()=>api.EditorView.findFromDOM(document.querySelector(".cm-editor"));
     s.reset=(source="call("+d+"{1:value}, "+d+"1)"+d+"0",indented=false,mode=1,format=2)=>{
+      s.admissionProbe=null;s.outsideAdmissionReads=0;
       s.omitMode=false;s.editLine=0;s.editStart=null;s.requests=[];s.retryProbe=false;s.noiseServed=0;s.labelOnly=false;s.source=source;s.indented=indented;s.mode=mode;s.format=format;s.omitImports=false;s.deferResolve=false;s.resolveReply=null;s.holdPreparation=false;s.preparedReply=null;
       const v=s.view(),text=indented?"  call":"call";v.dispatch({changes:{from:0,to:v.state.doc.length,insert:text},selection:{anchor:text.length}});v.setTabFocusMode(false);v.focus();
     };
@@ -3081,6 +3099,26 @@ try {
     await snippetLspPage.waitForTimeout(150);await snippetLspCode.press("Enter");
   };
 
+
+  const checkCompletionAdmission=async(kind)=>{
+    await snippetLspPage.evaluate(kind=>{const s=window.__snippetLspTest;s.reset();s.capabilityProbe=false;s.resolveAsSnippet=false;s.admissionProbe=kind;s.statuses=[];},kind);
+    const before=await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return {source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state),preparations:s.prepareCalls};});
+    await snippetLspCode.press("Control+Space");
+    await snippetLspPage.getByRole("option",{name:"call",exact:true}).waitFor();
+    assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.requests.length),1,kind+" admits a usable candidate without a readiness retry");
+    assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.statuses.some(text=>text.includes("正在准备补全"))),false,kind+" never enters readiness backoff");
+    assert.deepEqual(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return {source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state),preparations:s.prepareCalls};}),before,kind+" admission does not edit or prepare snippets");
+    assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.api.currentCompletions(s.view().state).length;}),1,kind+" excludes all rejected prefix entries");
+    if(kind==="input-limit")assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.outsideAdmissionReads),0,"entry 5001 is never inspected");
+    if(kind==="bad-format")await snippetLspPage.screenshot({path:"evidence/completion-rejected-prefix.png"});
+    await snippetLspPage.waitForTimeout(150);await snippetLspCode.press("Enter");
+    await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.value==="import helper\ncallPlain");
+    assert.equal(await snippetLspPage.evaluate(()=>window.__snippetLspTest.prepareCalls),before.preparations,"plain candidate never prepares a snippet");
+    await snippetLspCode.press("Control+z");
+    assert.equal(await snippetLspCode.innerText(),before.source,kind+" completion and import undo atomically");
+    assert.equal(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;return s.api.undoDepth(s.view().state);}),before.undo,kind+" restores the previous undo depth");
+    await snippetLspPage.evaluate(()=>window.__snippetLspTest.admissionProbe=null);
+  };
 
   // Capability belongs to the started session, not to the returned item or editor extension.
   for(const capability of [false,"omitted","true"]){
@@ -3108,6 +3146,7 @@ try {
     await acceptLspSnippet();
     await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("此会话未启用参数补全")));
     assert.deepEqual(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,v=s.view();return {source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state),preparations:s.prepareCalls};}),before,"resolved format2 refusal preserves source, selection, history and preparation count");
+    await checkCompletionAdmission("disabled-snippets");
   }
   await snippetLspPage.evaluate(()=>window.__snippetLspTest.mount.destroy());
   await snippetLspCode.waitFor({state:"hidden"});
@@ -3118,6 +3157,15 @@ try {
   await snippetLspCode.waitFor();
   await snippetLspPage.waitForFunction(()=>window.__snippetLspTest.statuses.some(text=>text.includes("已连接")));
   await writeFile("evidence/COMPLETION_SNIPPET_CAPABILITY_RESULT.txt","PASS: fresh false, missing and malformed capability sessions reject format2 candidates and resolved format2 before preparation; plaintext plus import and undo remain usable. Source, selection and undo depth are unchanged on refusal. Subsequent positive fixture explicitly advertises true. Mocked transport only.\n");
+
+  for(const kind of ["bad-format","invalid-range","missing-token","input-limit"])await checkCompletionAdmission(kind);
+  await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest;s.reset();s.admissionProbe="accepted-limit";});
+  await snippetLspCode.press("Control+Space");
+  await snippetLspPage.getByRole("option",{name:"call000",exact:true}).waitFor();
+  assert.deepEqual(await snippetLspPage.evaluate(()=>{const s=window.__snippetLspTest,items=s.api.currentCompletions(s.view().state);return {count:items.length,first:items[0]?.label,last:items.at(-1)?.label,requests:s.requests.length};}),{count:300,first:"call000",last:"call299",requests:1},"retain ranked first 300 accepted candidates");
+  await snippetLspCode.press("Escape");
+  await snippetLspPage.evaluate(()=>window.__snippetLspTest.admissionProbe=null);
+  await writeFile("evidence/COMPLETION_ADMISSION_RESULT.txt","PASS: rejected prefix entries cannot hide a usable completion; malformed formats, invalid primary ranges, missing resolve tokens and disabled snippet capabilities are covered. Explicit requests use one IPC request, accepted plain completion/import undo atomically, source/selection/history remain untouched during admission, 5000 input and 300 accepted limits remain. Actual CodeEditor keyboard path with mocked LSP.\n");
 
 
   for(const format of [1,2]){

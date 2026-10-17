@@ -171,13 +171,20 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       let items: unknown[] = [], isIncomplete=false;
       const needle = word?.text.toLowerCase() ?? "";
       const requiresResolve=session.completionResolve===true,snippets=advertisedSnippets&&context.state.field(snippetSessionState,false)!==undefined;
-      const admissible=(items:unknown[])=>items.slice(0,5000).filter((item):item is Record<string,any>=>
-        object(item)&&typeof item.label==="string"&&(!needle||String(item.filterText??item.label).toLowerCase().includes(needle))
-      ).sort((a,b)=>String(a.sortText??a.label).localeCompare(String(b.sortText??b.label))).slice(0,300).filter(item=>{
-        if(item.label.length>512||requiresResolve&&(!Number.isSafeInteger(item._inkleetCompletion)||item._inkleetCompletion<=0))return false;
-        const application=completionApplication(doc,item,word?.from??context.pos,context.pos,contextSelection.main,defaultMode);
-        return !!application&&(application.format!==2||snippets);
-      });
+      const admissible=(items:unknown[])=>{
+        const ranked=items.slice(0,5000).filter((item):item is Record<string,any>=>
+          object(item)&&typeof item.label==="string"&&(!needle||String(item.filterText??item.label).toLowerCase().includes(needle))
+        ).sort((a,b)=>String(a.sortText??a.label).localeCompare(String(b.sortText??b.label)));
+        const accepted:Record<string,any>[]=[];
+        for(const item of ranked){
+          if(item.label.length>512||requiresResolve&&(!Number.isSafeInteger(item._inkleetCompletion)||item._inkleetCompletion<=0))continue;
+          const application=completionApplication(doc,item,word?.from??context.pos,context.pos,contextSelection.main,defaultMode);
+          if(!application||application.format===2&&!snippets)continue;
+          accepted.push(item);
+          if(accepted.length===300)break;
+        }
+        return accepted;
+      };
       let candidates:Record<string,any>[]=[];
       for (let attempt = 0; ; attempt++) {
         if(attempt>0&&Date.now()>=deadline)break;
