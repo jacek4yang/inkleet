@@ -639,8 +639,10 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 .lsp-reader-find-count{flex:0 0 auto;color:var(--muted);font:11px/1.5 var(--font-mono);white-space:nowrap}
 .lsp-reader-find button,.lsp-reader-find-trigger{display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px;padding:0;border:0;color:var(--muted);background:transparent}
 .lsp-reader-find button:disabled{opacity:.35}
-.lsp-reader-search-match{background:var(--selection);color:inherit;outline:1px solid var(--accent);border-radius:1px}
-@media(forced-colors:active){.lsp-reader-search-match{background:Highlight;color:HighlightText;outline:1px solid Highlight}}
+/* A result can cross several syntax/text nodes. Flat opaque fill joins those
+   fragments without per-token boxes, text reflow or accumulated alpha seams. */
+.lsp-reader-search-match{background:var(--reader-match-background,#fff4d6);color:inherit;font:inherit;display:inline;vertical-align:baseline;padding:0;margin:0;border:0;outline:0;border-radius:0;box-shadow:none}
+@media(forced-colors:active){.lsp-reader-search-match{background:Highlight;color:HighlightText;forced-color-adjust:none}}
 
 /* Expanded documentation owns these classes; raw Markdown never supplies them. */
 .lsp-document-reader .lsp-code-keyword{color:#80558c}

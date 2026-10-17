@@ -1254,6 +1254,15 @@ try:
                   while(node=allWalker.nextNode())nodes.push(node);
                   window.__nativeHighlightCode=code;window.__nativeHighlightNodes=nodes;
                   window.__nativeHighlightBlocks=blocks;window.__nativeHighlightTexts=blocks.map(node=>node.textContent);
+                  window.__nativeMatchGeometry=()=>{
+                    const root=window.__nativeHighlightCode,origin=root.getBoundingClientRect(),walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),rects=[];let node;
+                    while(node=walker.nextNode())for(let i=0;i<node.length;i++){
+                      const range=document.createRange();range.setStart(node,i);range.setEnd(node,i+1);
+                      const r=range.getBoundingClientRect();rects.push([r.left-origin.left,r.top-origin.top,r.width,r.height]);
+                    }
+                    return {text:root.textContent,rects};
+                  };
+                  window.__nativeBeforeMatchGeometry=window.__nativeMatchGeometry();
                   const token=code.querySelector('.lsp-code-keyword'),style=getComputedStyle(token);
                   return {query,painted:style.color!==getComputedStyle(code).color&&style.display!=='none'&&style.visibility==='visible'};
                 ""","args":[expected_rust_example]})
@@ -1267,6 +1276,26 @@ try:
                     window.__nativeHighlightBlocks.every((block,i)=>block.textContent===window.__nativeHighlightTexts[i]);
                 ""","args":[]}),"native query crosses real syntax-token boundaries and preserves all code text")
                 assert source_text(code)==code_text,"native syntax search preserves solution"
+                match_style=cmd("POST","/execute/sync",{"script":r"""
+                  const marks=[...window.__nativeHighlightCode.querySelectorAll('.lsp-reader-search-match')];
+                  return marks.map(mark=>{
+                    const s=getComputedStyle(mark),p=getComputedStyle(mark.parentElement),r=mark.getBoundingClientRect();
+                    return {background:s.backgroundColor,color:s.color,parentColor:p.color,left:r.left,right:r.right,top:r.top,
+                      flat:s.outlineStyle==='none'&&s.boxShadow==='none'&&['Top','Right','Bottom','Left'].every(side=>parseFloat(s['border'+side+'Width'])===0&&parseFloat(s['padding'+side])===0&&parseFloat(s['margin'+side])===0)&&['TopLeft','TopRight','BottomLeft','BottomRight'].every(corner=>parseFloat(s['border'+corner+'Radius'])===0),
+                      font:['fontFamily','fontSize','fontStyle','fontWeight','lineHeight','letterSpacing'].every(key=>s[key]===p[key])};
+                  });
+                ""","args":[]})
+                assert len(match_style)>1,"native style evidence covers several real token fragments"
+                assert len({mark["background"] for mark in match_style})==1,"native match fragments share one fill"
+                assert all(mark["flat"] and mark["font"] and mark["color"]==mark["parentColor"] and mark["background"].startswith("rgb(") for mark in match_style),"native marks preserve syntax foregrounds without edges or spacing"
+                assert all(abs(right["left"]-left["right"])<0.75 for left,right in zip(match_style,match_style[1:])),"native single-line match fragments touch continuously"
+                (evidence/"RUST_DOCUMENT_MATCH_STYLE_NATIVE.json").write_text(json.dumps(match_style,ensure_ascii=False,indent=2))
+                screenshot("rust-document-search-flat-fill-native.png")
+                assert cmd("POST","/execute/sync",{"script":r"""
+                  const before=window.__nativeBeforeMatchGeometry,after=window.__nativeMatchGeometry();
+                  return after.text===before.text&&after.rects.length===before.rects.length&&
+                    after.rects.every((r,i)=>r.every((v,j)=>Math.abs(v-before.rects[i][j])<0.15));
+                ""","args":[]}),"native search preserves every character's layout relative to its code block"
                 screenshot("rust-document-code-highlight-native.png")
                 subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
                 wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-find')}/property/hidden")==True,"native Escape hides syntax search")
@@ -1732,3 +1761,4 @@ finally:
     stop()
     driver.terminate()
     driver.wait(timeout=10)
+

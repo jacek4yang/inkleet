@@ -3748,7 +3748,7 @@ try {
     await reader.getByRole("button",{name:"关闭文档",exact:true}).click();
     await presentationPage.evaluate(()=>{window.__highlightFixture.owner.abort();window.__highlightFixture.host.remove();});
   };
-  await mountHighlightFixture({kind:"markdown",value:highlightCases.map(([language,code])=>"```"+language+"\n"+code+"```").join("\n\n")});
+  await mountHighlightFixture({kind:"markdown",value:highlightCases.map(([language,code])=>"```"+language+"\n"+code+"```").join("\n\n")+"\n\nA wrapped **reader search** phrase keeps its text and spacing while continuing across several narrow lines of documentation."});
   assert.deepEqual(await reader.locator("pre code").allTextContents(),highlightCases.map(([,code])=>code),"highlighting preserves every code point and newline");
   for(let i=0;i<6;i++){
     const code=reader.locator("pre code").nth(i),keyword=code.locator(".lsp-code-keyword").first();
@@ -3761,6 +3761,46 @@ try {
   assert.equal(await reader.locator("img,script,iframe,a").count(),0,"code resembling HTML stays inert");
   assert.equal(await presentationPage.evaluate(()=>window.__highlightUnsafe??null),null);
   assert.deepEqual(externalDocRequests,[]);
+  // Compare per-character geometry relative to its block so search scrolling is harmless.
+  const readerTextGeometry = root => {
+    const origin=root.getBoundingClientRect(),walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),rects=[];let node;
+    while(node=walker.nextNode())for(let i=0;i<node.length;i++){
+      const range=document.createRange();range.setStart(node,i);range.setEnd(node,i+1);
+      const r=range.getBoundingClientRect();rects.push([r.left-origin.left,r.top-origin.top,r.width,r.height]);
+    }
+    return {text:root.textContent,rects};
+  };
+  const assertReaderGeometry = (before,after) => {
+    assert.equal(after.text,before.text,"search preserves every character");
+    assert.equal(after.rects.length,before.rects.length);
+    assert.ok(after.rects.every((r,i)=>r.every((v,j)=>Math.abs(v-before.rects[i][j])<0.15)),"search does not move or resize text");
+  };
+  const assertFlatReaderMarks = async (forced=false) => {
+    const styles=await reader.locator('.lsp-reader-search-match').evaluateAll((marks,forced)=>{
+      const probe=document.createElement('span');probe.style.cssText='background:Highlight;color:HighlightText;forced-color-adjust:none';document.body.append(probe);
+      const system=getComputedStyle(probe),palette={background:system.backgroundColor,color:system.color};
+      const result=marks.map(mark=>{
+        const s=getComputedStyle(mark),parent=getComputedStyle(mark.parentElement);
+        return {background:s.backgroundColor,color:s.color,parentColor:parent.color,
+          flat:s.outlineStyle==='none'&&s.boxShadow==='none'&&['Top','Right','Bottom','Left'].every(side=>parseFloat(s['border'+side+'Width'])===0&&parseFloat(s['padding'+side])===0&&parseFloat(s['margin'+side])===0)&&['TopLeft','TopRight','BottomLeft','BottomRight'].every(corner=>parseFloat(s['border'+corner+'Radius'])===0),
+          font:['fontFamily','fontSize','fontStyle','fontWeight','lineHeight','letterSpacing'].every(key=>s[key]===parent[key]),
+          forced:s.forcedColorAdjust==='none'&&s.backgroundColor===palette.background&&s.color===palette.color,
+          visible:s.visibility==='visible'&&s.display!=='none'&&s.opacity!=='0'};
+      });probe.remove();return result;
+    },forced);
+    assert.ok(styles.length>1,"active match spans multiple text/token fragments");
+    assert.equal(new Set(styles.map(s=>s.background)).size,1,"all fragments share a continuous fill");
+    assert.ok(styles.every(s=>s.flat&&s.font&&s.visible),"no per-fragment edges or font/spacing changes");
+    assert.ok(styles.every(s=>s.background!=="rgba(0, 0, 0, 0)"&&s.background!=="transparent"),"active match has a visible fill");
+    if(forced)assert.ok(styles.every(s=>s.forced&&s.background!==s.color),"forced colors use contrasting Highlight / HighlightText");
+    else {
+      assert.ok(styles.every(s=>/^rgb\(/.test(s.background)),"normal-mode match fill is opaque");
+      assert.ok(styles.every(s=>s.color===s.parentColor),"search retains each syntax or prose foreground");
+    }
+  };
+  const firstHighlightCode=reader.locator('pre code').first();
+  const beforeSearchGeometry=await firstHighlightCode.evaluate(readerTextGeometry);
+  const beforeSearchSource=await presentationCode.innerText();
   const beforeHighlightSearch=await reader.getByLabel("文档正文",{exact:true}).innerHTML();
   await reader.evaluate(dialog=>{
     const code=dialog.querySelector("pre code"),walker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];let node;
@@ -3772,6 +3812,11 @@ try {
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
   assert.ok(await reader.locator(".lsp-reader-search-match").count()>1,"one search result crosses token and plain-text boundaries");
   assert.equal((await reader.locator(".lsp-reader-search-match").allTextContents()).join(""),"let answer = 42");
+  await assertFlatReaderMarks();
+  assertReaderGeometry(beforeSearchGeometry,await firstHighlightCode.evaluate(readerTextGeometry));
+  assert.equal(await presentationCode.innerText(),beforeSearchSource,"reader match paint preserves solution source");
+  const matchRects=await reader.locator('.lsp-reader-search-match').evaluateAll(marks=>marks.map(mark=>{const r=mark.getBoundingClientRect();return {left:r.left,right:r.right};}));
+  assert.ok(matchRects.every((r,i)=>i===0||Math.abs(r.left-matchRects[i-1].right)<0.75),"single-line token fragments touch without seams");
   await presentationPage.screenshot({path:"evidence/document-reader-highlight-search.png"});
   await readerFind.press("Escape");
   assert.equal(await reader.isVisible(),true);
@@ -3781,20 +3826,54 @@ try {
     while(node=walker.nextNode())nodes.push(node);
     return code===old.code&&nodes.length===old.nodes.length&&nodes.every((node,i)=>node===old.nodes[i]);
   }),true,"Escape restores original token spans and text nodes by identity");
+  // CSS zoom exercises fractional and enlarged layout; it is not OS/browser zoom.
+  for(const zoom of [1.25,2]){
+    await reader.evaluate((node,zoom)=>{node.style.zoom=String(zoom);},zoom);
+    const zoomGeometry=await firstHighlightCode.evaluate(readerTextGeometry);
+    await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
+    await readerFind.fill("let answer = 42");
+    await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
+    await assertFlatReaderMarks();
+    assertReaderGeometry(zoomGeometry,await firstHighlightCode.evaluate(readerTextGeometry));
+    assert.equal(await reader.evaluate(node=>node.scrollWidth<=node.clientWidth+1),true,"zoomed reader has no horizontal overflow");
+    await presentationPage.screenshot({path:`evidence/document-reader-search-css-zoom-${zoom*100}.png`});
+    await readerFind.press("Escape");
+  }
+  await reader.evaluate(node=>node.style.removeProperty('zoom'));
   await removeHighlightFixture();
 
   // Reopening identical Markdown exercises the sanitized cache plus fence sidecar.
-  await mountHighlightFixture({kind:"markdown",value:highlightCases.map(([language,code])=>"```"+language+"\n"+code+"```").join("\n\n")});
+  await mountHighlightFixture({kind:"markdown",value:highlightCases.map(([language,code])=>"```"+language+"\n"+code+"```").join("\n\n")+"\n\nA wrapped **reader search** phrase keeps its text and spacing while continuing across several narrow lines of documentation."});
   assert.deepEqual(await reader.locator("pre code").allTextContents(),highlightCases.map(([,code])=>code));
   assert.ok(await reader.locator("pre code").first().locator(".lsp-code-keyword").count(),"cache hit retains trusted fence metadata");
   await presentationPage.setViewportSize({width:390,height:844});
   assert.equal(await reader.evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth+1),true,"highlighted code does not expand narrow dialog");
   await presentationPage.screenshot({path:"evidence/document-reader-highlight-narrow.png"});
+  const wrappedProse=reader.locator('.lsp-reader-body p').last();
+  const wrappedText=await wrappedProse.textContent();
+  const wrappedGeometry=await wrappedProse.evaluate(readerTextGeometry);
+  assert.ok(new Set(wrappedGeometry.rects.map(r=>Math.round(r[1]))).size>1,"narrow prose genuinely wraps across lines");
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
+  await readerFind.fill(wrappedText);
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
+  await assertFlatReaderMarks();
+  assertReaderGeometry(wrappedGeometry,await wrappedProse.evaluate(readerTextGeometry));
+  assert.equal(await reader.evaluate(node=>node.scrollWidth<=node.clientWidth+1),true,"wrapped match cannot expand the dialog");
+  assert.equal(await wrappedProse.evaluate(node=>node.scrollWidth<=node.clientWidth+1),true,"wrapped match cannot overflow its paragraph");
+  await presentationPage.screenshot({path:"evidence/document-reader-search-wrapped.png"});
+  await readerFind.press("Escape");
   await presentationPage.emulateMedia({forcedColors:"active"});
   const forcedKeyword=reader.locator("pre code").first().locator(".lsp-code-keyword").first();
   await forcedKeyword.scrollIntoViewIfNeeded();
   assert.equal(await forcedKeyword.isVisible(),true);
   assert.equal(await forcedKeyword.evaluate(node=>matchMedia("(forced-colors: active)").matches&&getComputedStyle(node).forcedColorAdjust!=="none"&&getComputedStyle(node).opacity!=="0"),true,"tokens remain visible and allow the system high-contrast palette");
+  await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
+  await readerFind.fill("let answer = 42");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
+  await assertFlatReaderMarks(true);
+  assert.equal(await reader.locator('.lsp-reader-body').evaluate(node=>getComputedStyle(node).forcedColorAdjust),"auto","forced-color override is scoped to active marks");
+  await presentationPage.screenshot({path:"evidence/document-reader-search-forced-colors.png"});
+  await readerFind.press("Escape");
   await presentationPage.screenshot({path:"evidence/document-reader-highlight-forced-colors.png"});
   await presentationPage.emulateMedia({forcedColors:"none"});
   await presentationPage.setViewportSize({width:1200,height:800});
@@ -4238,3 +4317,4 @@ try {
 
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }
+
