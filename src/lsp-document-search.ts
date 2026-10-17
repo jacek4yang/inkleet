@@ -10,10 +10,9 @@ function indexBody(body:HTMLElement):Segment[]|null{
  let node:Node|null;
  while((node=walker.nextNode())){
   if(++nodes>32768)return null;
-  if(node instanceof Element){if(node.tagName==="BR"){owner=null;current=null;}continue;}
+  if(node instanceof Element){if(node.matches(blocks+",br,hr,ul,ol,table,thead,tbody,tfoot,tr")){owner=null;current=null;}continue;}
   if(!(node instanceof Text)||!node.data)continue;
   const block=node.parentElement?.closest(blocks)??body;
-  if(!node.data.trim()&&block.matches(".lsp-document-section")&&!block.matches(".lsp-document-plain")){owner=null;current=null;continue;}
   if(owner!==block||!current){current={text:"",pieces:[]};segments.push(current);owner=block;}
   if((units+=node.length)>524288)return null;
   const from=current.text.length;current.text+=node.data;current.pieces.push({node,from,to:current.text.length});
@@ -83,7 +82,7 @@ export function documentReaderSearch(dialog:HTMLDialogElement,body:HTMLElement,h
  }
  const schedule=()=>{clearTimeout(timer);if(!composing)timer=setTimeout(()=>render(0,true),100);};
  const open=()=>{if(disposed)return;bar.hidden=false;input.focus();input.select();render();};
- const hide=()=>{clearTimeout(timer);bar.hidden=true;unmark();if(!disposed)body.focus({preventScroll:true});};
+ const hide=()=>{clearTimeout(timer);composing=false;bar.hidden=true;unmark();if(!disposed)body.focus({preventScroll:true});};
  const cancel=()=>{if(composing)return true;if(!bar.hidden){hide();return true;}return false;};
  const key=(event:KeyboardEvent)=>{
   if(event.isComposing||event.keyCode===229||composing)return;

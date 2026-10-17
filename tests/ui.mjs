@@ -3621,11 +3621,11 @@ try {
   await presentationPage.evaluate(async()=>{
     const {renderDocumentation}=await import("/src/lsp-documentation.ts");
     const owner=new AbortController();window.__readerSearchOwner=owner;
-    const node=await renderDocumentation({kind:"markdown",value:"Ha**sh**Map and HASHMAP. 😀\n\nHash\n\nMap\n\nliteral [x]+.*"},false,owner.signal);
+    const node=await renderDocumentation({kind:"markdown",value:"Ha**sh**Map and HASHMAP. 😀\n\nHash\n\nMap\n\nliteral [x]+.*\n\n<blockquote>alpha<hr>beta</blockquote>\n\n<blockquote>alpha<p></p>beta</blockquote>\n\n<div><em>inline</em> <strong>space</strong></div>"},false,owner.signal);
     node.id="reader-search-fixture";document.body.append(node);
   });
   await presentationPage.locator("#reader-search-fixture .lsp-document-expand").click();
-  await reader.waitFor();await reader.locator("strong").waitFor();
+  await reader.waitFor();await reader.locator("strong").first().waitFor();
   const searchMarkup=await reader.getByLabel("文档正文",{exact:true}).innerHTML();
   await reader.evaluate(dialog=>{window.__readerOriginalStrong=dialog.querySelector("strong");window.__readerOriginalText=dialog.querySelector("strong").firstChild;});
   await reader.getByLabel("文档正文",{exact:true}).press("Control+f");
@@ -3636,6 +3636,11 @@ try {
   await readerFind.press("Shift+Enter");assert.equal(await reader.locator(".lsp-reader-find-count").innerText(),"1 / 2");
   await readerFind.fill("HashMapHash");
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="0 / 0");
+  await readerFind.fill("alphabeta");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="0 / 0");
+  await readerFind.fill("inline space");
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 1");
+  assert.equal((await reader.locator(".lsp-reader-search-match").allTextContents()).join(""),"inline space","visible inline whitespace remains searchable after sanitizer removes wrappers");
   await readerFind.fill("😀");
   await reader.locator(".lsp-reader-search-match").filter({hasText:"😀"}).waitFor();
   await readerFind.evaluate(input=>{
@@ -3646,6 +3651,8 @@ try {
   });
   assert.equal(await reader.locator(".lsp-reader-search-match").innerText(),"😀","composition does not navigate or apply partial query");
   assert.equal(await reader.isVisible(),true);
+  await reader.evaluate(dialog=>dialog.dispatchEvent(new Event("cancel",{cancelable:true})));
+  assert.equal(await reader.isVisible(),true,"composition also owns native-style dialog cancel events");
   await readerFind.evaluate(input=>input.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true,data:"Hash"})));
   await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-find-count")?.textContent==="1 / 3");
   await readerFind.press("Escape");
