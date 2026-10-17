@@ -19,7 +19,7 @@ Forced-colors mode uses the user's Highlight/HighlightText system colors with fo
 - Existing Ctrl/Cmd+F, Enter/Shift+Enter, Escape, IME-event, delayed-content and close/reopen tests stay enabled.
 - Browser screenshots and the genuine Linux Rust Vec::push search screenshot must be inspected after CI.
 
-CSS zoom tests do not establish native OS scaling or other-platform validation. This checkpoint changes no LSP behavior, saving, account isolation or production capability gates. No package, merge or Release.
+Content-only CSS zoom tests keep the reader chrome at normal size and do not establish whole-app zoom, browser zoom, native OS scaling or other-platform validation. This checkpoint changes no LSP behavior, saving, account isolation or production capability gates. No package, merge or Release.
 
 ## Verification
 Pending GitHub Actions on the checkpoint head; final exact commit and evidence are recorded in its Draft PR.
