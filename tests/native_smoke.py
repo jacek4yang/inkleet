@@ -1,35 +1,43 @@
 """Linux WebKitGTK smoke test against the built native application, not a browser mock."""
-import base64, json, os, pathlib, subprocess, time, urllib.request, urllib.error, http.client
+import base64, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.error, http.client
+from native_wait import JsonlDiagnostics, Polling, operation_label, read_only_command
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
 evidence = pathlib.Path("evidence/native")
 evidence.mkdir(parents=True, exist_ok=True)
+polling = Polling(emit=JsonlDiagnostics(evidence / "native-timing.jsonl"))
 data = pathlib.Path(os.environ["XDG_DATA_HOME"])
 class PublicServiceUnavailable(Exception): pass
 (evidence/"LIVE_CN_RESULT.txt").write_text("NOT RUN: live public CN validation has not completed.\n")
-def request(method, path, payload=None):
+def request(method, path, payload=None, *, retry_read_only=False):
     raw = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(BASE + path, data=raw, method=method, headers={"Content-Type":"application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=90) as response:
-            result = json.load(response)
-    except urllib.error.HTTPError as error:
-        raise RuntimeError(error.read().decode()) from error
-    value = result.get("value")
-    if isinstance(value, dict) and value.get("error"):
-        raise RuntimeError(str(value))
-    return value
-def wait_for(fn, label, seconds=25):
-    end = time.monotonic() + seconds
-    last = None
-    while time.monotonic() < end:
+    def send(timeout):
         try:
-            value = fn()
-            if value: return value
-        except Exception as error: last = error
-        time.sleep(.2)
-    raise AssertionError(f"{label}: {last}")
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                result = json.load(response)
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(error.read().decode()) from error
+        value = result.get("value")
+        if isinstance(value, dict) and value.get("error"):
+            raise RuntimeError(str(value))
+        return value
+    return polling.driver_call(send, operation=operation_label(method, path),
+                               retry_read_only=retry_read_only)
+def wait_for(fn, label, seconds=25):
+    # A bounded caller-line chain includes helper and scenario locations.
+    # No labels, locals, source text, or filesystem paths enter the timing log.
+    frame = sys._getframe()
+    source, lines = frame.f_code.co_filename, []
+    for _ in range(6):
+        frame = frame.f_back
+        if frame is None: break
+        if frame.f_code.co_filename == source:
+            lines.append(str(frame.f_lineno))
+    del frame
+    phase = "native_smoke.py:" + ">".join(lines)
+    return polling.wait_for(fn, label, seconds, phase=phase)
 def native_keys(payload):
     # Real X11 events, prospectively selected instead of the flaky WebKit action
     # transport. No mutation is retried; all source/selection assertions remain.
@@ -59,14 +67,8 @@ def cmd(method, path, payload=None):
     if method=="DELETE" and path=="/actions":
         subprocess.run(["xdotool","keyup","Control_L","Shift_L","Alt_L","Super_L"],check=True)
         return
-    read_only = method == "GET" or (method == "POST" and (path in ("/element", "/elements") or path.endswith("/elements")))
-    try: return request(method, f"/session/{session}" + path, payload)
-    except http.client.RemoteDisconnected:
-        if not read_only: raise
-        with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
-            log.write(f"Retrying one read-only WebKit transport reset: {method} {path}\n")
-        time.sleep(.3)
-        return request(method, f"/session/{session}" + path, payload)
+    return request(method, f"/session/{session}" + path, payload,
+                   retry_read_only=read_only_command(method, path))
 def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
 def text(css):
     suffix = "/attribute/data-status" if css == ".lsp-status" else "/attribute/data-storage-state" if css == '.statusbar[role="status"]' else "/text"
