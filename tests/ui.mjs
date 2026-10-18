@@ -1956,6 +1956,15 @@ try {
   await formatPage.addInitScript(()=>{
     window.isTauri=true;
     const state=window.__formatTest={docs:{},saves:[],formats:[],settings:{version:1,formatOnSave:true,overrides:{}},revision:null,failFormat:false,failSave:false,failSettings:false,defer:false};
+    const NativeWorker=window.Worker;
+    window.Worker=class extends NativeWorker{
+      constructor(url,options){
+        super(url,options);
+        if(String(url).includes("format.worker"))this.addEventListener("message",event=>{
+          if(state.holdDiff){event.stopImmediatePropagation();state.diffReply=()=>this.dispatchEvent(new MessageEvent("message",{data:event.data}));}
+        });
+      }
+    };
     window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
       if(command==="load_recent_questions")return window.__fixtureQuestions;
       if(command==="search_questions")return {questions:[],total:0,hasMore:false};
@@ -1975,6 +1984,7 @@ try {
       if(command==="save_text"){
         if(state.failSave)throw Error("测试：磁盘保存失败");
         if(args.kind==="code"){
+          if(state.holdSave)await new Promise(resolve=>{state.saveReply=resolve;});
           if((state.docs[args.language]??null)!==args.expected)throw Error("fixture CAS conflict");
           state.docs[args.language]=args.text;state.saves.push(args.text);
         }return;
@@ -1983,7 +1993,7 @@ try {
         state.formats.push(args.text);
         if(state.failFormat)throw Error("测试：格式化器失败");
         const output=args.text.replace(/\s*=\s*/g," = ").trimEnd()+"\n";
-        if(state.defer)return new Promise(resolve=>{state.reply=()=>resolve(output);});
+        if(state.defer)return new Promise((resolve,reject)=>{state.reply=()=>resolve(output);state.reject=()=>reject(Error("测试：排队格式化失败"));});
         return output;
       }
       throw Error("Unexpected formatter IPC: "+command);
@@ -2048,6 +2058,78 @@ try {
   await formatPage.waitForTimeout(200);
   assert.equal(await formattedCode.innerText(),"new=2","late format cannot replace newer input");
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.docs.python3),"x=2","stale format cannot write canonical");
+
+  // Explicit Save joins the same owned format, including its diff-worker phase.
+  const queuedFormatKey=await formatPage.evaluate(()=>/linux/i.test(navigator.platform)?"Control+Shift+KeyI":"Alt+Shift+KeyF");
+  const beginQueuedFormat=async(text,phase="request")=>{
+    const before=await formatPage.evaluate(phase=>{
+      const s=window.__formatTest;s.defer=phase==="request";s.holdDiff=phase==="diff";s.reply=null;s.reject=null;s.diffReply=null;
+      return {formats:s.formats.length,saves:s.saves.length,python:s.docs.python3};
+    },phase);
+    await formattedCode.fill(text);await formattedCode.press(queuedFormatKey);
+    await formatPage.waitForFunction(phase=>typeof window.__formatTest[phase==="diff"?"diffReply":"reply"]==="function",phase);
+    await formattedCode.press("Control+s");
+    await formattedCode.press("Control+s");
+    return before;
+  };
+  const releaseQueuedFormat=async(phase="request")=>{
+    await formatPage.evaluate(phase=>{
+      const s=window.__formatTest;s.defer=false;s.holdDiff=false;s[phase==="diff"?"diffReply":"reply"]();
+    },phase);
+  };
+  for(const [text,expected,phase] of [
+    ["promoted=1","promoted = 1\n","request"],
+    ["unchanged = 2\n","unchanged = 2\n","request"],
+    ["diff=3","diff = 3\n","diff"],
+  ]){
+    const before=await beginQueuedFormat(text,phase);
+    await releaseQueuedFormat(phase);
+    await formatPage.waitForFunction(expected=>window.__formatTest.docs.python3===expected,expected);
+    assert.deepEqual(await formatPage.evaluate(before=>({
+      formats:window.__formatTest.formats.slice(before.formats),saves:window.__formatTest.saves.slice(before.saves),
+    }),before),{formats:[text],saves:[expected]},"queued save shares the active "+phase+" format exactly once");
+    assert.equal(await formatPage.getByLabel("源码未保存",{exact:true}).count(),0);
+  }
+
+  // A failed format must fail its joined Save, not silently start another formatter.
+  const failedQueuedFormat=await beginQueuedFormat("failed_pending=4");
+  await formatPage.evaluate(()=>{const s=window.__formatTest;s.defer=false;s.reject();});
+  await formatPage.getByRole("button",{name:"格式化状态",exact:true}).waitFor();
+  assert.deepEqual(await formatPage.evaluate(before=>({
+    formats:window.__formatTest.formats.slice(before.formats),saves:window.__formatTest.saves.slice(before.saves),canonical:window.__formatTest.docs.python3,
+  }),failedQueuedFormat),{formats:["failed_pending=4"],saves:[],canonical:failedQueuedFormat.python});
+  assert.equal(await formattedCode.innerText(),"failed_pending=4");
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
+
+  // Destruction owns both the old formatter result and its queued save intention.
+  const switchedQueuedFormat=await beginQueuedFormat("switched_pending=5");
+  await formatPage.getByRole("combobox",{name:"编程语言"}).selectOption("golang");
+  await formatPage.waitForFunction(()=>document.querySelector(".editor-status-meta > span")?.textContent==="Go"&&document.querySelector('.cm-content[aria-label="代码编辑器"]'));
+  await releaseQueuedFormat();
+  await formattedCode.fill("other=6");await formattedCode.press("Control+s");
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.golang==="other = 6\n");
+  assert.deepEqual(await formatPage.evaluate(before=>({
+    formats:window.__formatTest.formats.slice(before.formats),saves:window.__formatTest.saves.slice(before.saves),canonical:window.__formatTest.docs.python3,
+  }),switchedQueuedFormat),{formats:["switched_pending=5","other=6"],saves:["other = 6\n"],canonical:switchedQueuedFormat.python});
+  await formatPage.getByRole("combobox",{name:"编程语言"}).selectOption("python3");
+  await formatPage.waitForFunction(()=>document.querySelector(".editor-status-meta > span")?.textContent==="Python"&&document.querySelector('.cm-content[aria-label="代码编辑器"]')?.textContent==="switched_pending=5");
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  // A newer explicit save during an older disk write retains its own generation.
+  const diskQueuedBefore=await formatPage.evaluate(()=>{
+    const s=window.__formatTest;s.holdSave=true;s.saveReply=null;
+    return {formats:s.formats.length,saves:s.saves.length};
+  });
+  await formattedCode.fill("disk_old=7");await formattedCode.press("Control+s");
+  await formatPage.waitForFunction(()=>typeof window.__formatTest.saveReply==="function");
+  await formattedCode.fill("disk_new=8");await formattedCode.press("Control+s");
+  await formatPage.evaluate(()=>{const s=window.__formatTest;s.holdSave=false;s.saveReply();});
+  await formatPage.waitForFunction(()=>window.__formatTest.docs.python3==="disk_new = 8\n");
+  assert.deepEqual(await formatPage.evaluate(before=>({
+    formats:window.__formatTest.formats.slice(before.formats),saves:window.__formatTest.saves.slice(before.saves),
+  }),diskQueuedBefore),{formats:["disk_old=7","disk_new=8"],saves:["disk_old = 7\n","disk_new = 8\n"]});
+  assert.equal((await formattedCode.locator(".cm-line").allTextContents()).join("\n"),"disk_new = 8\n");
+  assert.equal(await formatPage.getByLabel("源码未保存",{exact:true}).count(),0);
+  await writeFile("evidence/QUEUED_SAVE_INTENT_RESULT.txt","PASS: explicit format plus queued Ctrl+S during request/diff, unchanged result, one format and one save, formatter rejection without retry, switch cancellation, repeated saves, and newer save during an older disk write. Real CodeMirror/diff worker; mocked formatter and storage IPC.\n");
 
 
   await formatPage.evaluate(()=>{window.__formatTest.defer=true;window.__formatTest.reply=null;});
@@ -4336,5 +4418,6 @@ try {
 
   await writeFile("evidence/UI_RESULT.txt", "PASS: frontend draft switching, notes editing, responsive layout, no page errors.\nScreenshots: Linux Chromium frontend preview; authored samples; NOT native app or real LeetCode.\n");
 } finally { await browser.close(); server.kill(); }
+
 
 
