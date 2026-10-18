@@ -441,6 +441,11 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
     EditorView.domEventObservers({
       keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}},
+      compositionstart(_event,target){
+        invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;
+        // Retire the pre-composition scheduled source before native bookkeeping.
+        closeCompletion(target);
+      },
       blur(event,target){
         if(popup.containsFocus(target,event.relatedTarget))return;
         invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;
@@ -449,7 +454,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         closeCompletion(target);
       },
     }),
-    EditorView.domEventHandlers({ compositionstart(){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, mousedown(event, target) {
+    EditorView.domEventHandlers({ mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
