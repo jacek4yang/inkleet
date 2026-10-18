@@ -1556,13 +1556,34 @@ try {
     let sample;
     try{
       if(warm)await runPage.waitForFunction(()=>window.__inputCostProbe.ready(),{},{timeout:30000});
+      await runPage.evaluate(()=>{
+        const slot=document.getElementById("vim-command-slot");
+        if(!slot)throw Error("input-cost fixture requires the command slot");
+        const hosts=[...slot.children].filter(host=>host instanceof HTMLElement&&host.classList.contains("vim-command-host"));
+        const owner=hosts.find(host=>host.dataset.active==="true");
+        if(!owner||hosts.some(host=>host.dataset.active!==String(host===owner)))throw Error("input-cost fixture requires one settled command owner");
+        let mutations=0;
+        const count=records=>{mutations+=records.filter(record=>record.target instanceof HTMLElement&&record.target.classList.contains("vim-command-host")).length;};
+        const observer=new MutationObserver(count);
+        observer.observe(slot,{subtree:true,attributes:true,attributeFilter:["data-active"]});
+        window.__inputStatusMutations={
+          read:()=>{
+            count(observer.takeRecords());
+            const current=[...slot.children].filter(host=>host instanceof HTMLElement&&host.classList.contains("vim-command-host"));
+            return {mutations,stableOwner:document.getElementById("vim-command-slot")===slot&&current.length===hosts.length&&current.every((host,index)=>host===hosts[index]&&host.dataset.active===String(host===owner))};
+          },
+          dispose:()=>observer.disconnect(),
+        };
+      });
       await inputEditor.pressSequentially(inputProbeText,{delay:20});
       await runPage.waitForFunction(count=>window.__inputCostProbe.read().length===count,inputProbeText.length);
       sample=await runPage.evaluate(async()=>{
         const {EditorView}=await import("/tests/input-harness.ts");
-        return {phases:window.__inputCostProbe.read(),appCommits:window.__appCommits,checkpointEnqueues:window.__checkpointEnqueues,text:EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.doc.toString()};
+        return {phases:window.__inputCostProbe.read(),statusAttributes:window.__inputStatusMutations.read(),appCommits:window.__appCommits,checkpointEnqueues:window.__checkpointEnqueues,text:EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor")).state.doc.toString()};
       });
-    }finally{await runPage.evaluate(()=>window.__inputCostProbe?.dispose());}
+    }finally{await runPage.evaluate(()=>{window.__inputStatusMutations?.dispose();delete window.__inputStatusMutations;window.__inputCostProbe?.dispose();});}
+    assert.equal(sample.statusAttributes.stableOwner,true,"input-cost typing keeps the same settled command owner and hosts");
+    assert.equal(sample.statusAttributes.mutations,0,"stable-owner typing does not rewrite command-host activity attributes");
     assert.equal(sample.text,source.slice(0,insertion)+inputProbeText+source.slice(insertion),"phase instrumentation preserves all typed source");
     assert.equal(sample.checkpointEnqueues,inputProbeText.length,"instrumented edits retain every recovery enqueue");
     assert.ok(sample.phases.every(item=>item.updates>0),"each input has a real document update");
@@ -1571,12 +1592,12 @@ try {
       const values=sample.phases.map(item=>item[field]).sort((a,b)=>a-b);
       return {p50:values[Math.floor(values.length*.5)],p95:values[Math.floor(values.length*.95)],max:values.at(-1)};
     };
-    inputCosts.push({lines,warm,kind,initialCharacters:source.length,inputCount:sample.phases.length,appCommits:sample.appCommits,checkpointEnqueues:sample.checkpointEnqueues,updateMs:stats("updateMs"),snapshotMs:stats("snapshotMs"),onChangeMs:stats("onChangeMs"),inputToRafMs:stats("inputToRafMs"),samples:sample.phases});
+    inputCosts.push({lines,warm,kind,initialCharacters:source.length,inputCount:sample.phases.length,statusAttributeMutations:sample.statusAttributes.mutations,statusOwnerStable:sample.statusAttributes.stableOwner,appCommits:sample.appCommits,checkpointEnqueues:sample.checkpointEnqueues,updateMs:stats("updateMs"),snapshotMs:stats("snapshotMs"),onChangeMs:stats("onChangeMs"),inputToRafMs:stats("inputToRafMs"),samples:sample.phases});
   }
   await writeFile("evidence/EDITOR_INPUT_COST.json",JSON.stringify({
     environment:"GitHub Actions headless Chromium development React; actual App; mocked IPC; language service intentionally absent",
     cpu:os.cpus()[0]?.model,logicalCpus:os.cpus().length,viewport:"1440x900",
-    meaning:"EditorView.update synchronous wall time includes nested snapshot cache-miss flattening and onChange callback. Do not sum overlapping phases. Does not measure input queueing, completed paint, native IPC serialization, disk or LSP. All measured edits are already dirty.",
+    meaning:"EditorView.update synchronous wall time includes nested snapshot cache-miss flattening and onChange callback. Do not sum overlapping phases. statusAttributeMutations counts observed command-host data-active writes during stable-owner typing; zero demonstrates eliminated redundant DOM writes, not a measured latency improvement. Does not measure input queueing, completed paint, native IPC serialization, disk or LSP. All measured edits are already dirty.",
     samples:inputCosts
   },null,2));
 
@@ -2284,6 +2305,9 @@ try {
   await vimPage.waitForFunction(()=>document.querySelector(".editor-status-mode")?.textContent==="NORMAL");
   assert.equal(await vimPage.locator(".code-pane .cm-vim-panel").count(),0,"no duplicate local mode bar");
   assert.equal(await vimPage.locator(".statusbar .editor-status-mode").count(),1);
+  await vimPage.evaluate(()=>{window.__vimTest.codeCommandHost=document.querySelector("#vim-command-slot > .vim-command-host[data-active=true]");});
+  const vimCommandHosts=()=>vimPage.evaluate(()=>[...document.querySelectorAll("#vim-command-slot > .vim-command-host")].map(host=>({owner:host===window.__vimTest.codeCommandHost?"code":"notes",active:host.dataset.active})));
+  assert.deepEqual(await vimCommandHosts(),[{owner:"code",active:"true"}],"initial code editor owns the sole command host");
   assert.equal(await vimPage.locator(".cm-vimCursorLayer").first().evaluate(node=>getComputedStyle(node).animationName),"none");
   await vimPage.keyboard.type("i");
   await vimPage.waitForFunction(()=>document.querySelector(".editor-status-mode")?.textContent==="INSERT");
@@ -2333,15 +2357,24 @@ try {
   const vimNotes=vimPage.getByRole("textbox",{name:"Markdown 笔记",exact:true});
   await vimNotes.click();await vimPage.keyboard.press("Escape");
   await vimPage.waitForFunction(()=>document.querySelector(".editor-status-meta")?.textContent?.includes("Markdown"));
+  assert.deepEqual(await vimCommandHosts(),[{owner:"code",active:"false"},{owner:"notes",active:"true"}],"notes focus transfers command-host ownership");
   await vimPage.keyboard.type("/note");
   await vimPage.locator(".statusbar .cm-vim-panel input").waitFor({state:"visible"});
+  assert.equal(await vimPage.locator(".statusbar .cm-vim-panel input").evaluate(node=>{const host=node.closest(".vim-command-host");return !!host&&host!==window.__vimTest.codeCommandHost&&host.dataset.active==="true";}),true,"visible notes command belongs to the active notes host");
   await vimPage.keyboard.press("Escape");await vimCode.click();
   await vimPage.waitForFunction(()=>document.querySelector(".editor-status-meta")?.textContent?.includes("Rust"));
+  assert.deepEqual(await vimCommandHosts(),[{owner:"code",active:"true"},{owner:"notes",active:"false"}],"code focus restores the existing code command host");
   assert.equal(await vimText(),beforeVimToggle,"code/notes focus routing preserves code");
+  await vimPage.keyboard.type(":");
+  await vimPage.locator(".statusbar .cm-vim-panel input").waitFor({state:"visible"});
+  assert.equal(await vimPage.locator(".statusbar .cm-vim-panel input").evaluate(node=>{const host=node.closest(".vim-command-host");return host===window.__vimTest.codeCommandHost&&host?.dataset.active==="true";}),true,"visible code command belongs to the reactivated code host");
+  await vimPage.keyboard.press("Escape");
   await vimNotes.click();
+  assert.deepEqual(await vimCommandHosts(),[{owner:"code",active:"false"},{owner:"notes",active:"true"}],"notes owns the command slot immediately before teardown");
   await vimPage.getByRole("button",{name:"题目",exact:true}).click();
   await vimPage.waitForFunction(()=>document.querySelector(".editor-status-meta")?.textContent?.includes("Rust"));
   assert.equal(await vimPage.locator(".editor-status-mode").innerText(),"NORMAL","closing active notes restores remaining code status");
+  assert.deepEqual(await vimCommandHosts(),[{owner:"code",active:"true"}],"notes teardown removes its host and restores the remaining code host");
   await openSettings(vimPage,"编辑器");
   await vimPage.getByRole("checkbox",{name:"Vim",exact:true}).uncheck();
   await vimPage.getByRole("button",{name:"保存设置",exact:true}).click();
@@ -2351,7 +2384,7 @@ try {
   assert.equal(await vimPage.locator(".code-pane .cm-vim-panel").count(),0);
   await vimPage.screenshot({path:"evidence/vim-workflow.png"});
   await vimPage.close();
-  await writeFile("evidence/VIM_UI_RESULT.txt","PASS: real keyboard modal edits, undo/redo/dot/search/visual selection, Unicode insert (not native IME), NORMAL Tab, explicit :w with disabled formatting, rejected filename, palette focus and dynamic toggle. Native IME and full Zed parity remain unverified.\n");
+  await writeFile("evidence/VIM_UI_RESULT.txt","PASS: real keyboard modal edits, undo/redo/dot/search/visual selection, Unicode insert (not native IME), NORMAL Tab, explicit :w with disabled formatting, rejected filename, palette focus, command-host ownership/visibility and notes teardown, and dynamic toggle. Native IME and full Zed parity remain unverified.\n");
 
   const gutterPage=await browser.newPage({viewport:{width:1000,height:700}});
   await gutterPage.route("**/gutter-test",route=>route.fulfill({contentType:"text/html",body:"<!doctype html><html><body style='margin:0'><div id='editor'></div></body></html>"}));

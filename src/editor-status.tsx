@@ -29,7 +29,7 @@ export function editorStatus(language:string,documentKey:string,commandHost:HTML
    const cm=getCM(this.view);
    if(cm!==this.cm){this.detach();this.cm=cm;cm?.on("vim-mode-change",this.event);cm?.on("vim-command-done",this.event);cm?.on("dialog",this.event);}
    if(!this.view.hasFocus&&active!==this&&(active||language==="markdown"))return;
-   if(commandHost){for(const host of commandHost.parentElement?.children??[])if(host instanceof HTMLElement)host.dataset.active=String(host===commandHost);}
+   if(commandHost){for(const host of commandHost.parentElement?.children??[])if(host instanceof HTMLElement){const value=String(host===commandHost);if(host.dataset.active!==value)host.dataset.active=value;}}
    const vim=cm?.state.vim,head=this.view.state.selection.main.head,line=this.view.state.doc.lineAt(head);
    const mode=!vim?"EDIT":cm?.state.overwrite?"REPLACE":vim.visualBlock?"V-BLOCK":vim.visualLine?"V-LINE":vim.visualMode?"VISUAL":vim.insertMode?"INSERT":"NORMAL";
    publish(this,{mode,language:names[language]??language,line:line.number,column:countColumn(line.text.slice(0,head-line.from),this.view.state.tabSize)+1,document:documentKey});
