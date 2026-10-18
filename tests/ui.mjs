@@ -2088,6 +2088,7 @@ try {
     assert.deepEqual(await formatPage.evaluate(before=>({
       formats:window.__formatTest.formats.slice(before.formats),saves:window.__formatTest.saves.slice(before.saves),
     }),before),{formats:[text],saves:[expected]},"queued save shares the active "+phase+" format exactly once");
+    await formatPage.getByLabel("源码未保存",{exact:true}).waitFor({state:"hidden"});
     assert.equal(await formatPage.getByLabel("源码未保存",{exact:true}).count(),0);
   }
 
@@ -2128,6 +2129,7 @@ try {
     formats:window.__formatTest.formats.slice(before.formats),saves:window.__formatTest.saves.slice(before.saves),
   }),diskQueuedBefore),{formats:["disk_old=7","disk_new=8"],saves:["disk_old = 7\n","disk_new = 8\n"]});
   assert.equal((await formattedCode.locator(".cm-line").allTextContents()).join("\n"),"disk_new = 8\n");
+  await formatPage.getByLabel("源码未保存",{exact:true}).waitFor({state:"hidden"});
   assert.equal(await formatPage.getByLabel("源码未保存",{exact:true}).count(),0);
   await writeFile("evidence/QUEUED_SAVE_INTENT_RESULT.txt","PASS: explicit format plus queued Ctrl+S during request/diff, unchanged result, one format and one save, formatter rejection without retry, switch cancellation, repeated saves, and newer save during an older disk write. Real CodeMirror/diff worker; mocked formatter and storage IPC.\n");
 
