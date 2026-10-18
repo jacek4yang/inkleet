@@ -3680,6 +3680,101 @@ try {
 
   assert.deepEqual(safe,{cancelled:true,unsafe:null});assert.deepEqual(externalDocRequests,[]);
 
+  // COMPLETION_OWNED_TOOLTIP_FOCUS_V1: preserve focus inside this editor's real popup.
+  // Mouse activation alone does not cover this: the expand button prevents mousedown focus.
+  const tooltipFocusEvidence={scope:"Actual presentation CodeEditor, owned completion expand button, full reader, and external focus; mocked LSP. No native accessibility qualification.",external:[]};
+  await presentationPage.evaluate(()=>{window.__presentation.hold=false;});
+  await showPresentation();
+  const ownedExpand=presentationPage.locator(".cm-completionInfo").getByRole("button",{name:"展开文档",exact:true});
+  await ownedExpand.waitFor();
+  tooltipFocusEvidence.before=await ownedExpand.evaluate(button=>{
+    const s=window.__presentation,v=s.view(),tooltip=button.closest(".inkleet-completion");
+    if(!tooltip)throw Error("Real completion owner missing");
+    const ownerClass=[...tooltip.classList].find(name=>/^inkleet-completion-\d+$/.test(name));
+    s.tooltipFocusProbe={button,tooltip,ownerClass,relatedTargetMatched:false};
+    v.contentDOM.addEventListener("blur",event=>{s.tooltipFocusProbe.relatedTargetMatched=event.relatedTarget===button;},{once:true});
+    return {ownerClass,source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state),completion:s.api.completionStatus(v.state)};
+  });
+  await ownedExpand.focus();
+  await presentationPage.waitForTimeout(50);
+  tooltipFocusEvidence.owned=await presentationPage.evaluate(()=>{
+    const s=window.__presentation,v=s.view(),p=s.tooltipFocusProbe;
+    return {relatedTargetMatched:p.relatedTargetMatched,buttonConnected:p.button.isConnected,tooltipConnected:p.tooltip.isConnected,
+      buttonFocused:document.activeElement===p.button,editorFocused:v.hasFocus,completion:s.api.completionStatus(v.state),
+      source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state)};
+  });
+  await writeFile("evidence/COMPLETION_TOOLTIP_FOCUS_RESULT.json",JSON.stringify(tooltipFocusEvidence,null,2));
+  assert.match(tooltipFocusEvidence.before.ownerClass,/^inkleet-completion-\d+$/,"fixture uses the real per-editor owner");
+  assert.equal(tooltipFocusEvidence.owned.relatedTargetMatched,true,"native editor blur identifies the actual expand button");
+  assert.equal(tooltipFocusEvidence.owned.buttonConnected,true,"owned focus must not remove its own expand button");
+  assert.equal(tooltipFocusEvidence.owned.tooltipConnected,true,"owned popup survives its focus transition");
+  assert.equal(tooltipFocusEvidence.owned.buttonFocused,true);
+  assert.equal(tooltipFocusEvidence.owned.editorFocused,false,"regression genuinely leaves contentDOM");
+  assert.equal(tooltipFocusEvidence.owned.completion,"active");
+  assert.equal(tooltipFocusEvidence.owned.source,tooltipFocusEvidence.before.source);
+  assert.deepEqual(tooltipFocusEvidence.owned.selection,tooltipFocusEvidence.before.selection);
+  assert.equal(tooltipFocusEvidence.owned.undo,tooltipFocusEvidence.before.undo);
+  await presentationPage.screenshot({path:"evidence/completion-owned-expand-focused.png"});
+  await ownedExpand.click();
+  const focusReader=presentationPage.getByRole("dialog",{name:"文档阅读",exact:true});
+  await focusReader.waitFor();
+  await presentationPage.waitForFunction(()=>document.querySelector(".lsp-reader-body")?.getAttribute("aria-busy")==="false");
+  tooltipFocusEvidence.reader=await presentationPage.evaluate(()=>{
+    const s=window.__presentation,v=s.view(),p=s.tooltipFocusProbe,reader=document.querySelector(".lsp-document-reader");
+    return {open:reader?.open===true,fullContent:reader?.querySelector(".lsp-reader-body")?.textContent.includes("HashMap::new"),
+      oldTooltipConnected:p.tooltip.isConnected,completion:s.api.completionStatus(v.state),
+      source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state)};
+  });
+  await writeFile("evidence/COMPLETION_TOOLTIP_FOCUS_RESULT.json",JSON.stringify(tooltipFocusEvidence,null,2));
+  assert.equal(tooltipFocusEvidence.reader.open,true);
+  assert.equal(tooltipFocusEvidence.reader.fullContent,true,"focused real expand button opens the full reader");
+  assert.equal(tooltipFocusEvidence.reader.oldTooltipConnected,false,"reader activation still retires its old completion");
+  assert.equal(tooltipFocusEvidence.reader.completion,null);
+  assert.equal(tooltipFocusEvidence.reader.source,tooltipFocusEvidence.before.source);
+  assert.deepEqual(tooltipFocusEvidence.reader.selection,tooltipFocusEvidence.before.selection);
+  assert.equal(tooltipFocusEvidence.reader.undo,tooltipFocusEvidence.before.undo);
+  await presentationPage.screenshot({path:"evidence/completion-focused-expand-reader.png"});
+  await presentationPage.keyboard.press("Escape");await focusReader.waitFor({state:"hidden"});
+  tooltipFocusEvidence.readerCloseRestoresEditor=await presentationPage.evaluate(()=>window.__presentation.view().hasFocus);
+  await writeFile("evidence/COMPLETION_TOOLTIP_FOCUS_RESULT.json",JSON.stringify(tooltipFocusEvidence,null,2));
+  assert.equal(tooltipFocusEvidence.readerCloseRestoresEditor,true,"Escape restores code after a keyboard-focused expand button opens the reader");
+  // Start each external-blur case with a fresh completion and the editor focused.
+  for(const target of ["ordinary-button","foreign-tooltip"]){
+    await showPresentation();
+    await presentationPage.locator(".cm-completionInfo .lsp-document-expand").waitFor();
+    const externalBefore=await presentationPage.evaluate(target=>{
+      const s=window.__presentation,v=s.view(),button=document.querySelector(".cm-completionInfo .lsp-document-expand");
+      const tooltip=button.closest(".inkleet-completion"),outside=document.createElement("button"),container=document.createElement("div");
+      outside.textContent="Unrelated focus target";
+      // A lookalike tooltip belongs to no current owner. A global closest() exemption must fail this.
+      if(target==="foreign-tooltip")container.className="cm-tooltip cm-tooltip-autocomplete inkleet-completion inkleet-completion-foreign-fixture";
+      container.append(outside);document.body.append(container);
+      s.externalTooltipFocusProbe={tooltip,outside,container};
+      const before={source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state)};
+      outside.focus();return before;
+    },target);
+    await presentationPage.waitForTimeout(50);
+    const observed=await presentationPage.evaluate(()=>{
+      const s=window.__presentation,v=s.view(),p=s.externalTooltipFocusProbe;
+      const result={outsideFocused:document.activeElement===p.outside,editorFocused:v.hasFocus,ownedTooltipConnected:p.tooltip.isConnected,
+        completion:s.api.completionStatus(v.state),source:v.state.doc.toString(),selection:v.state.selection.toJSON(),undo:s.api.undoDepth(v.state)};
+      p.container.remove();delete s.externalTooltipFocusProbe;v.focus();return result;
+    });
+    tooltipFocusEvidence.external.push({target,before:externalBefore,observed});
+    await writeFile("evidence/COMPLETION_TOOLTIP_FOCUS_RESULT.json",JSON.stringify(tooltipFocusEvidence,null,2));
+    assert.equal(observed.outsideFocused,true);
+    assert.equal(observed.editorFocused,false);
+    assert.equal(observed.ownedTooltipConnected,false,target+" must dismiss only the former owned popup");
+    assert.equal(observed.completion,null,target+" must not inherit the owned-tooltip focus exemption");
+    assert.equal(observed.source,externalBefore.source);
+    assert.deepEqual(observed.selection,externalBefore.selection);
+    assert.equal(observed.undo,externalBefore.undo);
+  }
+  await presentationPage.evaluate(()=>{delete window.__presentation.tooltipFocusProbe;});
+  tooltipFocusEvidence.result="PASS";
+  await writeFile("evidence/COMPLETION_TOOLTIP_FOCUS_RESULT.json",JSON.stringify(tooltipFocusEvidence,null,2));
+
+
   await presentationPage.evaluate(()=>{window.__presentation.hold=false;});
   await presentationCode.press("Control+Space");
   await presentationPage.locator(".cm-completionInfo .lsp-document-expand").waitFor();
@@ -4403,6 +4498,7 @@ try {
       ["fixture has not issued IPC before blur",()=>assert.equal(result.immediate.beforeBlur.calls.length,0)],
       ["fixture really moves focus outside",()=>assert.equal(result.immediate.blurred.outsideFocused,true)],
       ["fixture really blurs the editor",()=>assert.equal(result.immediate.blurred.focused,false)],
+      ["blur retires the scheduled source synchronously",()=>assert.equal(result.immediate.blurred.completion,null)],
       ["optional refocus occurs in the same task",()=>assert.equal(result.immediate.afterBlur.focused,result.variant==="blur-refocus")],
       ["blurred intent never issues completion IPC",()=>assert.equal(result.afterReply.calls.length,0)],
       ["blurred intent never displays completion options",()=>assert.deepEqual(result.afterReply.seenPopups,[])],
@@ -4420,7 +4516,8 @@ try {
   }
   if(pendingFocusErrors.length)pendingFocusFailures.push({check:"no page errors",errors:pendingFocusErrors});
   await writeFile("evidence/COMPLETION_PENDING_FOCUS_RESULT.json",JSON.stringify({
-    baseline:"82d40fde6dd928efc6700503390259c2b17c6981",
+    baselineApplication:"9f04add250b519ceee4d38e60b2cc9219c421dd3",
+    baselineRegression:"247373f79dd80e8fa355c47d12cf943e3d4acd8d",
     scope:"Actual CodeMirror provider fixture and installed lockfile modules; mocked IPC. Same-turn explicit intent then blur or blur/refocus, before any source IPC. Distinct from active-popup delayed blur-close and native/real IME qualification.",
     observationWindowMs:650,
     result:pendingFocusFailures.length?"FAIL":"PASS",

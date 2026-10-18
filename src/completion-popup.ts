@@ -20,7 +20,10 @@ export function completionPopup(){
   const rect=info.getBoundingClientRect(),viewport=view.dom.ownerDocument.documentElement;
   return rect.bottom>0&&rect.right>0&&rect.top<viewport.clientHeight&&rect.left<viewport.clientWidth?info:null;
  }
- return {tooltipClass:()=>"inkleet-completion "+owner,positionInfo,scrollDocs(view:EditorView,direction:1|-1){
+ return {containsFocus(view:EditorView,target:EventTarget|null){
+  const tooltip=view.dom.ownerDocument.querySelector<HTMLElement>("."+owner);
+  return target instanceof Node&&!!tooltip?.contains(target);
+ },tooltipClass:()=>"inkleet-completion "+owner,positionInfo,scrollDocs(view:EditorView,direction:1|-1){
   const info=visibleInfo(view);if(!info||info.scrollHeight<=info.clientHeight)return false;
   info.scrollTop+=direction*Math.max(24,info.clientHeight*.8);return true;
  },openDocs(view:EditorView){

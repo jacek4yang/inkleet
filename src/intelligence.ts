@@ -56,7 +56,14 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   const documentationLifetime=new AbortController(),popup=completionPopup();
   // Close synchronously before modal focus: CodeMirror otherwise schedules an
   // unowned blur timeout that can close a newer completion after quick reopen.
-  function beforeReader(){if(view&&!closed)closeCompletion(view);}
+  function beforeReader(){
+    if(view&&!closed){
+      const focusedPopup=popup.containsFocus(view,view.dom.ownerDocument.activeElement);
+      closeCompletion(view);
+      // The reader must restore a live editor, not the removed popup button.
+      if(focusedPopup)view.focus();
+    }
+  }
   const serverName = { python3: "Pyright", java: "JDT LS", golang: "gopls", rust: "rust-analyzer", c: "clangd", cpp: "clangd" }[language];
   const signatureEffect = StateEffect.define<Tooltip | null>();
   const signatureField = StateField.define<Tooltip | null>({
@@ -432,8 +439,17 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     keymap.of([{key:"Alt-Enter",run:target=>popup.openDocs(target)},{key:"Alt-PageDown",run:target=>popup.scrollDocs(target,1)},{key:"Alt-PageUp",run:target=>popup.scrollDocs(target,-1)}]),
     hoverTooltip(hover, { hoverTime: 350 }),
     keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
-    EditorView.domEventObservers({keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}}}),
-    EditorView.domEventHandlers({ blur(){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, compositionstart(){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, mousedown(event, target) {
+    EditorView.domEventObservers({
+      keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}},
+      blur(event,target){
+        if(popup.containsFocus(target,event.relatedTarget))return;
+        invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;
+        // Retire scheduled sources too, before the completion plugin's blur handler.
+        // Refocusing must not revive an intent owned by the previous focus session.
+        closeCompletion(target);
+      },
+    }),
+    EditorView.domEventHandlers({ compositionstart(){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;return false;}, mousedown(event, target) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
