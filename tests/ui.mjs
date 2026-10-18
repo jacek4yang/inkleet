@@ -4308,6 +4308,128 @@ try {
   await providerPage.keyboard.press("Control+Space");
   await providerPage.getByRole("option",{name:"itemName",exact:true}).waitFor();
   assert.equal(await providerPage.evaluate(()=>window.__providerTest.calls.at(-1)?.triggerKind),1,"current completion still works after canceled flush");
+  // COMPLETION_PENDING_FOCUS_BASELINE_V1: blur before any source IPC, then restore focus.
+  // Keep both actions in one synchronous browser task; inspect the locked module graph.
+  // Write both cases and all failures before asserting, so a failing baseline is useful evidence.
+  const pendingFocusEvidence=[],pendingFocusErrors=[];
+  const recordPendingFocusError=error=>pendingFocusErrors.push(String(error));
+  providerPage.on("pageerror",recordPendingFocusError);
+  for(const variant of ["blur","blur-refocus"]){
+    await providerPage.evaluate(()=>window.__providerTest.view.focus());
+    await providerPage.keyboard.press("Escape");
+    const immediate=await providerPage.evaluate(async variant=>{
+      const {completionStatus}=await import("/tests/input-harness.ts");
+      const s=window.__providerTest,v=s.view;
+      s.defer=true;s.reply=null;s.deferSync=false;s.incomplete=false;
+      v.dispatch({changes:{from:0,to:v.state.doc.length,insert:"item"},selection:{anchor:4}});
+      v.focus();
+      const outside=document.createElement("button");
+      outside.id="pending-completion-focus-target";outside.textContent="Outside editor";
+      document.body.append(outside);
+      const callBase=s.calls.length,sequenceBase=s.sequences.length,cancelBase=s.cancellations.length,statusBase=s.statuses.length;
+      const startedAt=performance.now(),seenPopups=[];
+      const visiblePopups=()=>[...document.querySelectorAll(".cm-tooltip-autocomplete")].filter(node=>{
+        const rect=node.getBoundingClientRect(),style=getComputedStyle(node);
+        return rect.width>0&&rect.height>0&&style.visibility!=="hidden"&&style.display!=="none";
+      }).map(node=>node.textContent);
+      const observePopups=()=>{for(const text of visiblePopups())if(!seenPopups.includes(text))seenPopups.push(text);};
+      const observer=new MutationObserver(observePopups);
+      observer.observe(document.body,{childList:true,subtree:true,attributes:true});
+      s.pendingFocusProbe={
+        outside,observer,observePopups,
+        snapshot:()=>({
+          elapsedMs:performance.now()-startedAt,
+          completion:completionStatus(v.state),
+          focused:v.hasFocus,
+          outsideFocused:document.activeElement===outside,
+          activeElement:document.activeElement?.id||document.activeElement?.getAttribute("aria-label")||document.activeElement?.tagName,
+          source:v.state.doc.toString(),
+          selection:v.state.selection.toJSON(),
+          calls:s.calls.slice(callBase),
+          sequences:s.sequences.slice(sequenceBase),
+          cancellations:s.cancellations.slice(cancelBase),
+          statuses:s.statuses.slice(statusBase),
+          visiblePopups:visiblePopups(),
+          seenPopups:[...seenPopups],
+        }),
+      };
+      // Nothing asynchronous may be inserted between these three actions.
+      const started=s.client.commands.completion(v);
+      const beforeBlur=s.pendingFocusProbe.snapshot();
+      outside.focus();
+      const blurred=s.pendingFocusProbe.snapshot();
+      if(variant==="blur-refocus")v.focus();
+      return {started,beforeBlur,blurred,afterBlur:s.pendingFocusProbe.snapshot()};
+    },variant);
+    // The fixture holds any wrongly issued response so issuance and display are distinct.
+    await providerPage.waitForTimeout(400);
+    const beforeReply=await providerPage.evaluate(()=>window.__providerTest.pendingFocusProbe.snapshot());
+    const delivered=await providerPage.evaluate(()=>{
+      const s=window.__providerTest,reply=s.reply;s.defer=false;s.reply=null;
+      if(typeof reply!=="function")return false;
+      reply();return true;
+    });
+    await providerPage.waitForTimeout(250);
+    const afterReply=await providerPage.evaluate(()=>{
+      const p=window.__providerTest.pendingFocusProbe;p.observePopups();return p.snapshot();
+    });
+    await providerPage.screenshot({path:"evidence/completion-pending-focus-"+variant+".png"});
+    const beforeRecovery=await providerPage.evaluate(()=>{
+      const s=window.__providerTest,p=s.pendingFocusProbe;
+      p.observer.disconnect();p.outside.remove();s.view.focus();return s.calls.length;
+    });
+    await providerPage.keyboard.press("Escape");
+    let recoveryError=null;
+    try{
+      await providerPage.keyboard.press("Control+Space");
+      await providerPage.waitForFunction(expected=>window.__providerTest.calls.length>=expected,beforeRecovery+1,{timeout:3000});
+      await providerPage.getByRole("option",{name:"itemName",exact:true}).waitFor({timeout:3000});
+    }catch(error){recoveryError=String(error);}
+    const recovery=await providerPage.evaluate(beforeRecovery=>{
+      const s=window.__providerTest;
+      return {calls:s.calls.slice(beforeRecovery),source:s.view.state.doc.toString(),focused:s.view.hasFocus,
+        visibleOptions:[...document.querySelectorAll('[role="option"]')].map(node=>node.textContent)};
+    },beforeRecovery);
+    pendingFocusEvidence.push({variant,immediate,beforeReply,delivered,afterReply,recovery,recoveryError});
+    await providerPage.keyboard.press("Escape");
+    await providerPage.evaluate(()=>{const s=window.__providerTest;s.defer=false;s.reply=null;s.incomplete=true;delete s.pendingFocusProbe;});
+  }
+  providerPage.off("pageerror",recordPendingFocusError);
+  const pendingFocusFailures=[];
+  for(const result of pendingFocusEvidence){
+    const checks=[
+      ["explicit intent starts",()=>assert.equal(result.immediate.started,true)],
+      ["fixture has a pending source before blur",()=>assert.equal(result.immediate.beforeBlur.completion,"pending")],
+      ["fixture has not issued IPC before blur",()=>assert.equal(result.immediate.beforeBlur.calls.length,0)],
+      ["fixture really moves focus outside",()=>assert.equal(result.immediate.blurred.outsideFocused,true)],
+      ["fixture really blurs the editor",()=>assert.equal(result.immediate.blurred.focused,false)],
+      ["optional refocus occurs in the same task",()=>assert.equal(result.immediate.afterBlur.focused,result.variant==="blur-refocus")],
+      ["blurred intent never issues completion IPC",()=>assert.equal(result.afterReply.calls.length,0)],
+      ["blurred intent never displays completion options",()=>assert.deepEqual(result.afterReply.seenPopups,[])],
+      ["no completion popup remains visible",()=>assert.deepEqual(result.afterReply.visiblePopups,[])],
+      ["blur cannot change source",()=>assert.equal(result.afterReply.source,result.immediate.beforeBlur.source)],
+      ["blur cannot change selection",()=>assert.deepEqual(result.afterReply.selection,result.immediate.beforeBlur.selection)],
+      ["completion cannot steal focus",()=>assert.equal(result.afterReply.focused,result.variant==="blur-refocus")],
+      ["outside focus stays outside",()=>assert.equal(result.afterReply.outsideFocused,result.variant==="blur")],
+      ["fresh explicit completion recovers",()=>assert.equal(result.recoveryError,null)],
+      ["fresh explicit intent issues exactly once",()=>assert.equal(result.recovery.calls.length,1)],
+      ["recovery stays focused",()=>assert.equal(result.recovery.focused,true)],
+      ["recovery preserves source",()=>assert.equal(result.recovery.source,"item")],
+    ];
+    for(const [name,check] of checks)try{check();}catch(error){pendingFocusFailures.push({variant:result.variant,check:name,error:String(error)});}
+  }
+  if(pendingFocusErrors.length)pendingFocusFailures.push({check:"no page errors",errors:pendingFocusErrors});
+  await writeFile("evidence/COMPLETION_PENDING_FOCUS_RESULT.json",JSON.stringify({
+    baseline:"82d40fde6dd928efc6700503390259c2b17c6981",
+    scope:"Actual CodeMirror provider fixture and installed lockfile modules; mocked IPC. Same-turn explicit intent then blur or blur/refocus, before any source IPC. Distinct from active-popup delayed blur-close and native/real IME qualification.",
+    observationWindowMs:650,
+    result:pendingFocusFailures.length?"FAIL":"PASS",
+    cases:pendingFocusEvidence,
+    pageErrors:pendingFocusErrors,
+    failures:pendingFocusFailures,
+  },null,2));
+  assert.deepEqual(pendingFocusFailures,[],"pending completion must not issue IPC or show a popup after blur; see COMPLETION_PENDING_FOCUS_RESULT.json");
+
   // Real CodeMirror invalidation hooks send the exact issued ownership ticket.
   // The fixture intentionally ignores cancellation and delivers late replies.
   for(const action of ["Escape","typing","selection","blur","composition"]){
