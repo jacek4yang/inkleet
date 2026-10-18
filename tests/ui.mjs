@@ -1843,6 +1843,349 @@ try {
   await writeFile("evidence/DOWNLOAD_SETTINGS_UI_RESULT.txt","PASS: mocked IPC; save/reopen, duplicate-save guard, visible failure retaining prior settings and draft, reload and direct mode. Native proxy routing/persistence tested separately.\n");
 
 
+  // Settings navigation regressions use the actual App with isolated IPC state.
+  // Keep these separate from the formatter/proxy fixtures and their save histories.
+  // Collect every case before asserting so a red baseline exposes all regressions.
+  const settingsNavigationEvidence = [], settingsNavigationFailures = [];
+  async function settingsNavigationCase(name, run, options={}) {
+    const settingsPage = await browser.newPage({viewport:{width:1100,height:800}});
+    settingsPage.setDefaultTimeout(5000);
+    const result = {name, checks:[], pageErrors:[], screenshots:[], ipc:null};
+    settingsNavigationEvidence.push(result);
+    settingsPage.on("pageerror", error => result.pageErrors.push(error.message));
+    const check = (label, actual, expected) => {
+      const item = {check:label, actual, expected, passed:true};
+      try { assert.deepEqual(actual, expected); }
+      catch (error) {
+        item.passed = false;
+        settingsNavigationFailures.push({case:name, check:label, error:String(error)});
+      }
+      result.checks.push(item);
+    };
+    try {
+      await settingsPage.addInitScript(({initialQuestions}) => {
+        window.isTauri = true;
+        const copy = value => JSON.parse(JSON.stringify(value));
+        const state = window.__settingsNavigationTest = {
+          editor:{settings:{version:1,vim:false,formatOnSave:true,overrides:{}},revision:"editor-initial"},
+          downloads:{settings:{version:1,proxy:{mode:"system",url:""}},revision:"downloads-initial"},
+          reads:{editor:0,downloads:0}, writes:{editor:[],downloads:[]},
+          mode:{editor:"immediate",downloads:"immediate"}, pending:[],
+          commits:{editor:0,downloads:0}, settled:{editor:0,downloads:0}, unexpected:[],
+        };
+        window.__TAURI_INTERNALS__ = {invoke:async (command,args={}) => {
+          if (command === "load_recent_questions") return initialQuestions;
+          if (command === "search_questions") return {questions:[],total:0,hasMore:false};
+          if (command === "external_editor_supported") return false;
+          if (command === "login_status") return null;
+          if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
+          if (command === "load_document") return {code:null,notes:null};
+          if (command === "start_language_service") throw Error("No LSP in settings navigation fixture");
+          if (command === "stop_language_service") return;
+          if (command === "get_editor_settings" || command === "get_download_settings") {
+            const kind = command === "get_editor_settings" ? "editor" : "downloads";
+            state.reads[kind]++;
+            return copy(state[kind]);
+          }
+          if (command === "save_editor_settings" || command === "save_download_settings") {
+            const kind = command === "save_editor_settings" ? "editor" : "downloads";
+            const request = copy(args);
+            state.writes[kind].push(request);
+            try {
+              if (state.mode[kind] === "fail") throw Error("fixture " + kind + " save failed");
+              if (state.mode[kind] === "delay") {
+                await new Promise(resolve => state.pending.push({kind,release:resolve}));
+              }
+              if (request.expected !== state[kind].revision) throw Error("fixture settings revision conflict");
+              const settings = kind === "editor" ? request.settings : {
+                version:1,proxy:{mode:request.proxy.mode,url:request.proxy.mode === "custom" ? request.proxy.url : ""},
+              };
+              state[kind] = {settings,revision:kind + "-saved-" + ++state.commits[kind]};
+              return copy(state[kind]);
+            } finally { state.settled[kind]++; }
+          }
+          state.unexpected.push(command);
+          throw Error("Unexpected settings navigation IPC: " + command);
+        }};
+      }, {initialQuestions:options.withQuestion ? fixtures : []});
+      await settingsPage.goto("http://127.0.0.1:5173");
+      await settingsPage.waitForFunction(() => window.__settingsNavigationTest.reads.editor === 1);
+      await run(settingsPage, check, async path => {
+        await settingsPage.screenshot({path,fullPage:true});
+        result.screenshots.push(path);
+      });
+    } catch (error) {
+      settingsNavigationFailures.push({case:name, check:"fixture execution", error:String(error)});
+    } finally {
+      try {
+        result.ipc = await settingsPage.evaluate(() => {
+          const s = window.__settingsNavigationTest;
+          return {reads:s.reads,writes:s.writes,commits:s.commits,settled:s.settled,
+            editor:s.editor,downloads:s.downloads,pending:s.pending.map(item=>item.kind),unexpected:s.unexpected};
+        });
+        check("no unexpected IPC", result.ipc.unexpected, []);
+      } catch (error) {
+        settingsNavigationFailures.push({case:name,check:"final IPC evidence",error:String(error)});
+      }
+      check("no page errors", result.pageErrors, []);
+      await settingsPage.close();
+    }
+  }
+  const settingsEditorDraft = {vim:true,formatOnSave:false,pythonOverride:"true"};
+  const settingsProxyDraft = {mode:"custom",url:"http://127.0.0.1:7899"};
+  async function settingsCategory(dialog, category) {
+    await dialog.getByRole("navigation",{name:"设置分类"}).getByRole("button",{name:category,exact:true}).click();
+  }
+  async function settingsPaint(settingsPage) {
+    await settingsPage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => resolve())));
+  }
+  async function settingsEditorValues(dialog) {
+    const panel = dialog.locator(".format-settings");
+    await panel.getByRole("checkbox",{name:"Vim",exact:true}).waitFor();
+    return {
+      vim:await panel.getByRole("checkbox",{name:"Vim",exact:true}).isChecked(),
+      formatOnSave:await panel.getByRole("checkbox",{name:"保存时格式化",exact:true}).isChecked(),
+      pythonOverride:await panel.getByRole("combobox",{name:"Python 3 保存时格式化",exact:true}).inputValue(),
+    };
+  }
+  async function settingsEditEditor(dialog) {
+    const panel = dialog.locator(".format-settings");
+    await panel.getByRole("checkbox",{name:"Vim",exact:true}).check();
+    await panel.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
+    await panel.getByRole("combobox",{name:"Python 3 保存时格式化",exact:true}).selectOption("true");
+  }
+  async function settingsProxyValues(dialog) {
+    const panel = dialog.locator(".download-settings");
+    const mode = panel.getByLabel("连接方式",{exact:true});
+    await mode.waitFor();
+    const url = panel.getByLabel("HTTP / HTTPS 地址",{exact:true});
+    return {mode:await mode.inputValue(),url:await url.count() ? await url.inputValue() : null};
+  }
+  async function settingsEditProxy(dialog) {
+    const panel = dialog.locator(".download-settings");
+    await panel.getByLabel("连接方式",{exact:true}).selectOption("custom");
+    await panel.getByLabel("HTTP / HTTPS 地址",{exact:true}).fill(settingsProxyDraft.url);
+  }
+  async function settingsWriteCounts(settingsPage) {
+    return settingsPage.evaluate(() => {
+      const s = window.__settingsNavigationTest;
+      return {editor:s.writes.editor.length,downloads:s.writes.downloads.length};
+    });
+  }
+  async function settingsNavigateAwayAndBack(settingsPage, dialog, kind, boundary, check) {
+    const panel = dialog.locator(kind === "editor" ? ".format-settings" : ".download-settings");
+    if (boundary === "category") await settingsCategory(dialog,"源码");
+    else await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill("no-settings-match-9f3b");
+    await settingsPaint(settingsPage);
+    check(boundary + " hides inactive " + kind + " controls", await panel.isVisible(), false);
+    check(boundary + " excludes inactive form buttons from visible role lookup", await panel.getByRole("button").count(), 0);
+    if (boundary === "category") await settingsCategory(dialog,kind === "editor" ? "编辑器" : "下载");
+    else await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill("");
+    await panel.waitFor();
+    await settingsPaint(settingsPage);
+  }
+
+  await settingsNavigationCase("editor unsaved drafts", async (settingsPage,check,capture) => {
+    let dialog = await openSettings(settingsPage,"编辑器");
+    for (const boundary of ["category","search"]) {
+      // Re-enter each draft so a baseline failure does not mask the other route.
+      await settingsEditEditor(dialog);
+      check(boundary + " editor draft is established", await settingsEditorValues(dialog), settingsEditorDraft);
+      await settingsNavigateAwayAndBack(settingsPage,dialog,"editor",boundary,check);
+      check(boundary + " retains Vim, global format and language override", await settingsEditorValues(dialog), settingsEditorDraft);
+      if (boundary === "category") await capture("evidence/settings-editor-draft-navigation.png");
+      check(boundary + " never saves by navigation", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
+      check(boundary + " leaves committed editor settings unchanged", await settingsPage.evaluate(() => window.__settingsNavigationTest.editor.settings),
+        {version:1,vim:false,formatOnSave:true,overrides:{}});
+    }
+    await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
+    dialog = await openSettings(settingsPage,"编辑器");
+    check("closing discards unsaved editor settings", await settingsEditorValues(dialog), {vim:false,formatOnSave:true,pythonOverride:"inherit"});
+    check("closing never saves the draft", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
+  });
+
+  await settingsNavigationCase("download unsaved drafts", async (settingsPage,check,capture) => {
+    const dialog = await openSettings(settingsPage,"下载");
+    for (const boundary of ["category","search"]) {
+      await settingsEditProxy(dialog);
+      check(boundary + " proxy draft is established", await settingsProxyValues(dialog), settingsProxyDraft);
+      await settingsNavigateAwayAndBack(settingsPage,dialog,"downloads",boundary,check);
+      check(boundary + " retains proxy mode and address", await settingsProxyValues(dialog), settingsProxyDraft);
+      if (boundary === "category") await capture("evidence/settings-proxy-draft-navigation.png");
+      check(boundary + " never saves by navigation", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
+      check(boundary + " leaves committed proxy unchanged", await settingsPage.evaluate(() => window.__settingsNavigationTest.downloads.settings.proxy),
+        {mode:"system",url:""});
+    }
+  });
+
+  await settingsNavigationCase("Vim search finds the real control", async (settingsPage,check,capture) => {
+    const dialog = await openSettings(settingsPage,"源码");
+    const search = dialog.getByRole("textbox",{name:"搜索设置",exact:true});
+    for (const query of ["Vim","ViM","  Vim  "]) {
+      await search.fill(query);
+      await settingsPaint(settingsPage);
+      const checkbox = dialog.getByRole("checkbox",{name:"Vim",exact:true});
+      check(JSON.stringify(query) + " exposes exactly one visible Vim checkbox", await checkbox.count(), 1);
+      if (await checkbox.count() === 1) {
+        check(JSON.stringify(query) + " resolves to the real editor setting", await checkbox.evaluate(node => ({
+          tag:node.tagName,type:node.type,inEditorPanel:!!node.closest(".format-settings"),
+        })), {tag:"INPUT",type:"checkbox",inEditorPanel:true});
+        check(JSON.stringify(query) + " checkbox is visible", await checkbox.isVisible(), true);
+      }
+    }
+    await capture("evidence/settings-vim-search.png");
+    check("searching never writes settings", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
+    check("Vim-only searches never load downloads", await settingsPage.evaluate(() => window.__settingsNavigationTest.reads.downloads), 0);
+  });
+
+  await settingsNavigationCase("downloads visited before editor", async (settingsPage,check) => {
+    // The App's real LSP-settings entry opens environment without visiting editor.
+    await settingsPage.getByRole("textbox",{name:"代码编辑器",exact:true}).waitFor();
+    await settingsPage.getByRole("button",{name:"语言服务设置",exact:true}).click();
+    const dialog = settingsPage.getByRole("dialog",{name:"设置",exact:true});
+    await dialog.waitFor();
+    check("environment entry has no visible editor form", await dialog.getByRole("checkbox",{name:"Vim",exact:true}).count(), 0);
+    check("environment entry does not load downloads", await settingsPage.evaluate(() => window.__settingsNavigationTest.reads.downloads), 0);
+    await settingsCategory(dialog,"下载");
+    await settingsEditProxy(dialog);
+    check("first downloads visit reads once", await settingsPage.evaluate(() => window.__settingsNavigationTest.reads.downloads), 1);
+    await settingsCategory(dialog,"编辑器");
+    await settingsEditEditor(dialog);
+    await settingsCategory(dialog,"下载");
+    check("inserting the earlier editor panel does not reread downloads", await settingsPage.evaluate(() => window.__settingsNavigationTest.reads.downloads), 1);
+    check("inserting the earlier editor panel preserves proxy draft", await settingsProxyValues(dialog), settingsProxyDraft);
+    check("first-visit ordering never saves either form", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
+  }, {withQuestion:true});
+
+  await settingsNavigationCase("downloads load lazily once per dialog", async (settingsPage,check) => {
+    let dialog = await openSettings(settingsPage,"编辑器");
+    const reads = () => settingsPage.evaluate(() => window.__settingsNavigationTest.reads.downloads);
+    check("opening editor does not load downloads", await reads(), 0);
+    await settingsCategory(dialog,"语言与环境");
+    await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill("no-settings-match-9f3b");
+    await settingsPaint(settingsPage);
+    check("unrelated category and search do not load downloads", await reads(), 0);
+    await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill("下载");
+    await dialog.getByLabel("连接方式",{exact:true}).waitFor();
+    await settingsPage.waitForFunction(() => window.__settingsNavigationTest.reads.downloads >= 1);
+    check("first matching search loads downloads exactly once", await reads(), 1);
+    await settingsCategory(dialog,"下载");
+    await settingsEditProxy(dialog);
+    for (const boundary of ["category","search"]) {
+      await settingsNavigateAwayAndBack(settingsPage,dialog,"downloads",boundary,check);
+      check(boundary + " return does not reread downloads", await reads(), 1);
+    }
+    check("first-visit navigation never writes", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
+    await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
+    dialog = await openSettings(settingsPage,"下载");
+    await dialog.getByLabel("连接方式",{exact:true}).waitFor();
+    await settingsPage.waitForFunction(() => window.__settingsNavigationTest.reads.downloads >= 2);
+    check("a new dialog gets a fresh download snapshot", await reads(), 2);
+    check("closing discards the unsaved download draft", await settingsProxyValues(dialog), {mode:"system",url:null});
+  });
+
+  for (const kind of ["editor","downloads"]) {
+    await settingsNavigationCase(kind + " failed save survives navigation", async (settingsPage,check) => {
+      const dialog = await openSettings(settingsPage,kind === "editor" ? "编辑器" : "下载");
+      const panel = dialog.locator(kind === "editor" ? ".format-settings" : ".download-settings");
+      await settingsPage.evaluate(kind => { window.__settingsNavigationTest.mode[kind] = "fail"; },kind);
+      let attempts = 0;
+      for (const boundary of ["category","search"]) {
+        if (kind === "editor") await settingsEditEditor(dialog); else await settingsEditProxy(dialog);
+        await panel.getByRole("button",{name:kind === "editor" ? "保存设置" : "保存下载设置",exact:true}).click();
+        const failure = "fixture " + kind + " save failed";
+        await panel.getByRole("alert").filter({hasText:failure}).waitFor();
+        attempts++;
+        check(boundary + " failed save retains the draft before navigation",
+          kind === "editor" ? await settingsEditorValues(dialog) : await settingsProxyValues(dialog),
+          kind === "editor" ? settingsEditorDraft : settingsProxyDraft);
+        await settingsNavigateAwayAndBack(settingsPage,dialog,kind,boundary,check);
+        check(boundary + " failed save retains the draft after navigation",
+          kind === "editor" ? await settingsEditorValues(dialog) : await settingsProxyValues(dialog),
+          kind === "editor" ? settingsEditorDraft : settingsProxyDraft);
+        check(boundary + " retains the visible save error", await panel.getByRole("alert").allTextContents(), ["Error: " + failure]);
+        check(boundary + " does not retry the failed save", await settingsWriteCounts(settingsPage),
+          {editor:kind === "editor" ? attempts : 0,downloads:kind === "downloads" ? attempts : 0});
+        check(boundary + " failed save does not commit", await settingsPage.evaluate(kind => window.__settingsNavigationTest.commits[kind],kind), 0);
+      }
+    });
+  }
+
+  for (const kind of ["editor","downloads"]) for (const boundary of ["category","search"]) {
+    await settingsNavigationCase(kind + " pending save across " + boundary, async (settingsPage,check) => {
+      const dialog = await openSettings(settingsPage,kind === "editor" ? "编辑器" : "下载");
+      const panel = dialog.locator(kind === "editor" ? ".format-settings" : ".download-settings");
+      if (kind === "editor") await settingsEditEditor(dialog); else await settingsEditProxy(dialog);
+      await settingsPage.evaluate(kind => { window.__settingsNavigationTest.mode[kind] = "delay"; },kind);
+      await panel.getByRole("button",{name:kind === "editor" ? "保存设置" : "保存下载设置",exact:true}).click();
+      await settingsPage.waitForFunction(kind => window.__settingsNavigationTest.pending.some(item=>item.kind===kind),kind);
+      const controls = panel.locator("input,select,button");
+      await settingsPage.waitForFunction(selector => {
+        const nodes = [...document.querySelectorAll(selector + " input," + selector + " select," + selector + " button")];
+        return nodes.length > 0 && nodes.every(node=>node.disabled);
+      },kind === "editor" ? ".format-settings" : ".download-settings");
+      check("pending save disables every settings form control before navigation",
+        await controls.evaluateAll(nodes => nodes.map(node=>node.disabled)),
+        Array(await controls.count()).fill(true));
+      await settingsNavigateAwayAndBack(settingsPage,dialog,kind,boundary,check);
+      check("pending save stays busy after navigation",
+        await controls.evaluateAll(nodes => nodes.map(node=>node.disabled)),
+        Array(await controls.count()).fill(true));
+      check("pending save keeps its submitted draft",
+        kind === "editor" ? await settingsEditorValues(dialog) : await settingsProxyValues(dialog),
+        kind === "editor" ? settingsEditorDraft : settingsProxyDraft);
+      // If navigation wrongly made the form editable, a user can re-enter a draft
+      // and submit again before the first IPC resolves. Never bypass disabled controls.
+      const firstInput = kind === "editor" ? panel.getByRole("checkbox",{name:"Vim",exact:true}) : panel.getByLabel("连接方式",{exact:true});
+      if (!await firstInput.isDisabled()) {
+        if (kind === "editor") await settingsEditEditor(dialog); else await settingsEditProxy(dialog);
+      }
+      // HTMLElement.click respects disabled. Two same-task clicks also exercise
+      // the ref guard when a broken remount has exposed a second enabled button.
+      await panel.locator(".settings-form-actions button").first().evaluate(button => { button.click(); button.click(); });
+      check("navigation and repeat clicks issue only the original save", await settingsWriteCounts(settingsPage),
+        {editor:kind === "editor" ? 1 : 0,downloads:kind === "downloads" ? 1 : 0});
+      // Settle the request while this panel is hidden, then inspect its return.
+      if (boundary === "category") await settingsCategory(dialog,"源码");
+      else await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill("no-settings-match-9f3b");
+      await settingsPaint(settingsPage);
+      check("save is still hidden before settlement", await panel.isVisible(), false);
+      await settingsPage.evaluate(() => {
+        const s = window.__settingsNavigationTest;
+        s.mode.editor = "immediate"; s.mode.downloads = "immediate";
+        for (const pending of s.pending.splice(0)) pending.release();
+      });
+      await settingsPage.waitForFunction(kind => {
+        const s = window.__settingsNavigationTest;
+        return s.settled[kind] === s.writes[kind].length;
+      },kind);
+      await settingsPaint(settingsPage);
+      check("the original request eventually commits once", await settingsPage.evaluate(kind => window.__settingsNavigationTest.commits[kind],kind), 1);
+      if (boundary === "category") await settingsCategory(dialog,kind === "editor" ? "编辑器" : "下载");
+      else await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill("");
+      await panel.waitFor();
+      await settingsPage.waitForFunction(selector => {
+        const input = document.querySelector(selector)?.querySelector("input,select");
+        return !!input && !input.disabled;
+      },kind === "editor" ? ".format-settings" : ".download-settings");
+      check("settled form recovers enabled controls", await firstInput.isDisabled(), false);
+      check("return after hidden settlement shows the saved draft",
+        kind === "editor" ? await settingsEditorValues(dialog) : await settingsProxyValues(dialog),
+        kind === "editor" ? settingsEditorDraft : settingsProxyDraft);
+      if (kind === "downloads") check("hidden save completion keeps its visible success notice",
+        await panel.getByRole("status").allTextContents(), ["已保存，下次下载生效"]);
+      check("settled request preserves the requested settings", await settingsPage.evaluate(kind => window.__settingsNavigationTest[kind].settings,kind),
+        kind === "editor" ? {version:1,vim:true,formatOnSave:false,overrides:{python3:true}} : {version:1,proxy:settingsProxyDraft});
+    });
+  }
+  await writeFile("evidence/SETTINGS_NAVIGATION_UI_RESULT.json",JSON.stringify({
+    scope:"Actual App in Chromium with mocked settings IPC. Visible DOM controls, drafts, search, lazy reads, errors and duplicate-save guards only; no native accessibility or IME qualification.",
+    result:settingsNavigationFailures.length ? "FAIL" : "PASS",
+    cases:settingsNavigationEvidence,failures:settingsNavigationFailures,
+  },null,2));
+  assert.deepEqual(settingsNavigationFailures,[],"settings drafts and in-flight saves must survive category/search navigation; Vim must be discoverable");
+
+
   const solutionsPage=await testPage({viewport:{width:1440,height:900}});
   await solutionsPage.addInitScript(()=>{
     window.isTauri=true;
