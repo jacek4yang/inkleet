@@ -4560,6 +4560,134 @@ try {
   },null,2));
   assert.deepEqual(pendingFocusFailures,[],"pending completion must not issue IPC or show a popup after blur; see COMPLETION_PENDING_FOCUS_RESULT.json");
 
+  // Cancel pending completion before the source callback begins.
+  // One lifecycle regression, with Escape as its same-task cancellation control.
+  // Uses the existing providerPage fixture and its actual locked CodeMirror graph.
+  const pendingInputEvidence = [];
+  const pendingInputErrors = [];
+  const recordPendingInputError = error => pendingInputErrors.push(String(error));
+  providerPage.on("pageerror", recordPendingInputError);
+  for (const boundary of ["Escape", "compositionstart"]) {
+    await providerPage.evaluate(() => {
+      const v = window.__providerTest.view;
+      v.contentDOM.dispatchEvent(new CompositionEvent("compositionend", {bubbles: true}));
+      v.focus();
+    });
+    await providerPage.keyboard.press("Escape");
+    const immediate = await providerPage.evaluate(async boundary => {
+      const {completionStatus} = await import("/tests/input-harness.ts");
+      const s = window.__providerTest, v = s.view;
+      s.defer = true; s.reply = null; s.deferSync = false; s.incomplete = false;
+      v.dispatch({changes: {from: 0, to: v.state.doc.length, insert: "item"}, selection: {anchor: 4}});
+      v.focus();
+      const base = {calls: s.calls.length, sequences: s.sequences.length,
+        cancellations: s.cancellations.length, statuses: s.statuses.length};
+      const seenPopups = [];
+      const visiblePopups = () => [...document.querySelectorAll(".cm-tooltip-autocomplete")]
+        .filter(node => {
+          const rect = node.getBoundingClientRect(), style = getComputedStyle(node);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+        }).map(node => node.textContent);
+      const observe = () => {
+        for (const text of visiblePopups()) if (!seenPopups.includes(text)) seenPopups.push(text);
+      };
+      const observer = new MutationObserver(observe);
+      observer.observe(document.body, {childList: true, subtree: true, attributes: true});
+      s.pendingInputProbe = {observer, snapshot: () => {
+        observe();
+        return {completion: completionStatus(v.state), compositionStarted: v.compositionStarted,
+          composing: v.composing, focused: v.hasFocus, source: v.state.doc.toString(),
+          selection: v.state.selection.toJSON(), calls: s.calls.slice(base.calls),
+          sequences: s.sequences.slice(base.sequences), cancellations: s.cancellations.slice(base.cancellations),
+          statuses: s.statuses.slice(base.statuses), visiblePopups: visiblePopups(), seenPopups: [...seenPopups]};
+      }};
+      // No await, timer, document edit, or focus transition between these actions.
+      const started = s.client.commands.completion(v);
+      const before = s.pendingInputProbe.snapshot();
+      const event = boundary === "Escape"
+        ? new KeyboardEvent("keydown", {key: "Escape", code: "Escape", keyCode: 27, bubbles: true, cancelable: true})
+        : new CompositionEvent("compositionstart", {bubbles: true, cancelable: true});
+      // Do not add CodeMirror's private event.synthetic property or fake composing state.
+      v.contentDOM.dispatchEvent(event);
+      return {started, before, after: s.pendingInputProbe.snapshot(), defaultPrevented: event.defaultPrevented};
+    }, boundary);
+    await providerPage.waitForTimeout(400);
+    const beforeReply = await providerPage.evaluate(() => window.__providerTest.pendingInputProbe.snapshot());
+    const delivered = await providerPage.evaluate(() => {
+      const s = window.__providerTest, reply = s.reply;
+      s.defer = false; s.reply = null;
+      if (typeof reply !== "function") return false;
+      reply(); return true;
+    });
+    await providerPage.waitForTimeout(250);
+    const afterReply = await providerPage.evaluate(() => window.__providerTest.pendingInputProbe.snapshot());
+    await providerPage.screenshot({path: "evidence/completion-pending-input-" + boundary + ".png"});
+    const recoveryBase = await providerPage.evaluate(() => {
+      const s = window.__providerTest;
+      s.pendingInputProbe.observer.disconnect();
+      s.view.contentDOM.dispatchEvent(new CompositionEvent("compositionend", {bubbles: true}));
+      s.view.focus();
+      return s.calls.length;
+    });
+    await providerPage.keyboard.press("Escape");
+    let recoveryError = null;
+    try {
+      await providerPage.keyboard.press("Control+Space");
+      await providerPage.getByRole("option", {name: "itemName", exact: true}).waitFor({timeout: 3000});
+    } catch (error) { recoveryError = String(error); }
+    const recovery = await providerPage.evaluate(base => {
+      const s = window.__providerTest;
+      return {calls: s.calls.slice(base), focused: s.view.hasFocus, source: s.view.state.doc.toString()};
+    }, recoveryBase);
+    pendingInputEvidence.push({boundary, immediate, beforeReply, delivered, afterReply, recovery, recoveryError});
+    await providerPage.keyboard.press("Escape");
+    await providerPage.evaluate(() => {
+      const s = window.__providerTest;
+      s.defer = false; s.reply = null; s.incomplete = true; delete s.pendingInputProbe;
+    });
+  }
+  providerPage.off("pageerror", recordPendingInputError);
+  const pendingInputFailures = [];
+  for (const result of pendingInputEvidence) {
+    const checks = [
+      ["explicit start succeeds", () => assert.equal(result.immediate.started, true)],
+      ["source is scheduled, not issued", () => {
+        assert.equal(result.immediate.before.completion, "pending");
+        assert.equal(result.immediate.before.calls.length, 0);
+      }],
+      ["boundary retires pending intent synchronously", () => assert.equal(result.immediate.after.completion, null)],
+      ["retired intent never reaches IPC", () => assert.equal(result.afterReply.calls.length, 0)],
+      ["retired intent never writes completion status", () => assert.deepEqual(result.afterReply.statuses, [])],
+      ["retired intent never appears", () => assert.deepEqual(result.afterReply.seenPopups, [])],
+      ["document and selection remain unchanged", () => {
+        assert.equal(result.afterReply.source, result.immediate.before.source);
+        assert.deepEqual(result.afterReply.selection, result.immediate.before.selection);
+        assert.equal(result.afterReply.focused, true);
+      }],
+      ["fresh completion recovers once", () => {
+        assert.equal(result.recoveryError, null);
+        assert.equal(result.recovery.calls.length, 1);
+        assert.equal(result.recovery.focused, true);
+        assert.equal(result.recovery.source, "item");
+      }],
+    ];
+    if (result.boundary === "compositionstart") checks.push(
+      ["composition boundary is observed without fabricating input", () => {
+        assert.equal(result.immediate.after.compositionStarted, true);
+        assert.equal(result.immediate.after.composing, false);
+        assert.equal(result.immediate.defaultPrevented, false);
+      }]
+    );
+    for (const [check, run] of checks) try { run(); }
+    catch (error) { pendingInputFailures.push({boundary: result.boundary, check, error: String(error)}); }
+  }
+  if (pendingInputErrors.length) pendingInputFailures.push({check: "no page errors", errors: pendingInputErrors});
+  await writeFile("evidence/COMPLETION_PENDING_INPUT_RESULT.json", JSON.stringify({
+    scope: "Actual locked CodeMirror provider fixture, mocked IPC; same-task scheduled completion followed by Escape or synthetic compositionstart before any text input. This is a lifecycle regression, not native IME qualification.",
+    result: pendingInputFailures.length ? "FAIL" : "PASS", cases: pendingInputEvidence, pageErrors: pendingInputErrors, failures: pendingInputFailures,
+  }, null, 2));
+  assert.deepEqual(pendingInputFailures, [], "pending completion must not survive its input-cancellation boundary");
+
   // Real CodeMirror invalidation hooks send the exact issued ownership ticket.
   // The fixture intentionally ignores cancellation and delivers late replies.
   for(const action of ["Escape","typing","selection","blur","composition"]){
