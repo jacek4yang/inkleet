@@ -1978,6 +1978,14 @@ try {
     else await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill("no-settings-match-9f3b");
     await settingsPaint(settingsPage);
     check(boundary + " hides inactive " + kind + " controls", await panel.isVisible(), false);
+    check(boundary + " removes inactive form controls from role queries", {
+      buttons:await panel.getByRole("button").count(),checkboxes:await panel.getByRole("checkbox").count(),selects:await panel.getByRole("combobox").count(),
+    },{buttons:0,checkboxes:0,selects:0});
+    await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).focus();
+    await settingsPage.keyboard.press("Tab");
+    check(boundary + " skips hidden form in keyboard navigation",
+      await panel.evaluateAll(nodes=>nodes.some(node=>node.contains(document.activeElement))),false);
+
     check(boundary + " excludes inactive form buttons from visible role lookup", await panel.getByRole("button").count(), 0);
     if (boundary === "category") await settingsCategory(dialog,kind === "editor" ? "编辑器" : "下载");
     else await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill("");
