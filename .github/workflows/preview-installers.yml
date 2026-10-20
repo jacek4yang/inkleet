@@ -190,8 +190,9 @@ jobs:
           export XDG_CACHE_HOME="$(mktemp -d)"
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export INKLEET_TEST_BINARY=/usr/bin/inkleet
+          export INKLEET_EVIDENCE_DIR=evidence/linux-x86_64/installed-native
+          test ! -e "$INKLEET_EVIDENCE_DIR"
           xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
-          cp -R evidence/native evidence/linux-x86_64/installed-native
       - name: Build tar and test its launcher from a directory with spaces
         run: |
           mapfile -d '' packages < <(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -name '*.deb' -print0)
@@ -216,8 +217,9 @@ jobs:
           export XDG_CACHE_HOME="$(mktemp -d)"
           export WEBKIT_DISABLE_COMPOSITING_MODE=1
           export INKLEET_TEST_BINARY="$root/start.sh"
+          export INKLEET_EVIDENCE_DIR=evidence/linux-x86_64/tar-native
+          test ! -e "$INKLEET_EVIDENCE_DIR"
           xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
-          cp -R evidence/native evidence/linux-x86_64/tar-native
           (cd delivery/linux-x86_64 && sha256sum --check ./*.sha256)
       - name: Record exact Linux verification scope
         run: |

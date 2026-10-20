@@ -75,10 +75,29 @@ impl DownloadProxy {
             loop {
                 match listener.accept(){
                     Ok((mut socket,_))=>{
-                        socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-                        let mut bytes=[0u8;4096];let n=socket.read(&mut bytes).unwrap();
+                        // Accepted sockets may inherit the listener's nonblocking
+                        // flag on BSD/macOS. A timeout alone does not clear it.
+                        socket.set_nonblocking(false).unwrap();
+                        socket.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+                        socket.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
+                        let read_deadline=Instant::now()+Duration::from_secs(5);
+                        let mut captured=Vec::new();
+                        loop {
+                            assert!(Instant::now()<read_deadline,"incomplete proxy CONNECT header");
+                            let mut bytes=[0u8;512];
+                            match socket.read(&mut bytes) {
+                                Ok(0)=>panic!("proxy peer closed before complete CONNECT header"),
+                                Ok(n)=>{
+                                    captured.extend_from_slice(&bytes[..n]);
+                                    assert!(captured.len()<=4096,"proxy CONNECT header exceeded test bound");
+                                    if captured.windows(4).any(|part|part==b"\r\n\r\n"){break;}
+                                }
+                                Err(error) if matches!(error.kind(),std::io::ErrorKind::WouldBlock|std::io::ErrorKind::TimedOut|std::io::ErrorKind::Interrupted)=>{},
+                                Err(error)=>panic!("proxy capture failed: {error}"),
+                            }
+                        }
                         socket.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
-                        return String::from_utf8_lossy(&bytes[..n]).to_string();
+                        return String::from_utf8_lossy(&captured).to_string();
                     }
                     Err(error) if error.kind()==std::io::ErrorKind::WouldBlock=>{
                         assert!(Instant::now()<deadline,"proxy was not contacted");std::thread::sleep(Duration::from_millis(10));
@@ -88,7 +107,7 @@ impl DownloadProxy {
             }
         });
         let config=DownloadProxy{mode:ProxyMode::Custom,url:format!("http://{address}")};
-        let client=config.apply(reqwest::Client::builder().timeout(Duration::from_secs(3))).unwrap().build().unwrap();
+        let client=config.apply(reqwest::Client::builder().timeout(Duration::from_secs(10))).unwrap().build().unwrap();
         assert!(client.get("https://nodejs.org/").send().await.is_err());
         assert!(received.join().unwrap().starts_with("CONNECT nodejs.org:443 HTTP/1.1"));
     }

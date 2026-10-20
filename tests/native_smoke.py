@@ -4,7 +4,7 @@ from native_wait import JsonlDiagnostics, Polling, operation_label, read_only_co
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
-evidence = pathlib.Path("evidence/native")
+evidence = pathlib.Path(os.environ.get("INKLEET_EVIDENCE_DIR", "evidence/native"))
 evidence.mkdir(parents=True, exist_ok=True)
 polling = Polling(emit=JsonlDiagnostics(evidence / "native-timing.jsonl"))
 data = pathlib.Path(os.environ["XDG_DATA_HOME"])
@@ -579,7 +579,7 @@ try:
     click('#download-proxy-mode option[value="custom"]')
     fill("#download-proxy-url","http://127.0.0.1:7890")
     save_proxy=cmd("POST","/element",{"using":"xpath","value":"//button[text()='保存下载设置']"})[EID]
-    cmd("POST",f"/element/{save_proxy}/click",{})
+    click_native_node(save_proxy)  # One prospective OS click; never replay an uncertain WebDriver write.
     wait_for(lambda:"已保存，下次下载生效" in text(".download-settings"),"native proxy setting saved")
     config=pathlib.Path(os.environ["XDG_CONFIG_HOME"])/"top.jacek.inkleet/download-settings.json"
     wait_for(lambda:config.exists() and json.loads(config.read_text())["proxy"]["mode"]=="custom","download proxy persisted only in app config")
@@ -592,7 +592,7 @@ try:
     wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-url')}/property/value")=="http://127.0.0.1:7890/","restart restores validated proxy")
     click('#download-proxy-mode option[value="system"]')
     save_proxy=cmd("POST","/element",{"using":"xpath","value":"//button[text()='保存下载设置']"})[EID]
-    cmd("POST",f"/element/{save_proxy}/click",{})
+    click_native_node(save_proxy)  # One prospective OS click; never replay an uncertain WebDriver write.
     wait_for(lambda:json.loads(config.read_text())["proxy"]["mode"]=="system","restore original download route before real installs")
     click('[aria-label="关闭设置"]')
     (evidence/"DOWNLOAD_SETTINGS_GUI_RESULT.txt").write_text("PASS: native Settings save, app-only config persistence, restart restore, explicit reset before real downloads; no system proxy change. Proxy CONNECT routing covered by isolated Rust test.\n")

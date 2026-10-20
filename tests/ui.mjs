@@ -7,6 +7,7 @@ import { runTabSizeUI } from "./tab-size-ui.mjs";
 import { runSettingsWorkbenchUI } from "./settings-workbench-ui.mjs";
 import { runNotesSaveUI } from "./notes-save-ui.mjs";
 import { runCaseInputUI } from "./case-input-ui.mjs";
+import { runNewlineSaveUI } from "./newline-save-ui.mjs";
 
 async function openSettings(page, category) {
   await page.locator('[data-action="open-settings"]').click();
@@ -1068,6 +1069,31 @@ try {
   await lspPage.evaluate(() => window.__lspTest.referencesReply());
   await lspPage.waitForTimeout(100);
   assert.equal(await lspPage.locator(".lsp-references").count(), 0, "dismissed references cannot reopen from a late response");
+  for(const boundary of ["notes","settings","caret","refocus","composition"]){
+    await lspPage.evaluate(()=>{window.__lspTest.referencesReply=null;});
+    await lspEditor.press("Control+Home");await lspEditor.press("ArrowRight");await lspEditor.press("Shift+F12");
+    await lspPage.waitForFunction(()=>typeof window.__lspTest.referencesReply==="function");
+    let focused;
+    if(boundary==="notes"||boundary==="refocus"){
+      await lspPage.getByRole("button",{name:"笔记",exact:true}).click();
+      focused=lspPage.getByRole("textbox",{name:"Markdown 笔记",exact:true});
+      await focused.fill("Notes own the focus");
+      if(boundary==="refocus"){await lspEditor.click();focused=lspEditor;}
+    }else if(boundary==="settings"){
+      const settings=await openSettings(lspPage,"编辑器");
+      focused=settings.getByRole("textbox",{name:"搜索设置",exact:true});await focused.fill("vim");
+    }else if(boundary==="composition"){
+      await lspEditor.evaluate(node=>node.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true})));focused=lspEditor;
+    }else{await lspEditor.press("ArrowRight");focused=lspEditor;}
+    await lspPage.evaluate(()=>window.__lspTest.referencesReply());
+    await lspPage.waitForTimeout(100);
+    assert.equal(await lspPage.locator(".lsp-references").count(),0,boundary+" invalidates the old references request");
+    assert.equal(await focused.evaluate(node=>document.activeElement===node),true,boundary+" retains newer focus");
+    assert.equal(await lspEditor.innerText(),"items = []\nitems.append(1)");
+    if(boundary==="settings")await lspPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+    if(boundary==="composition"){await lspEditor.evaluate(node=>node.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true})));await lspPage.waitForTimeout(100);}
+  }
+  await writeFile("evidence/REFERENCES_FOCUS_RESULT.txt","PASS: delayed references cannot steal Notes/settings focus, reappear after blur/refocus, or follow a stale caret; successful reference navigation remains covered. Mocked LSP, not native server acceptance.\n");
   await lspPage.evaluate(() => { window.__lspTest.deferReferences = false; });
   await lspPage.evaluate(() => { window.__lspTest.deferRename = true; });
   await lspEditor.press("Control+Home"); await lspEditor.press("ArrowRight"); await lspEditor.press("F2");
@@ -2761,6 +2787,7 @@ try {
 
   await runNotesSaveUI(testPage);
   await runCaseInputUI(testPage);
+  await runNewlineSaveUI(testPage,openSettings);
 
   const recoveryPage=await testPage({viewport:{width:1200,height:800}});
   recoveryPage.on("dialog",dialog=>dialog.accept());

@@ -1,3 +1,4 @@
+import {editorText,hasRecoveryEdits} from "./editor-text";
 import {sameBreakpointLines} from "./breakpoint-lines";
 import {CodeSignals,useCodeEmpty} from "./live-code";
 import {EditorStatus} from "./editor-status";
@@ -95,7 +96,7 @@ function App() {
   const selected = useRef(activeKey); selected.current = activeKey;
   const problem = problems.find(p => p.id === problemId);
   const baseTemplate = officialTemplate(problem?.official.codeSnippets,language);
-  const baseCode = baseTemplate ?? "";
+  const baseCode = editorText(baseTemplate ?? "");
   const doc = documents.current.get(activeKey) ?? { code: baseCode, notes: notes.current.get(problemId) ?? "" };
 
   const codeSource=useMemo(()=>codeSignals.current.source(activeKey,()=>documents.current.get(activeKey)?.code??baseCode),[activeKey,baseCode]);
@@ -192,15 +193,15 @@ function App() {
           const loaded = await invoke<LoadedDocument>("load_document", { problem: problemId, language, solution });
           // 迟到的读取不能覆盖已打开/已编辑的草稿；笔记跨语言共享，不能被新语言读取重置。
           if (!notes.current.has(problemId)) {
-            const key=problemId+"/notes",recovered=loaded.notesDraft&&loaded.notesDraft.text!==(loaded.notesDraft.baseline??"")&&loaded.notesDraft.text!==loaded.notes?loaded.notesDraft:null;
-            notes.current.set(problemId,recovered?.text??loaded.notes??"");
-            persisted.current.set(key,loaded.notes);clean.current.set(key,loaded.notes??"");
+            const key=problemId+"/notes",recovered=hasRecoveryEdits(loaded.notesDraft,loaded.notes)?loaded.notesDraft:null;
+            notes.current.set(problemId,editorText(recovered?.text??loaded.notes??""));
+            persisted.current.set(key,loaded.notes);clean.current.set(key,editorText(loaded.notes??""));
             if(recovered){dirty.current.add(key);if(recovered.baseline!==loaded.notes){persisted.current.set(key,recovered.baseline);queue.current.block(key);}}
           }
           if (!documents.current.has(activeKey)) {
-            const recovered=loaded.codeDraft&&loaded.codeDraft.text!==(loaded.codeDraft.baseline??"")&&loaded.codeDraft.text!==loaded.code?loaded.codeDraft:null;
-            documents.current.set(activeKey,{code:recovered?.text??loaded.code??baseCode,notes:notes.current.get(problemId)??""});
-            persisted.current.set(activeKey,loaded.code);clean.current.set(activeKey,loaded.code??baseCode);
+            const recovered=hasRecoveryEdits(loaded.codeDraft,loaded.code)?loaded.codeDraft:null;
+            documents.current.set(activeKey,{code:editorText(recovered?.text??loaded.code??baseCode),notes:notes.current.get(problemId)??""});
+            persisted.current.set(activeKey,loaded.code);clean.current.set(activeKey,editorText(loaded.code??baseCode));
             if(recovered){dirty.current.add(activeKey);if(recovered.baseline!==loaded.code){persisted.current.set(activeKey,recovered.baseline);queue.current.block(activeKey);}}
             if(loaded.draftWarnings?.length)setDraftError(loaded.draftWarnings.join(" · "));
           }
@@ -293,14 +294,14 @@ function App() {
       problem: current.problem, language: current.language, solution: current.solution, kind: current.kind,
       expected: current.external, local: current.local, choice,
     });
-    persisted.current.set(current.saveKey, resolved.text);clean.current.set(current.saveKey,resolved.text??"");
+    persisted.current.set(current.saveKey, resolved.text);clean.current.set(current.saveKey,editorText(resolved.text??""));
     if (currentText() !== current.local) {
       reconcileDirty(current);checkpoint(current,currentText(),resolved.text);refresh(n=>n+1);
       setConflict({ ...current, local: currentText(), external: resolved.text });
       throw new Error("处理期间编辑器又有更新，新草稿仍被保留，请重新确认");
     }
     queue.current.discard(current.saveKey);
-    const text = resolved.text ?? "";
+    const text = editorText(resolved.text ?? "");
     if (current.kind === "notes") {
       notes.current.set(current.problem, text);
       for (const [key, value] of documents.current) if (JSON.parse(key)[1] === current.problem) documents.current.set(key, { ...value, notes: text });
@@ -330,14 +331,14 @@ function App() {
     const result = await invoke<{ text: string | null; backup: string }>("restore_recovery", {
       problem: target.problem, language: target.language, solution: target.solution, kind: target.kind, id, side, reviewed, expected: target.external, local: target.local,
     });
-    persisted.current.set(target.saveKey, result.text);clean.current.set(target.saveKey,result.text??"");
+    persisted.current.set(target.saveKey, result.text);clean.current.set(target.saveKey,editorText(result.text??""));
     if (currentText() !== target.local) {
       reconcileDirty(target);checkpoint(target,currentText(),result.text);refresh(n=>n+1);
       setRecovery({ ...target, local: currentText(), external: result.text });
       throw new Error("恢复期间编辑器又有更新，新草稿仍被保留，请刷新后确认");
     }
     queue.current.discard(target.saveKey);
-    const text = result.text ?? "";
+    const text = editorText(result.text ?? "");
     if (target.kind === "notes") {
       notes.current.set(target.problem, text);
       for (const [key, value] of documents.current) if (JSON.parse(key)[1] === target.problem) documents.current.set(key, { ...value, notes: text });
@@ -368,9 +369,9 @@ function App() {
       const loaded = await invoke<{ code: string | null; notes: string | null }>("load_document", { problem: target, language });
       if (selected.current !== key || sequence.current !== generation || notes.current.get(target) !== local) return;
       if (loaded.notes === baseline) return;
-      if (local === (baseline ?? "") && !queue.current.failed(saveKey) && loaded.notes !== null) {
-        notes.current.set(target, loaded.notes); persisted.current.set(saveKey, loaded.notes);clean.current.set(saveKey,loaded.notes);dirty.current.delete(saveKey);
-        for (const [entryKey, value] of documents.current) if (JSON.parse(entryKey)[1] === target) documents.current.set(entryKey, { ...value, notes: loaded.notes });
+      if (local === editorText(baseline ?? "") && !queue.current.failed(saveKey) && loaded.notes !== null) {
+        notes.current.set(target, editorText(loaded.notes)); persisted.current.set(saveKey, loaded.notes);clean.current.set(saveKey,editorText(loaded.notes));dirty.current.delete(saveKey);
+        for (const [entryKey, value] of documents.current) if (JSON.parse(entryKey)[1] === target) documents.current.set(entryKey, { ...value, notes: editorText(loaded.notes) });
         reloadNotes(n => n + 1); refresh(n => n + 1); setStatus("已重新读取外部笔记");
       } else {
         queue.current.block(saveKey); refresh(n => n + 1);
@@ -435,8 +436,8 @@ function App() {
     <section className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
       <div className="pane-heading"><div className="document-selectors"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select>{problem && <SolutionPicker key={solutionGroup} problem={problemId} language={language} value={solution} codeSource={codeSource} template={baseCode} templateAvailable={baseTemplate!==null} disabled={editorLoading} onChange={selectSolution} onCreated={(entry,text) => {
         const key=draftKey({account:"local",problem:problemId,language,solution:entry.id});
-        documents.current.set(key,{code:text,notes:notes.current.get(problemId)??""});
-        persisted.current.set(key,isTauri()?text:null);clean.current.set(key,text);dirty.current.delete(key);codeSignals.current.notify(key);selectSolution(entry.id);
+        documents.current.set(key,{code:editorText(text),notes:notes.current.get(problemId)??""});
+        persisted.current.set(key,isTauri()?text:null);clean.current.set(key,editorText(text));dirty.current.delete(key);codeSignals.current.notify(key);selectSolution(entry.id);
       }} />}{dirty.current.has(activeKey)&&<span className="unsaved-mark" role="img" aria-label="源码未保存" title="未保存" />}</div><div className="actions"><IconButton icon="save" label="保存源码" shortcut="Ctrl+S" disabled={editorLoading} onClick={()=>sourceSave.current?.()} /><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} aria-expanded={localRunner} onClick={() => {setLocalOpened(true);setLocalRunner(v => !v);}} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title={judgeDisabledReason||"将当前代码与用例发送到中国站运行"}>运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title={judgeDisabledReason||"确认后正式提交到中国站"}>提交</button></div></div>
       {problem && baseTemplate===null && sourceEmpty && <p className="error" role="alert">官方模板不可用</p>}
       {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor vimEnabled={editorSettings?.settings.vim??false} tabSize={editorSettings?.settings.tabSize??4} onSaveReady={save=>{sourceSave.current=save;}} formatting={{epoch:()=>formatEpoch.current,ready:(save)=>!shuttingDown.current&&(!save||(!queue.current.failed(activeKey)&&!conflict&&!recovery)),enabled:formatEnabled(editorSettings?.settings??null,language),save:text=>saveSnapshot("code",text),report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatusSnapshot} statusOwner={languageStatusOwner} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { if(sameBreakpointLines(points.current.get(activeKey)??[],lines))return;points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
