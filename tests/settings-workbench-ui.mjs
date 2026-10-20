@@ -302,6 +302,8 @@ export async function runSettingsWorkbenchUI(browser,openSettings){
      pageScrollWidth:document.documentElement.scrollWidth};
    });
    const layout=await measure();
+   await writeFile(`evidence/settings-layout-${viewport.width}x${viewport.height}.json`,JSON.stringify(layout,null,2));
+   await capture(`evidence/settings-layout-${viewport.width}x${viewport.height}.png`);
    equal(layout.dialog.left>=-1&&layout.dialog.top>=-1&&layout.dialog.right<=viewport.width+1&&layout.dialog.bottom<=viewport.height+1,true,"dialog stays within the viewport");
    equal(layout.body.left>=layout.dialog.left-1&&layout.body.top>=layout.dialog.top-1&&layout.body.right<=layout.dialog.right+1&&layout.body.bottom<=layout.dialog.bottom+1,true,"Settings body stays inside its dialog instead of overflowing a short-height clamp");
    equal(layout.content.left>=layout.body.left-1&&layout.content.top>=layout.body.top-1&&layout.content.right<=layout.body.right+1&&layout.content.bottom<=layout.body.bottom+1,true,"content viewport stays inside the Settings body");
