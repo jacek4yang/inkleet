@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: preview-installers-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref == 'refs/heads/build/preview-installers' }}
 
 # Preview artifacts only. No release, tag, deployment, signing credentials, or
 # debug/native-snippet feature is used by any distributable build.

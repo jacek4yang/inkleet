@@ -865,7 +865,10 @@ try:
         for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
         keys += [{"type":"keyDown","value":"\ue032"},{"type":"keyUp","value":"\ue032"}]
         cmd("POST","/actions",{"actions":[{"type":"key","id":"python-rename","actions":keys}]})
-        rename_input=wait_for(lambda: element('.lsp-rename input'),"native F2 rename input")
+        rename_input=wait_for(lambda: element('.lsp-rename input:not([readonly])'),"native F2 rename input")
+        assert element('.lsp-rename[data-prepared="server"]'),"private Pyright prepareRename validated source symbol"
+        assert text(code)=="def solve(values): return sum(values)","prepareRename must not modify source"
+        (evidence/"PREPARE_RENAME_NATIVE_RESULT.txt").write_text("PASS: real pinned Pyright prepareRename response accepted before name input becomes editable; source unchanged.\\n")
         cmd("POST",f"/element/{rename_input}/clear",{})
         cmd("POST",f"/element/{rename_input}/value",{"text":"numbers","value":list("numbers")})
         click('.lsp-rename button[type="submit"]')
@@ -882,7 +885,7 @@ try:
         wait_for(lambda:element(".editor-command-palette"),"rename palette opens at source selection")
         fill('[aria-label="搜索编辑器命令"]',"重命名符号")
         subprocess.run(["xdotool","key","Return"],check=True)
-        rename_input=wait_for(lambda:element(".lsp-rename input"),"palette invokes same rename controller")
+        rename_input=wait_for(lambda:element(".lsp-rename input:not([readonly])"),"palette invokes same rename controller")
         assert not cmd("POST","/elements",{"using":"css selector","value":".editor-command-palette"}),"executed palette closes"
         cmd("POST",f"/element/{rename_input}/clear",{})
         cmd("POST",f"/element/{rename_input}/value",{"text":"items","value":list("items")})
@@ -892,6 +895,36 @@ try:
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
         wait_for(lambda:text(code)=="def solve(values): return sum(values)","palette rename remains one undo transaction")
         (evidence/"COMMAND_RENAME_NATIVE_RESULT.txt").write_text("PASS: real palette invokes Pyright rename at preserved source selection, edits declaration/reference, and single undo restores both.\n")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home"],check=True)
+        subprocess.run(["xdotool","key","--repeat","11","--repeat-delay","10","Right"],check=True)
+        subprocess.run(["xdotool","key","F2"],check=True)
+        wait_for(lambda:element(".lsp-rename input:not([readonly])"),"preview rename input")
+        fill(".lsp-rename input","previewed")
+        subprocess.run(["xdotool","key","--clearmodifiers","shift+Return"],check=True)
+        wait_for(lambda:element(".lsp-rename-preview:not([hidden])"),"real Pyright rename preview")
+        assert text(code)=="def solve(values): return sum(values)","preview must leave original source unchanged"
+        assert len(cmd("POST","/elements",{"using":"css selector","value":".lsp-rename-change"}))==2,"both semantic occurrences are previewed"
+        screenshot("python-rename-preview-native.png")
+        apply_selector='[data-action="rename-apply"]'
+        last_rect=None
+        stable_samples=0
+        def stable_rename_apply():
+            global last_rect, stable_samples
+            target=element(apply_selector)
+            if not cmd("GET",f"/element/{target}/displayed"): return False
+            rect=cmd("GET",f"/element/{target}/rect")
+            stable_samples=stable_samples+1 if rect==last_rect else 0
+            last_rect=rect
+            return stable_samples>=2
+        wait_for(stable_rename_apply,"rename Apply has stable visible geometry")
+        click(apply_selector)
+        wait_for(lambda:text(code)=="def solve(previewed): return sum(previewed)","reviewed rename applied")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+        wait_for(lambda:text(code)=="def solve(values): return sum(values)","preview application is one undo transaction")
+        (evidence/"RENAME_PREVIEW_NATIVE_RESULT.txt").write_text("PASS: actual F2 + ShiftEnter obtains private Pyright edits, preview does not mutate source, Apply changes both occurrences and one undo restores original.\\n")
+
 
         focus_code_editor()
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
@@ -1358,7 +1391,7 @@ try:
                 local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
                 if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
-                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let mut total=0;\n for value in values {total+=value;}\n total\n}"
+                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let map=std::collections::HashMap::from([(3,30),(8,80)]); let empty:std::collections::HashMap<i32,i32>=std::collections::HashMap::new(); let set=std::collections::HashSet::from([3,8]); let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
                 save_editor(code)
                 if group=="golang":
@@ -1397,6 +1430,35 @@ try:
                     node=element('.debug-variable > button[aria-label="total"] + code')
                     return cmd("GET",f"/element/{node}/property/textContent")
                 wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
+
+                if group=="rust":
+                    map_node='.debug-tree-node:has(> .debug-variable > button[aria-label="map"])'
+                    click('.debug-variable > button[aria-label="map"]')
+                    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashMap exposes two logical pairs")
+                    assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"], '+map_node+' button[aria-label="[raw]"]'}),"internal map layout hidden by default"
+                    pair_buttons=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-variable > button'})
+                    pair_names=[cmd("GET",f"/element/{pair[EID]}/attribute/aria-label") for pair in pair_buttons]
+                    for pair_name in pair_names:
+                        pair_selector=map_node+' > .debug-tree-children > .debug-tree-node:has(> .debug-variable > button[aria-label="'+pair_name+'"])'
+                        click(pair_selector+' > .debug-variable > button')
+                        wait_for(lambda:cmd("GET",f"/element/{element(pair_selector+' > .debug-variable > button')}/attribute/aria-expanded")=="true","pair visibly expanded")
+                        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":pair_selector+' > .debug-tree-children > .debug-tree-node > .debug-variable > code'}))==2,"pair children loaded before next layout-dependent click")
+                    def map_values():
+                        nodes=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-tree-children > .debug-tree-node > .debug-variable > code'})
+                        return sorted(cmd("GET",f"/element/{item[EID]}/property/textContent") for item in nodes)
+                    wait_for(lambda:map_values()==["3","30","8","80"],"logical HashMap keys and values regardless of iteration order")
+                    click(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
+                    click(map_node+' button[aria-label="[raw]"]')
+                    wait_for(lambda:element(map_node+' button[aria-label="base"]'),"raw map retains implementation fields")
+                    click(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"]'}),"hide raw removes internal layout"
+                    click('.debug-variable > button[aria-label="set"]')
+                    set_node='.debug-tree-node:has(> .debug-variable > button[aria-label="set"])'
+                    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":set_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashSet logical elements")
+                    screenshot("rust-logical-collections-native.png")
+                    (evidence/"RUST_COLLECTIONS_NATIVE_RESULT.txt").write_text("PASS: private Rust compiler visualizers expose two HashMap pairs with exact keys/values, two HashSet elements, default-hidden raw layout and explicit reversible raw view. Large-map retrieval and other platforms unverified.\\n")
+
                 screenshot(group+"-debug-native.png")
                 for _ in range(3):
                     focus_code_editor()

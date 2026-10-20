@@ -407,6 +407,21 @@ input:not([type=checkbox]):not([type=radio]):focus-visible,textarea:focus-visibl
 .editor-command-palette>input[type=text]:focus,.editor-command-palette>input[type=text]:focus-visible{outline:none;box-shadow:none}
 .editor-command-palette:focus-within{border-color:var(--accent)}
 
+.lsp-rename:has(.lsp-rename-preview:not([hidden])){max-width:min(560px,85vw)}
+.lsp-rename-preview[hidden]{display:none}
+.lsp-rename-summary{font-size:12px;padding:4px 0 8px;outline:none}
+.lsp-rename-changes{max-height:min(320px,40vh);overflow:auto;margin-bottom:8px;border-block:1px solid var(--line)}
+.lsp-rename-change{display:grid;grid-template-columns:54px minmax(0,1fr) minmax(0,1fr);gap:8px;padding:6px 0;font-size:12px;border-bottom:1px solid var(--line)}
+.lsp-rename-change>span{color:var(--muted);text-align:right}
+.lsp-rename-change pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-family:var(--font-mono)}
+.lsp-rename-before{color:#9b5555}.lsp-rename-after{color:#387451}
+
+/* Refactoring previews are compact code rows, not Markdown code cards. */
+.lsp-rename{border-radius:6px;box-shadow:0 6px 22px #00000012}
+.lsp-rename:has(.lsp-rename-preview:not([hidden])){width:min(420px,80vw)}
+.lsp-rename .lsp-rename-change pre{padding:2px 4px;border:0;border-radius:0;background:transparent;box-shadow:none}
+.lsp-rename button{min-height:24px;padding:3px 8px;font-size:12px}
+
 .lsp-completion-documentation{max-height:min(320px,40vh);overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
 
 .unsaved-mark{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);flex:0 0 6px;align-self:center}.tabs>button{display:inline-flex;align-items:center;justify-content:center;gap:6px}.document-selectors>.unsaved-mark{margin-inline:4px}.close-drafts{max-width:420px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);padding:20px}.close-drafts::backdrop{background:#0005}.close-drafts button{margin-right:8px}
@@ -674,3 +689,6 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 @media(forced-colors:active){.settings-modified-mark{background:Highlight}.settings-modified-filter[aria-pressed=true]{outline:1px solid Highlight}.settings-owner-error{border-color:Mark}}
 
 .settings-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+
+.debug-tree-children>.debug-raw-toggle{margin:2px 0 2px 16px;padding:2px 5px;font-size:11px;color:var(--muted);background:transparent;border-color:transparent}.debug-tree-children>.debug-raw-toggle:hover{color:var(--ink);background:var(--active-line)}

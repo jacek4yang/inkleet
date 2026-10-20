@@ -32,7 +32,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
+type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; prepareRename?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 function offset(doc: Text, position: unknown): number | null {
@@ -425,7 +425,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
   const references = findReferences((pos, doc) => request("references", pos, doc), status, !commandsOwned);
-  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned);
+  const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned, () => { const id=session?.id; return () => !closed && id!==undefined && session?.id===id; }, (pos,doc) => session?.prepareRename ? request("prepareRename",pos,doc) : Promise.resolve({supported:false}));
   const extensions: Extension[] = [
     vimNavigation({definition:target=>{void definition(target.state.selection.main.head);return true;}}),
     ...references.extensions,
