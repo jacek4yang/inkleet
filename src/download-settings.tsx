@@ -59,14 +59,14 @@ export function DownloadSettings({ visibleRows, addressMatch, onReport }: {
       <div className="settings-group-heading"><h3>下载代理</h3><IconButton type="button" icon="refresh" label="重置下载代理" title="重置下载代理 · 默认：跟随系统" className="settings-reset" data-setting-reset="downloads.proxy" data-settings-focus="reset:downloads.proxy" disabled={busy || !canReset} onClick={() => { setDraft(resetProxyBundle(draft)); setNotice(""); }} /></div>
       <div className="settings-row" data-setting-id="downloads.proxy.mode" hidden={!showMode}>
         <label className="settings-field" htmlFor="download-proxy-mode"><span>连接方式{modeState.status === "known" && !modeState.isDefault && <i className="settings-modified-mark" aria-hidden="true" title="已修改" />}</span>
-          <select id="download-proxy-mode" data-settings-focus="downloads.proxy.mode" disabled={busy || !saved} value={draft.mode} onChange={event => { setDraft(current => ({ ...current, mode: event.target.value as ProxyMode })); setNotice(""); }}>
+          <select aria-label="连接方式" id="download-proxy-mode" data-settings-focus="downloads.proxy.mode" disabled={busy || !saved} value={draft.mode} onChange={event => { setDraft(current => ({ ...current, mode: event.target.value as ProxyMode })); setNotice(""); }}>
             <option value="system">跟随系统</option><option value="direct">直接连接</option><option value="custom">自定义代理</option>
           </select>
         </label>
       </div>
       {draft.mode === "custom" && <div className="settings-row settings-address" data-setting-id="downloads.proxy.url" data-setting-match={visibleRows.has("downloads.proxy.url") ? undefined : "supporting"} hidden={!showAddress}>
         <label className="settings-field" htmlFor="download-proxy-url"><span>HTTP / HTTPS 地址</span>
-          <input id="download-proxy-url" data-settings-focus="downloads.proxy.url" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={2048} placeholder="http://127.0.0.1:7890" value={draft.url} disabled={busy || !saved} onChange={event => { setDraft(current => ({ ...current, url: event.target.value })); setNotice(""); }} />
+          <input aria-label="HTTP / HTTPS 地址" id="download-proxy-url" data-settings-focus="downloads.proxy.url" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={2048} placeholder="http://127.0.0.1:7890" value={draft.url} disabled={busy || !saved} onChange={event => { setDraft(current => ({ ...current, url: event.target.value })); setNotice(""); }} />
         </label>
       </div>}
       {addressMatch && draft.mode !== "custom" && <p className="settings-dependent" data-setting-id="downloads.proxy.url">HTTP / HTTPS 地址 <span>· 自定义代理</span></p>}
