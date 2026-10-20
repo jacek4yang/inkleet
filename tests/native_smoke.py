@@ -85,16 +85,16 @@ def source_text(css):
     return "\n".join(cmd("GET",f"/element/{line[EID]}/property/textContent") for line in lines)
 
 
-def reveal_debug_control(css, fallback="down"):
+def reveal_debug_control(css, fallback="down", panel_css=".debug-body", top_inset=4):
     # Native WebKit does not reliably auto-scroll controls in nested inspectors.
     # Use the real pointer wheel over the outer padding, never execute JS clicks.
     for _ in range(12):
-        panel=cmd("GET",f"/element/{element('.debug-body')}/rect")
+        panel=cmd("GET",f"/element/{element(panel_css)}/rect")
         try: target=cmd("GET",f"/element/{element(css)}/rect")
         except RuntimeError as error:
             if "element not interactable" not in str(error): raise
             target=None
-        top=panel["y"]+4; bottom=panel["y"]+panel["height"]-4
+        top=panel["y"]+top_inset; bottom=panel["y"]+panel["height"]-4
         if target and target["height"]>0 and target["y"]>=top and target["y"]+target["height"]<=bottom:
             return
         window=cmd("GET","/window/rect")
@@ -103,7 +103,7 @@ def reveal_debug_control(css, fallback="down"):
         direction=("4" if fallback=="up" else "5") if target is None else ("5" if target["y"]+target["height"]>bottom else "4")
         subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","--repeat","2","--delay","80",direction],check=True)
         time.sleep(.15)
-    raise AssertionError("Debug control remains unreachable through real wheel: "+css)
+    raise AssertionError("Control remains unreachable through real wheel in "+panel_css+": "+css)
 
 def click_debug_action(css):
     # Choose one real pointer click before sending any mutation. Presence and
@@ -1497,7 +1497,10 @@ try:
             selector='select[aria-label="Tab 显示宽度"]'
             click(f'{selector} option[value="{size}"]')
             wait_for(lambda:cmd("GET",f"/element/{element(selector)}/property/value")==str(size),"native tab display selection")
-            click_debug_action(".format-settings .settings-form-actions button")
+            # Scroll the actual Settings viewport before exactly one Save click.
+            # WebKit refuses element rects for offscreen nested-scroll controls.
+            reveal_debug_control('[data-settings-focus="editor.save"]',panel_css=".settings-content",top_inset=80)
+            click_debug_action('[data-settings-focus="editor.save"]')
             def persisted_width():
                 settings=json.loads(editor_config.read_text())
                 return "tabSize" not in settings if size==4 else settings.get("tabSize")==size
@@ -1524,7 +1527,10 @@ try:
             selected=cmd("GET",f"/element/{check}/selected")
             if bool(selected)!=enabled: click_debug_action(".format-switch input")
             wait_for(lambda:bool(cmd("GET",f"/element/{element('.format-switch input')}/selected"))==enabled,"format preference checkbox changed")
-            click_debug_action(".format-settings .settings-form-actions button")
+            # Scroll the actual Settings viewport before exactly one Save click.
+            # WebKit refuses element rects for offscreen nested-scroll controls.
+            reveal_debug_control('[data-settings-focus="editor.save"]',panel_css=".settings-content",top_inset=80)
+            click_debug_action('[data-settings-focus="editor.save"]')
             wait_for(lambda:json.loads(editor_config.read_text())["formatOnSave"]==enabled,"native format preference saved")
             click_debug_action('[aria-label="关闭设置"]')
             wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="关闭设置"]'}),"settings closed after format preference")
@@ -1570,7 +1576,10 @@ try:
             check=element(".vim-switch input")
             selected=cmd("GET",f"/element/{check}/selected")
             if bool(selected)!=enabled: cmd("POST",f"/element/{check}/click",{})
-            click_debug_action(".format-settings .settings-form-actions button")
+            # Scroll the actual Settings viewport before exactly one Save click.
+            # WebKit refuses element rects for offscreen nested-scroll controls.
+            reveal_debug_control('[data-settings-focus="editor.save"]',panel_css=".settings-content",top_inset=80)
+            click_debug_action('[data-settings-focus="editor.save"]')
             wait_for(lambda:json.loads(editor_config.read_text()).get("vim",False)==enabled,"native Vim preference saved")
             click('[aria-label="关闭设置"]')
         set_vim(True)

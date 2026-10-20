@@ -1606,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "inkleet"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "inkleet-managed-env",
  "reqwest 0.12.28",

@@ -3,6 +3,7 @@ name: Preview desktop installers
 on:
   push:
     branches: [build/preview-installers]
+    paths: ['src/**', 'src-tauri/**', 'crates/**', 'package*.json', 'icon.svg', 'scripts/**', '.github/workflows/preview-installers.yml']
   workflow_dispatch:
 
 permissions:
