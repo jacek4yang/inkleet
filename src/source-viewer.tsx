@@ -17,8 +17,8 @@ function Icon({kind}:{kind:"back"|"forward"|"close"|"return"}){
  const d={back:"M10 3 5 8l5 5M5 8h9",forward:"m6 3 5 5-5 5M2 8h9",close:"m4 4 8 8M12 4l-8 8",return:"M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v2"}[kind];
  return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d}/></svg>;
 }
-export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;onClose:()=>void;vimEnabled?:boolean}){
- const dialog=useRef<HTMLDialogElement>(null),host=useRef<HTMLDivElement>(null),actions=useRef<{move:(direction:-1|1)=>void;close:()=>void;configure:(enabled:boolean)=>void}|null>(null);
+export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4}:{source:Source;onClose:()=>void;vimEnabled?:boolean;tabSize?:number}){
+ const dialog=useRef<HTMLDialogElement>(null),host=useRef<HTMLDivElement>(null),actions=useRef<{move:(direction:-1|1)=>void;close:()=>void;configure:(enabled:boolean)=>void;configureTabSize:(size:number)=>void}|null>(null);
  const [info,setInfo]=useState({name:source.name,uri:source.uri,path:sourceDisplayPath(source.uri),declaration:source.declaration,back:true,forward:false,message:""});
  const closeCallback=useRef(onClose);closeCallback.current=onClose;
  useLayoutEffect(()=>{
@@ -30,7 +30,8 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   history.push({source,selection:{ranges:[initialSelection],mainIndex:0},scroll:{top:0,left:0}});
   let destroyed=false,generation=0,abort:AbortController|null=null,swapping=false,view:EditorView;
   let pendingRestore:{top:number;left:number}|null=null;
-  const vimSlot=new Compartment();
+  const vimSlot=new Compartment(),tabSizeSlot=new Compartment();
+  let displayTabSize=tabSize;
   const vimExtensions=(enabled:boolean)=>enabled?[Prec.high(vim({status:false})),steadyVimCursor()]:[];
   let enabled=vimEnabled;
   const selection=()=>({ranges:view.state.selection.ranges.map(({anchor,head})=>({anchor,head})),mainIndex:view.state.selection.mainIndex});
@@ -78,7 +79,7 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
   };
   function state(text:string,language:string,selected:EditorSelection){
    return EditorState.create({doc:text,selection:selected,extensions:[
-    basicSetup,indentGuides,EditorState.tabSize.of(4),language==="java"?java():language==="golang"?go():language==="rust"?rust():language==="cpp"||language==="c"?cpp():python(),
+    basicSetup,indentGuides,tabSizeSlot.of(EditorState.tabSize.of(displayTabSize)),language==="java"?java():language==="golang"?go():language==="rust"?rust():language==="cpp"||language==="c"?cpp():python(),
     vimSlot.of(vimExtensions(enabled)),
     vimNavigation({definition:target=>{void follow(target.state.selection.main.head);return true;}}),
     Prec.highest(EditorView.domEventHandlers({keydown(event,target){
@@ -111,11 +112,12 @@ export function SourceViewer({source,onClose,vimEnabled=false}:{source:Source;on
    // edits using filter:false; trusted navigation alone may replace the state.
    dispatchTransactions(transactions,target){if(transactions.some(t=>t.docChanged))return;target.update(transactions);}
   });
-  actions.current={move,close,configure(value){enabled=value;view.dispatch({effects:vimSlot.reconfigure(vimExtensions(value))});}};
+  actions.current={move,close,configure(value){enabled=value;view.dispatch({effects:vimSlot.reconfigure(vimExtensions(value))});},configureTabSize(size){displayTabSize=size;if(view.state.tabSize!==size)view.dispatch({effects:tabSizeSlot.reconfigure(EditorState.tabSize.of(size))});}};
   update();view.focus();view.dispatch({effects:EditorView.scrollIntoView(first.anchor,{y:"center"})});
   return()=>{destroyed=true;cancel();actions.current=null;element.close();view.destroy();history.clear();};
  },[source]);
  useLayoutEffect(()=>{actions.current?.configure(vimEnabled);},[vimEnabled]);
+ useLayoutEffect(()=>{actions.current?.configureTabSize(tabSize);},[tabSize]);
  return <dialog className="source-viewer" ref={dialog} aria-label="源码查看" aria-labelledby="source-title" onCancel={event=>{event.preventDefault();actions.current?.close();}}>
   <header>
    <nav aria-label="源码导航"><button aria-label="后退" title="后退 · Alt+← / Ctrl+O" disabled={!info.back} onClick={()=>actions.current?.move(-1)}><Icon kind="back"/></button><button aria-label="前进" title="前进 · Alt+→ / Ctrl+I" disabled={!info.forward} onClick={()=>actions.current?.move(1)}><Icon kind="forward"/></button></nav>

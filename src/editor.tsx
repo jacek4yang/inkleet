@@ -56,17 +56,18 @@ export type EditorLanguageStatus={owner:string;text:string};
 type Props = {
   statusOwner?:string;
   vimEnabled?:boolean;
+  tabSize?:number;
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void; onStatus?: (status: EditorLanguageStatus) => void; reconnectToken?: number; onSettings?: () => void;
   onSave?:()=>void;onSaveReady?:(save:(()=>boolean)|null)=>void;
   formatting?: {epoch?:()=>number;ready?:(save:boolean)=>boolean;enabled:boolean;save:(text:string)=>Promise<boolean>;report:(message:string)=>void};
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
-export function CodeEditor({ vimEnabled=false, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, statusOwner, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
+export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, statusOwner, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
   const formatOptions=useRef(formatting);formatOptions.current=formatting;
   const saveCallback=useRef(onSave),saveReady=useRef(onSaveReady);saveCallback.current=onSave;saveReady.current=onSaveReady;
   const host = useRef<HTMLDivElement>(null);
-  const vimSlot=useRef(new Compartment()),liveView=useRef<EditorView|null>(null),vimSave=useRef<(view:EditorView)=>boolean>(()=>false);
+  const vimSlot=useRef(new Compartment()),tabSizeSlot=useRef(new Compartment()),liveView=useRef<EditorView|null>(null),vimSave=useRef<(view:EditorView)=>boolean>(()=>false);
   const [lspStatus, setLspStatus] = useState<EditorLanguageStatus>({owner:"",text:""});
   const connection = reconnectToken;
   const [source, setSource] = useState<Source | null>(null);
@@ -103,7 +104,7 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
     const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
       basicSetup, snippetSession, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), ...(language==="markdown"?[]:[indentGuides]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
-      EditorState.tabSize.of(4),
+      tabSizeSlot.current.of(EditorState.tabSize.of(tabSize)),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
       // 补全优先，其次缩进；Escape 然后 Tab 仍可退出编辑器，避免键盘焦点陷阱。
       Prec.high(keymap.of([{ key: "Tab", run: view => vimNormal(view)||acceptCompletion(view)||completionStatus(view.state)==="active"||acceptSnippetChoice(view,true)||moveSnippetField(view,1)||indentMore(view), shift:view=>vimNormal(view)||moveSnippetField(view,-1)||indentLess(view) },
@@ -150,7 +151,9 @@ export function CodeEditor({ vimEnabled=false, documentKey, language, value, lab
       commandHost?.remove();
     };
   }, [documentKey, language, label, connection, metadata, statusOwner]);
+  // Display-only reconfiguration keeps the view, document, history and LSP owner.
+  useLayoutEffect(()=>{const view=liveView.current;if(view&&view.state.tabSize!==tabSize)view.dispatch({effects:tabSizeSlot.current.reconfigure(EditorState.tabSize.of(tabSize))});},[tabSize]);
   useLayoutEffect(()=>{const view=liveView.current;if(view){endSnippet(view);view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});}},[vimEnabled]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection, language, label, metadata]);
-  return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} vimEnabled={vimEnabled} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} vimEnabled={vimEnabled} tabSize={tabSize} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }

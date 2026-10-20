@@ -75,7 +75,7 @@ def text(css):
     return cmd("GET",f"/element/{element(css)}" + suffix)
 def settings_action(category, css):
     click('[data-action="open-settings"]')
-    node=cmd("POST","/element",{"using":"xpath","value":f"//nav[@aria-label='设置分类']/button[text()='{category}']"})[EID]
+    node=cmd("POST","/element",{"using":"xpath","value":f"//nav[@aria-label='设置分类']/button[@aria-label='{category}']"})[EID]
     click_native_node(node)
     click_debug_action(css)
 def source_text(css):
@@ -573,7 +573,7 @@ try:
     # for login or configure the runner's system network.
     click('[data-action="open-settings"]')
     wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":"nav[aria-label='设置分类']"}),"settings categories mounted")
-    downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='下载']"})[EID]
+    downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='下载']"})[EID]
     cmd("POST",f"/element/{downloads_tab}/click",{})
     wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-mode')}/enabled"),"download settings read")
     click('#download-proxy-mode option[value="custom"]')
@@ -587,7 +587,7 @@ try:
     click('[aria-label="关闭设置"]')
     stop();start()
     click('[data-action="open-settings"]')
-    downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='下载']"})[EID]
+    downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='下载']"})[EID]
     cmd("POST",f"/element/{downloads_tab}/click",{})
     wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-url')}/property/value")=="http://127.0.0.1:7890/","restart restores validated proxy")
     click('#download-proxy-mode option[value="system"]')
@@ -928,11 +928,11 @@ try:
         click('[data-action="local-execute"]')
         wait_for(lambda: text(".local-result").strip()=="10", "real private Python harness result", seconds=30)
         assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.case-result')}/attribute/title")
-        click('[aria-label="运行与调试设置"]')
-        click('[aria-label="使用手册"]')
+        click('[aria-label="运行与调试帮助"]')
+        assert not cmd("POST","/elements",{"using":"css selector","value":'.settings-hub'}),"runner Help opens the manual directly"
         wait_for(lambda:"本地输出不代表力扣判题结论" in cmd("GET",f"/element/{element('.user-manual')}/property/textContent"),"local judge distinction is available in the manual")
         click('[aria-label="关闭使用手册"]')
-        click('[aria-label="关闭设置"]')
+        wait_for(lambda:cmd("GET",f"/element/{cmd('GET','/element/active')[EID]}/attribute/aria-label")=="运行与调试帮助","runner Help restores keyboard focus to its opener")
         screenshot("python-local-run-native.png")
         (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
         click('[data-local-tab="debug"]')
@@ -1415,10 +1415,48 @@ try:
         save_editor(code)
 
 
+        # Display-only preference through the native Settings UI. Reuse the saved
+        # marker above; this acceptance check must not author any source edits.
+        tab_editor_node=element(".code-pane .cm-editor")
+        tab_content_node=element(code)
+        tab_source_before=source_text(code)
+        tab_source_file=data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs"
+        wait_for(lambda:tab_source_file.exists() and tab_source_file.read_text()==tab_source_before,"native tab display prior source save settled")
+        tab_saved_before=tab_source_file.read_text()
+        def native_tab_display_size():
+            return cmd("POST","/execute/sync",{
+                "script":"return getComputedStyle(arguments[0]).getPropertyValue('tab-size');",
+                "args":[{EID:element(code)}],
+            })
+        def set_tab_display_width(size):
+            click('[data-action="open-settings"]')
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='编辑器']"})[EID]
+            click_native_node(category)
+            selector='select[aria-label="Tab 显示宽度"]'
+            click(f'{selector} option[value="{size}"]')
+            wait_for(lambda:cmd("GET",f"/element/{element(selector)}/property/value")==str(size),"native tab display selection")
+            click_debug_action(".format-settings .settings-form-actions button")
+            def persisted_width():
+                settings=json.loads(editor_config.read_text())
+                return "tabSize" not in settings if size==4 else settings.get("tabSize")==size
+            wait_for(persisted_width,"native tab display setting persisted")
+            wait_for(lambda:native_tab_display_size()==str(size),"native CodeMirror tab display style")
+            if size==8: screenshot("tab-display-width-settings-native.png")
+            click('[aria-label="关闭设置"]')
+            assert element(".code-pane .cm-editor")==tab_editor_node,"tab display preference preserves the native editor DOM"
+            assert element(code)==tab_content_node,"tab display preference preserves the native content DOM"
+            assert source_text(code)==tab_source_before,"tab display preference preserves visible source"
+            assert tab_source_file.read_text()==tab_saved_before,"tab display preference never rewrites saved source"
+        set_tab_display_width(8)
+        set_tab_display_width(4)
+        assert "tabSize" not in json.loads(editor_config.read_text()),"native default tab width omits the optional setting"
+        assert native_tab_display_size()=="4","native tab width default restored before formatter and Vim cases"
+        (evidence/"TAB_DISPLAY_NATIVE_RESULT.txt").write_text("PASS: native Settings saves tab display width 8, computed CodeMirror tab-size follows without replacing editor/content DOM or changing source; reset to 4 omits the optional key and restores the original default. No source edits are introduced by this case.\n")
+
         # Actual formatter processes/LSP inside the real WebView, never mocked IPC.
         def set_auto_format(enabled):
             click('[data-action="open-settings"]')
-            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='编辑器']"})[EID]
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='编辑器']"})[EID]
             click_native_node(category)
             check=element(".format-switch input")
             selected=cmd("GET",f"/element/{check}/selected")
@@ -1465,7 +1503,7 @@ try:
         fill(code,"one two\nthree four")
         def set_vim(enabled):
             click('[data-action="open-settings"]')
-            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[text()='编辑器']"})[EID]
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='编辑器']"})[EID]
             click_native_node(category)
             check=element(".vim-switch input")
             selected=cmd("GET",f"/element/{check}/selected")

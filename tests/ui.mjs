@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { runTabSizeUI } from "./tab-size-ui.mjs";
+import { runSettingsWorkbenchUI } from "./settings-workbench-ui.mjs";
 
 async function openSettings(page, category) {
   await page.locator('[data-action="open-settings"]').click();
@@ -1129,12 +1131,13 @@ try {
   assert.match(await runPanel.locator(".case-result").getAttribute("title"), /不代表通过力扣判题/, "local result distinction remains available on hover");
   await runPanel.getByLabel("查看原始结果",{exact:true}).click();
   assert.equal(await runPanel.locator(".exit-code").count(),0,"successful exit code is not permanent clutter");
-  await runPanel.getByRole("button", { name: "运行与调试设置", exact: true }).click();
+  const runHelp=runPanel.getByRole("button", { name: "运行与调试帮助", exact: true });
+  await runHelp.click();
   assert.equal(await runPage.getByRole("dialog",{name:"设置",exact:true}).locator(".settings-reference").count(),0);
-  await runPage.getByRole("button",{name:"使用手册",exact:true}).click();
+  assert.equal(await runPage.getByRole("dialog",{name:"设置",exact:true}).count(),0,"runner Help opens the manual directly without an empty Settings destination");
   await runPage.getByRole("dialog",{name:"使用手册",exact:true}).getByText(/本地输出不代表力扣判题结论/).waitFor();
   await runPage.getByRole("button",{name:"关闭使用手册",exact:true}).click();
-  await runPage.getByRole("button", { name: "关闭设置", exact: true }).click();
+  assert.equal(await runHelp.evaluate(node=>document.activeElement===node),true,"closing runner Help restores its real opener");
 
   const separator=runPage.getByRole("separator",{name:"调整本地面板高度",exact:true});
   const initialHeight=(await runPanel.boundingBox()).height;
@@ -1931,7 +1934,7 @@ try {
       await settingsPage.close();
     }
   }
-  const settingsEditorDraft = {vim:true,formatOnSave:false,pythonOverride:"true"};
+  const settingsEditorDraft = {vim:true,tabSize:"8",formatOnSave:false,pythonOverride:"true"};
   const settingsProxyDraft = {mode:"custom",url:"http://127.0.0.1:7899"};
   async function settingsCategory(dialog, category) {
     await dialog.getByRole("navigation",{name:"设置分类"}).getByRole("button",{name:category,exact:true}).click();
@@ -1944,6 +1947,7 @@ try {
     await panel.getByRole("checkbox",{name:"Vim",exact:true}).waitFor();
     return {
       vim:await panel.getByRole("checkbox",{name:"Vim",exact:true}).isChecked(),
+      tabSize:await panel.getByRole("combobox",{name:"Tab 显示宽度",exact:true}).inputValue(),
       formatOnSave:await panel.getByRole("checkbox",{name:"保存时格式化",exact:true}).isChecked(),
       pythonOverride:await panel.getByRole("combobox",{name:"Python 3 保存时格式化",exact:true}).inputValue(),
     };
@@ -1951,6 +1955,7 @@ try {
   async function settingsEditEditor(dialog) {
     const panel = dialog.locator(".format-settings");
     await panel.getByRole("checkbox",{name:"Vim",exact:true}).check();
+    await panel.getByRole("combobox",{name:"Tab 显示宽度",exact:true}).selectOption("8");
     await panel.getByRole("checkbox",{name:"保存时格式化",exact:true}).uncheck();
     await panel.getByRole("combobox",{name:"Python 3 保存时格式化",exact:true}).selectOption("true");
   }
@@ -2008,7 +2013,7 @@ try {
     }
     await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
     dialog = await openSettings(settingsPage,"编辑器");
-    check("closing discards unsaved editor settings", await settingsEditorValues(dialog), {vim:false,formatOnSave:true,pythonOverride:"inherit"});
+    check("closing discards unsaved editor settings", await settingsEditorValues(dialog), {vim:false,tabSize:"4",formatOnSave:true,pythonOverride:"inherit"});
     check("closing never saves the draft", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
   });
 
@@ -2044,6 +2049,19 @@ try {
     await capture("evidence/settings-vim-search.png");
     check("searching never writes settings", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
     check("Vim-only searches never load downloads", await settingsPage.evaluate(() => window.__settingsNavigationTest.reads.downloads), 0);
+  });
+
+  await settingsNavigationCase("Tab width search finds the real control", async (settingsPage,check) => {
+    const dialog=await openSettings(settingsPage,"源码");
+    for(const query of ["Tab","  TAB  ","显示宽度","制表符"]){
+      await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).fill(query);
+      await settingsPaint(settingsPage);
+      const width=dialog.getByRole("combobox",{name:"Tab 显示宽度",exact:true});
+      check(JSON.stringify(query)+" exposes exactly one real tab width",await width.count(),1);
+      if(await width.count()===1)check(JSON.stringify(query)+" selects the actual editor preference",await width.evaluate(node=>({tag:node.tagName,inEditorPanel:!!node.closest(".format-settings"),languageOverride:!!node.closest(".format-language")})),{tag:"SELECT",inEditorPanel:true,languageOverride:false});
+    }
+    check("tab width search never writes",await settingsWriteCounts(settingsPage),{editor:0,downloads:0});
+    check("tab width search never loads downloads",await settingsPage.evaluate(()=>window.__settingsNavigationTest.reads.downloads),0);
   });
 
   await settingsNavigationCase("downloads visited before editor", async (settingsPage,check) => {
@@ -2183,7 +2201,7 @@ try {
       if (kind === "downloads") check("hidden save completion keeps its visible success notice",
         await panel.getByRole("status").allTextContents(), ["已保存，下次下载生效"]);
       check("settled request preserves the requested settings", await settingsPage.evaluate(kind => window.__settingsNavigationTest[kind].settings,kind),
-        kind === "editor" ? {version:1,vim:true,formatOnSave:false,overrides:{python3:true}} : {version:1,proxy:settingsProxyDraft});
+        kind === "editor" ? {version:1,vim:true,tabSize:8,formatOnSave:false,overrides:{python3:true}} : {version:1,proxy:settingsProxyDraft});
     });
   }
   await writeFile("evidence/SETTINGS_NAVIGATION_UI_RESULT.json",JSON.stringify({
@@ -2193,6 +2211,9 @@ try {
   },null,2));
   assert.deepEqual(settingsNavigationFailures,[],"settings drafts and in-flight saves must survive category/search navigation; Vim must be discoverable");
 
+
+  await runSettingsWorkbenchUI(browser,openSettings);
+  await runTabSizeUI(browser,fixtures,openSettings);
 
   const solutionsPage=await testPage({viewport:{width:1440,height:900}});
   await solutionsPage.addInitScript(()=>{
@@ -3201,15 +3222,16 @@ try {
   await snippetPage.goto("http://127.0.0.1:5173/snippet-session-test");
   await snippetPage.evaluate(async()=>{
     const api=await import("/tests/snippet-session-harness.tsx");
-    const s=window.__snippetSessionTest={api,value:"",edits:[],statuses:[],saves:[],formats:[],errors:[],version:1};
+    const s=window.__snippetSessionTest={api,value:"",edits:[],statuses:[],saves:[],formats:[],errors:[],version:1,starts:0,stops:[]};
     window.isTauri=true;
     window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
       if(command==="format_source"){s.formats.push(args.text);return args.text;}
-      if(command==="start_language_service")return {id:97,version:1,server:"snippet-fixture",uri:"file:///solution.py",completionResolve:false};
+      if(command==="start_language_service"){s.starts++;return {id:97,version:1,server:"snippet-fixture",uri:"file:///solution.py",completionResolve:false};}
       if(command==="update_language_document"){s.version=args.version;return;}
       if(command==="language_diagnostics")return {version:s.version,diagnostics:[]};
       if(command==="language_request")return args.kind==="completion"?[{label:"nameComplete"}]:null;
-      if(command==="language_cancel_completion"||command==="stop_language_service")return;
+      if(command==="stop_language_service"){s.stops.push(args.id);return;}
+      if(command==="language_cancel_completion")return;
       throw Error(command);
     }};
     s.mount=api.mountSnippetEditor(document.querySelector("#editor"),s);
@@ -3224,6 +3246,19 @@ try {
   await snippetCode.waitFor();
   await snippetPage.waitForFunction(()=>window.__snippetSessionTest.statuses.some(text=>text.includes("已连接")));
   await snippetPage.evaluate(()=>window.__snippetSessionTest.insert());
+  // A display preference must not end a live snippet or reconnect its LSP owner.
+  await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest,v=s.view();
+    s.tabBefore={view:v,doc:v.state.doc,selection:v.state.selection,session:v.state.field(s.api.snippetSessionState),undo:s.api.undoDepth(v.state),starts:s.starts,stops:s.stops.length};
+    s.mount.setTabSize(8);
+  });
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.view().state.tabSize===8);
+  assert.deepEqual(await snippetPage.evaluate(()=>{
+    const s=window.__snippetSessionTest,v=s.view(),before=s.tabBefore;
+    return {view:v===before.view,doc:v.state.doc===before.doc,selection:v.state.selection.eq(before.selection),session:v.state.field(s.api.snippetSessionState)===before.session,undo:s.api.undoDepth(v.state)===before.undo,starts:s.starts===before.starts,stops:s.stops.length===before.stops};
+  }),{view:true,doc:true,selection:true,session:true,undo:true,starts:true,stops:true},"tab display reconfiguration preserves active snippet, selection, history and LSP");
+  await snippetPage.evaluate(()=>window.__snippetSessionTest.mount.setTabSize(4));
+  await snippetPage.waitForFunction(()=>window.__snippetSessionTest.view().state.tabSize===4);
   await snippetCode.press("ArrowRight");await snippetCode.press("X");
   assert.equal(await snippetCode.innerText(),"nameX = nameX; value","narrowing selection does not break mirrors");
   await snippetCode.press("Tab");

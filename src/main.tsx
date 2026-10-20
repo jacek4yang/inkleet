@@ -9,6 +9,7 @@ import { SolutionPicker } from "./solution-picker";
 import { QuestionSidebar } from "./question-sidebar";
 import { Icon, IconButton } from "./icons";
 import { SettingsHub, type SettingsSection, type SettingsAction } from "./settings-hub";
+import { UserManual } from "./user-manual";
 import { RecoveryDialog } from "./recovery";
 import { ConflictDialog, type FileConflict } from "./conflict";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -48,6 +49,7 @@ function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [fontInfo, setFontInfo] = useState(false);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
+  const [manual, setManual] = useState(false);
   const [editorSettings,setEditorSettings]=useState<EditorSettingsSnapshot|null>(null);
   const settingsVersion=useRef(0);
   const [formatConfigError,setFormatConfigError]=useState("");
@@ -107,10 +109,16 @@ function App() {
     if(isTauri())invoke("get_editor_settings").then(value=>{if(alive&&token===settingsVersion.current)setEditorSettings(validateEditorSettings(value));}).catch(error=>{if(alive&&token===settingsVersion.current)setFormatConfigError(String(error));});
     return()=>{alive=false;};
   },[]);
-  async function reloadEditorSettings(){
+  async function reloadEditorSettings():Promise<EditorSettingsSnapshot|null>{
     const token=++settingsVersion.current;
-    try{const value=validateEditorSettings(await invoke("get_editor_settings"));if(token===settingsVersion.current){setEditorSettings(value);setFormatConfigError("");}}
-    catch(error){if(token===settingsVersion.current)setFormatConfigError(String(error));}
+    try{
+      const value=validateEditorSettings(await invoke("get_editor_settings"));
+      if(token!==settingsVersion.current)return null;
+      setEditorSettings(value);setFormatConfigError("");return value;
+    }catch(error){
+      if(token!==settingsVersion.current)return null;
+      setFormatConfigError(String(error));throw error;
+    }
   }
   async function saveEditorSettings(settings:EditorSettings){
     const token=++settingsVersion.current;
@@ -392,7 +400,7 @@ function App() {
 
     <nav className="tabs" aria-label="工作区">{[["problem","题目"],["code","代码"],["notes","笔记"]].map(([id,label]) => <button key={id} aria-label={label} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}{id==="notes"&&dirty.current.has(problemId+"/notes")&&<span className="unsaved-mark" role="img" aria-label="笔记未保存" title="未保存" />}</button>)}</nav>
     <section className={"reading " + (tab === "code" ? "mobile-hidden" : "")}>
-      {!problem ? <div className="workspace-empty"><span>选择一道题目</span><IconButton icon="link" label="打开题目链接" disabled={!isTauri()} onClick={() => { setCatalogueMode("link"); setCatalogue(true); }} /></div> : tab === "notes" ? <Notes vimEnabled={editorSettings?.settings.vim??false} dirty={dirty.current.has(problemId+"/notes")} onSave={()=>void saveSnapshot("notes",notes.current.get(problemId)??"")} onSettings={() => setSettings("notes")} onRecovery={isTauri() ? () => void openRecovery("notes") : undefined} key={problemId + ":" + reload + ":" + noteRevision} externalEditors={externalEditors} onExternal={editor => void openExternalNotes(editor)} onReload={() => void refreshExternalNotes()} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
+      {!problem ? <div className="workspace-empty"><span>选择一道题目</span><IconButton icon="link" label="打开题目链接" disabled={!isTauri()} onClick={() => { setCatalogueMode("link"); setCatalogue(true); }} /></div> : tab === "notes" ? <Notes vimEnabled={editorSettings?.settings.vim??false} tabSize={editorSettings?.settings.tabSize??4} dirty={dirty.current.has(problemId+"/notes")} onSave={()=>void saveSnapshot("notes",notes.current.get(problemId)??"")} onSettings={() => setSettings("notes")} onRecovery={isTauri() ? () => void openRecovery("notes") : undefined} key={problemId + ":" + reload + ":" + noteRevision} externalEditors={externalEditors} onExternal={editor => void openExternalNotes(editor)} onReload={() => void refreshExternalNotes()} documentKey={problemId + "/notes"} value={notes.current.get(problemId) ?? ""} loading={editorLoading} onChange={text => edit("notes", text)} onExport={() => download("notes.md", notes.current.get(problemId) ?? "")} /> :
       <article>{problem.cached && <p className="cache-warning" title="本机公开题面缓存">已缓存题面</p>}<QuestionStatement question={problem.official} /></article>}
       {cacheWarning && <p className="cache-warning error" role="alert">{cacheWarning}</p>}
     </section>
@@ -403,11 +411,12 @@ function App() {
         persisted.current.set(key,isTauri()?text:null);clean.current.set(key,text);dirty.current.delete(key);codeSignals.current.notify(key);selectSolution(entry.id);
       }} />}{dirty.current.has(activeKey)&&<span className="unsaved-mark" role="img" aria-label="源码未保存" title="未保存" />}</div><div className="actions"><IconButton icon="save" label="保存源码" shortcut="Ctrl+S" disabled={editorLoading} onClick={()=>sourceSave.current?.()} /><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} aria-expanded={localRunner} onClick={() => {setLocalOpened(true);setLocalRunner(v => !v);}} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title={judgeDisabledReason||"将当前代码与用例发送到中国站运行"}>运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title={judgeDisabledReason||"确认后正式提交到中国站"}>提交</button></div></div>
       {problem && baseTemplate===null && sourceEmpty && <p className="error" role="alert">官方模板不可用</p>}
-      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor vimEnabled={editorSettings?.settings.vim??false} onSaveReady={save=>{sourceSave.current=save;}} formatting={{epoch:()=>formatEpoch.current,ready:(save)=>!shuttingDown.current&&(!save||(!queue.current.failed(activeKey)&&!conflict&&!recovery)),enabled:formatEnabled(editorSettings?.settings??null,language),save:text=>saveSnapshot("code",text),report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatusSnapshot} statusOwner={languageStatusOwner} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { if(sameBreakpointLines(points.current.get(activeKey)??[],lines))return;points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
-      {localOpened && problem && <LocalRunner onReveal={()=>setLocalRunner(true)} hidden={!localRunner} onSettings={() => setSettings("debug")} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={position => setPaused({ key: activeKey, position })} key={activeKey} documentKey={activeKey} codeSource={codeSource} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} exampleInputs={problem.official.exampleTestcases??""} onClose={() => {setLocalRunner(false);document.querySelector<HTMLElement>('.code-pane .cm-content')?.focus();}} />}
+      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor vimEnabled={editorSettings?.settings.vim??false} tabSize={editorSettings?.settings.tabSize??4} onSaveReady={save=>{sourceSave.current=save;}} formatting={{epoch:()=>formatEpoch.current,ready:(save)=>!shuttingDown.current&&(!save||(!queue.current.failed(activeKey)&&!conflict&&!recovery)),enabled:formatEnabled(editorSettings?.settings??null,language),save:text=>saveSnapshot("code",text),report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatusSnapshot} statusOwner={languageStatusOwner} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { if(sameBreakpointLines(points.current.get(activeKey)??[],lines))return;points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
+      {localOpened && problem && <LocalRunner onReveal={()=>setLocalRunner(true)} hidden={!localRunner} onHelp={() => setManual(true)} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={position => setPaused({ key: activeKey, position })} key={activeKey} documentKey={activeKey} codeSource={codeSource} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} exampleInputs={problem.official.exampleTestcases??""} onClose={() => {setLocalRunner(false);document.querySelector<HTMLElement>('.code-pane .cm-content')?.focus();}} />}
       {judge.panel}
     </section>
-    {settings && <SettingsHub editorSettings={editorSettings} editorSettingsError={formatConfigError||formatMessage} onReloadEditorSettings={()=>void reloadEditorSettings()} onSaveEditorSettings={saveEditorSettings} initial={settings} languageStatus={languageStatus} onClose={() => setSettings(null)} actions={settingsActions} />}
+    {settings && <SettingsHub editorSettings={editorSettings} editorSettingsError={formatConfigError} formattingStatus={formatMessage} onReloadEditorSettings={reloadEditorSettings} onSaveEditorSettings={saveEditorSettings} initial={settings} languageStatus={languageStatus} onClose={() => setSettings(null)} actions={settingsActions} />}
+    {manual && <UserManual onClose={() => setManual(false)} />}
     {environments && <Environments onClose={() => setEnvironments(false)} />}
     {fontInfo && <FontInfo onClose={() => setFontInfo(false)} />}
     {catalogue && <Catalogue initialMode={catalogueMode} onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}

@@ -6,10 +6,23 @@ use crate::storage;
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all="camelCase")]
-pub struct Document { pub version:u32, #[serde(default)] pub vim:bool, pub format_on_save:bool, pub overrides:BTreeMap<String,bool> }
-impl Default for Document{fn default()->Self{Self{version:1,vim:false,format_on_save:true,overrides:BTreeMap::new()}}}
+pub struct Document { pub version:u32, #[serde(default)] pub vim:bool, #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_tab_size")] pub tab_size:Option<u8>, pub format_on_save:bool, pub overrides:BTreeMap<String,bool> }
+// Deserialize the present value directly as u8: explicit null is invalid.
+// Missing fields use the serde default (None), with effective display width 4.
+fn deserialize_tab_size<'de,D>(deserializer:D)->Result<Option<u8>,D::Error>
+where D:serde::Deserializer<'de>{
+    let value=u8::deserialize(deserializer)?;
+    if !(1..=8).contains(&value){
+        return Err(serde::de::Error::custom("tabSize must be an integer from 1 to 8"));
+    }
+    Ok(Some(value))
+}
+impl Default for Document{fn default()->Self{Self{version:1,vim:false,tab_size:None,format_on_save:true,overrides:BTreeMap::new()}}}
 impl Document{
     fn validated(&self)->Result<(),String>{
+        if self.tab_size.is_some_and(|value|!(1..=8).contains(&value)){
+            return Err("编辑器 Tab 显示宽度必须是 1 到 8 的整数".into());
+        }
         if self.version!=1||self.overrides.len()>6||self.overrides.keys().any(|k|!matches!(k.as_str(),"python3"|"rust"|"golang"|"c"|"cpp"|"java")){
             return Err("编辑器配置版本或语言覆盖无效".into());
         }
@@ -64,6 +77,48 @@ impl EditorSettings {
 
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn tab_size_defaults_bounds_and_round_trip(){
+        let legacy=r#"{"version":1,"formatOnSave":true,"overrides":{}}"#;
+        let absent:Document=serde_json::from_str(legacy).unwrap();
+        assert_eq!(absent.tab_size,None);
+        assert_eq!(absent.tab_size.unwrap_or(4),4);
+        assert_eq!(Document::default().tab_size,None);
+        assert!(!serde_json::to_value(&absent).unwrap().as_object().unwrap().contains_key("tabSize"));
+        for width in [1u8,4,8]{
+            let mut value=serde_json::from_str::<serde_json::Value>(legacy).unwrap();
+            value["tabSize"]=serde_json::json!(width);
+            let parsed:Document=serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.tab_size,Some(width));
+            assert!(parsed.validated().is_ok());
+            assert_eq!(parsed.version,1);
+            let encoded=serde_json::to_string(&parsed).unwrap();
+            assert_eq!(serde_json::from_str::<Document>(&encoded).unwrap().tab_size,Some(width));
+        }
+    }
+    #[test]fn tab_size_rejects_malformed_present_values(){
+        for value in [
+            serde_json::json!(0),serde_json::json!(9),serde_json::json!(-1),
+            serde_json::json!(1.5),serde_json::Value::Null,serde_json::json!("4"),
+            serde_json::json!(true),
+        ]{
+            let input=serde_json::json!({"version":1,"formatOnSave":true,"overrides":{},"tabSize":value});
+            assert!(serde_json::from_value::<Document>(input).is_err());
+        }
+        for width in [0u8,9]{
+            let mut invalid=Document::default();invalid.tab_size=Some(width);
+            assert!(invalid.validated().is_err());
+        }
+    }
+    #[test]fn tab_size_persistence_keeps_cas_and_backup(){
+        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().into());
+        let original=store.save(Document::default(),None).unwrap();
+        let mut next=original.settings.clone();next.tab_size=Some(8);
+        let saved=store.save(next,original.revision.clone()).unwrap();
+        assert_eq!(EditorSettings::new(dir.path().into()).get().unwrap().settings.tab_size,Some(8));
+        assert_eq!(std::fs::read_to_string(dir.path().join("editor-settings.previous.json")).unwrap(),original.revision.unwrap());
+        assert!(store.save(Document::default(),None).is_err());
+        assert_eq!(store.get().unwrap().revision,saved.revision);
+    }
     #[test]fn legacy_vim_default_and_persistence(){
         let old:Document=serde_json::from_str(r#"{"version":1,"formatOnSave":false,"overrides":{}}"#).unwrap();
         assert!(!old.vim);
@@ -94,3 +149,4 @@ impl EditorSettings {
         assert_eq!(std::fs::read_to_string(&store.path).unwrap(),"broken");
     }
 }
+
