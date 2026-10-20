@@ -109,9 +109,18 @@ export function useOnlineJudge({ identity, question, language, solution = "defau
     setPhase("已停止等待，远端评测可能仍在进行；可继续查询原编号。");
   }
   async function acknowledge(job: Job) {
-    setAck(null);
-    try { remember(await invoke<Job>("acknowledge_unknown_judge", { account: job.snapshot.account, id: job.snapshot.id, confirmed: true })); }
-    catch (e) { setError(String(e)); }
+    if (guard.current || job.snapshot.account !== account) return;
+    guard.current = true;
+    const token = ++generation.current;
+    setAck(null); setBusy(true); setError(""); setPhase("");
+    try {
+      const updated = await invoke<Job>("acknowledge_unknown_judge", { account: job.snapshot.account, id: job.snapshot.id, confirmed: true });
+      if (generation.current === token) remember(updated);
+    } catch (e) {
+      if (generation.current === token) setError(String(e));
+    } finally {
+      if (generation.current === token) { guard.current = false; setBusy(false); }
+    }
   }
   const codeMismatch=useCodeMismatch(codeSource,current?.snapshot.code);
   const stale = current && (codeMismatch || (current.snapshot.kind === "online-run" && current.snapshot.testCase !== input));

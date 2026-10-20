@@ -390,8 +390,13 @@ try {
         return job;
       }
       if (command === "acknowledge_unknown_judge") {
+        window.__inkAuthTest.ackCalls=(window.__inkAuthTest.ackCalls??0)+1;
         const job = window.__inkAuthTest.jobs.find(j => j.snapshot.id === args.id);
-        job.state = { state: "acknowledged", message: "测试：用户已核查，未重发" };
+        const updated = { ...job, state: { state: "acknowledged", message: "测试：用户已核查，未重发" } };
+        if (window.__inkAuthTest.deferAck) return new Promise((resolve,reject)=>{
+          window.__inkAuthTest.ackReply={resolve:()=>resolve(updated),reject};
+        });
+        job.state = updated.state;
         return job;
       }
       if (command === "load_recent_questions") return window.__fixtureQuestions;
@@ -521,6 +526,53 @@ try {
   await authPage.getByLabel("待处理评测",{exact:true}).getByRole("button",{name:"继续查询",exact:true}).click();
   await authPage.waitForFunction(()=>window.__inkAuthTest.jobs.find(job=>job.snapshot.id==="other-pending").state.state==="finished");
   assert.equal(await authPage.evaluate(()=>window.__inkAuthTest.judgeStarts.length),2,"resuming another solution never re-sends code");
+  // Acknowledgement is a local journal write, never a retry of the submission.
+  // Its delayed reply belongs to the login generation that initiated it.
+  const reloginFixture=async()=>{
+    await authPage.getByRole("button",{name:"fixture-user · 退出",exact:true}).click();
+    await authPage.getByRole("button",{name:"登录力扣",exact:true}).click();
+    const next=await authPage.evaluate(()=>window.__inkAuthTest.pending.length);
+    await authPage.getByRole("button",{name:"验证登录",exact:true}).click();
+    await authPage.waitForFunction(n=>window.__inkAuthTest.pending.length===n+1,next);
+    await authPage.evaluate(n=>window.__inkAuthTest.pending[n].resolve({username:"fixture-user",account:"fixture-user",persistence:"memory-only"}),next);
+    await authPage.getByRole("button",{name:"fixture-user · 退出",exact:true}).waitFor();
+  };
+  for(const outcome of ["success","error"]){
+    await authPage.evaluate(()=>{
+      const s=window.__inkAuthTest;
+      s.jobs=[s.jobs.find(job=>job.snapshot.kind==="submission")];
+      s.jobs[0].state={state:"unknown",message:"延迟核查测试"};
+      s.deferAck=true;s.ackReply=null;
+    });
+    await reloginFixture();
+    await authPage.getByText("延迟核查测试",{exact:true}).waitFor();
+    await authPage.getByRole("button",{name:"我已核查官方记录",exact:true}).click();
+    const acknowledgements=await authPage.evaluate(()=>window.__inkAuthTest.ackCalls??0);
+    await authPage.getByRole("dialog",{name:"解除未知提交保护",exact:true}).getByRole("button",{name:"确认",exact:true}).click();
+    await authPage.waitForFunction(()=>!!window.__inkAuthTest.ackReply);
+    assert.equal(await authPage.getByRole("button",{name:"我已核查官方记录",exact:true}).isDisabled(),true,"pending acknowledgement cannot be double-sent");
+    assert.equal(await authPage.evaluate(()=>window.__inkAuthTest.ackCalls),acknowledgements+1);
+    // A newer login restores newer journal state before the old IPC reply arrives.
+    await authPage.evaluate(()=>{
+      const s=window.__inkAuthTest,old=s.jobs[0];
+      old.state={state:"acknowledged",message:"旧记录已核查"};
+      s.jobs.push({...old,snapshot:{...old.snapshot,id:"newer-"+crypto.randomUUID()},created:Date.now(),state:{state:"finished",server_id:"newer-session-result",result:{status_code:10,status_msg:"Accepted"}}});
+    });
+    await reloginFixture();
+    await authPage.locator(".verdict.accepted").waitFor();
+    await authPage.evaluate(outcome=>{
+      const s=window.__inkAuthTest;
+      if(outcome==="success")s.ackReply.resolve();else s.ackReply.reject(new Error("旧登录核查失败"));
+      s.deferAck=false;
+    },outcome);
+    await authPage.waitForTimeout(100);
+    assert.equal(await authPage.locator(".verdict.accepted").count(),1,"late "+outcome+" cannot replace a newer login result");
+    assert.equal(await authPage.getByText("测试：用户已核查，未重发",{exact:true}).count(),0);
+    assert.equal(await authPage.getByText("Error: 旧登录核查失败",{exact:true}).count(),0);
+    assert.equal(await authPage.getByRole("button",{name:"提交",exact:true}).isEnabled(),true,"old finally cannot strand the newer session");
+    assert.equal(await authPage.evaluate(()=>window.__inkAuthTest.judgeStarts.length),2,"acknowledgement and relogin never resend code");
+  }
+  await writeFile("evidence/JUDGE_ACK_SESSION_RESULT.txt","PASS: delayed acknowledgement success/error after same-account logout/relogin cannot overwrite restored verdicts or surface stale errors; no automatic resend. Mocked IPC, not real-account acceptance.\n");
   assert.deepEqual(authErrors, []);
   await authPage.close();
   await writeFile("evidence/AUTH_UI_RESULT.txt", "PASS: mocked IPC only; cancel during verification, ignore stale success, explicit failure and recovery. NOT real login validation.\n");
@@ -4144,6 +4196,11 @@ try {
   await presentationPage.waitForTimeout(150); // Match the guarded navigation cases below.
   await presentationCode.press("ArrowDown");
   assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] .cm-completionLabel").innerText(),"HashSet");
+  assert.deepEqual(await presentationPage.evaluate(()=>{
+    const v=window.__presentation.view();
+    return {text:v.state.doc.toString(),selection:v.state.selection.toJSON()};
+  }),longRowsBefore,"ArrowDown preserves code and cursor before the next key can restore them");
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
   await presentationCode.press("ArrowUp");
   assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] .cm-completionLabel").innerText(),fullRows.name);
   assert.deepEqual(await presentationPage.evaluate(()=>{
