@@ -2,15 +2,18 @@
 面向 leetcode.cn 的本地优先跨平台刷题本。暖白、克制，只围绕找题、代码、结果与笔记。
 
 **开发预览，尚未完成真实账号在线判题和全部平台验收。** 逐项测试证据见 [STATUS.md](STATUS.md)。
-开发分支：`feat/first-workbench`；审阅入口：[PR #1](https://github.com/jacek4yang/inkleet/pull/1)。
+统一开发分支：`build/preview-installers`；唯一审阅入口：[PR #94](https://github.com/jacek4yang/inkleet/pull/94)。
 
-## 下载测试
-- [Linux x86_64 tar.gz 测试包](https://github.com/jacek4yang/inkleet/actions/runs/38492041706/artifacts/11861114739)：GitHub 登录后下载 ZIP，内含 tar.gz、SHA-256 和说明；保留至 2026-11-13。
-- [五平台开发安装包](https://github.com/jacek4yang/inkleet/actions/runs/38489326380)：Windows NSIS、Linux DEB、macOS Intel/ARM DMG、Android ARM64 Debug APK；Actions 产物保留 7 天。
-- 上述程序均来自 **a62a3db** 检查点，包含六语言本地运行/调试、F2 和冲突处理，不包含后来的外部编辑、引用查找和恢复历史界面。
-- tar.gz 解压后运行 `./start.sh`。基于 Ubuntu 24.04 构建，适用于 Ubuntu 24.04 / Mint 22 系列 x86_64；需要 WebKitGTK 4.1 / GTK3 系统库，不是全静态发行包。
-- 软件数据位于应用数据目录，和解压目录分开。升级前备份数据；不要同时运行多个版本写同一份笔记。
-- 桌面未签名/公证，Android 为 Debug；不得为安装而全局关闭系统安全机制。
+首版目标为 **v0.1.0 Preview**。发布说明与限制见 [v0.1.0](docs/releases/v0.1.0.md)。候选检查通过且发布获确认后，才会创建标签和 Release。
+
+## 下载与安装
+- 首版目标：macOS Intel x86_64 DMG、Windows x64 setup EXE / MSI、Linux x86_64 tar.gz。
+- 正式下载入口为 [Releases](https://github.com/jacek4yang/inkleet/releases)。在首版发布之前，请使用明确标注提交号的 [Actions 测试产物](https://github.com/jacek4yang/inkleet/actions/workflows/preview-installers.yml)，不要将旧测试包视为 v0.1.0。
+- Windows 的 EXE / MSI 任选一种；未安装 WebView2 时可能需要联网获取运行时。
+- Linux tar.gz 解压后运行 `./start.sh`。面向 Ubuntu 24.04 / Mint 22 系列，需要 WebKitGTK 4.1 / GTK3；不是全静态或通用 Linux 包。
+- macOS 包仅面向 Intel。Ventura 的完整实际使用仍待验收；构建元数据里的最低系统版本不是兼容性保证。
+- Windows / macOS 包未签名，macOS 未公证；不要为安装而关闭系统安全保护。
+- 升级前备份应用数据、代码和笔记，关闭旧版本。不要让多个版本同时写同一份数据。
 
 ## 使用手册
 操作说明、快捷键、环境与下载规则见 [使用手册](docs/USER_MANUAL.md)。
@@ -27,11 +30,13 @@
 - F2 语义重命名，当前题目内的修改是一次可撤销事务；拒绝过时、跨文件或触及辅助代码的编辑。
 
 ## 新增编辑和笔记能力
-以下属于较下载包更新的开发分支，完整回归状态见 STATUS。
+以下已纳入统一候选分支；具体已通过与未完成的验收见 STATUS。
 - Shift+F12 本题语义引用列表（含声明），点击跳回原始源码；不读取任意外部文件。
 - 冲突恢复副本列表、两版本预览和显式恢复。恢复前再保留当前两份内容；磁盘再次变化则拒绝覆盖。这不是完整编辑历史。
 - 笔记可请求 Typora 或系统默认编辑器打开；返回窗口或手动刷新时检查文件。干净草稿可更新，脏草稿进入冲突处理。实际 Typora 启动仍待验收。
-- 暂停栈帧表达式求值已接入，待真实回归；显式执行一次，不自动重复，3 秒超时停止调试。Java 当前不支持此求值入口。
+- 暂停栈帧表达式求值已接入；显式执行一次，不自动重复，3 秒超时停止调试。Java 当前不支持此求值入口。不能据此宣称与成熟 IDE 调试器等价。
+- Vim、搜索式设置、语言格式化覆盖、Tab 显示宽度；显式保存、恢复草稿和配置冲突保护。
+- F2 重命名准备与可选预览；Rust 集合逻辑视图与显式原始视图。
 
 ## 本地运行与调试
 桌面点击「开发环境」安装所选语言工具，再用「本地」面板。
@@ -45,7 +50,7 @@
 **仅运行信任的代码：环境隔离不是安全沙箱。**
 
 Linux 原生六语言 GUI 已验证；四种桌面目标的协议与编译探针另行记录，不能替代 Windows/macOS 真机 GUI。
-Android 暂无本地语言工具链；官方 SDK 模拟器运行验证正在推进，不能替代 ARM64 真机。
+Android 和 macOS ARM 不属于本次 v0.1.0 首版交付目标。历史探针不能替代当前版本的平台验收。
 
 ## 登录与在线判题
 桌面有独立官方隐私窗口与原生会话校验原型，仅保留本次运行内存会话。

@@ -29,6 +29,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
+      - name: Verify release version metadata
+        run: python3 scripts/verify-release-version.py
       - name: Install locked frontend dependencies
         run: npm ci --ignore-scripts
       - name: Check native test helpers

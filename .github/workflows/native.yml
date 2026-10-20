@@ -2,7 +2,7 @@ name: Native Linux
 on:
   push:
     branches: [build/preview-installers, main, feat/first-workbench, feat/editor-p0-reliability, feat/workbench-minimal-ui, feat/real-question-workspace, feat/download-proxy-inputs, feat/debugger-workspace, feat/named-solutions, feat/language-adapter-contract, feat/lsp-p1-recovery, feat/workbench-visual-polish, feat/format-on-save, feat/debugger-precision-dock, feat/lsp-semantic-analysis, feat/ide-command-routing, feat/editor-input-reliability, feat/explicit-save, feat/polished-linux-preview, feat/vim-status-cursor, feat/real-use-hardening, feat/completion-integration, feat/completion-request-ownership, feat/completion-issuer-order, feat/lsp-status-ownership, perf/runner-rendering, perf/reading-panes, fix/in-place-results, feat/case-expectations, feat/case-run-context, feat/named-case-batches, feat/owned-lsp-cancellation, perf/diagnostics-dedup, perf/live-source-boundary, fix/judge-terminal-verdict, test/native-snippet-validation, feat/validated-linux-snippets, test/native-clang-snippets, test/native-java-snippets, fix/session-completion-mode, fix/completion-snippet-capability, style/ide-popovers, style/full-completion-content, feat/expanded-documentation, feat/recursive-source-navigation, perf/editor-session-retention, feat/document-reader-search, feat/document-code-highlighting, fix/completion-candidate-admission, style/continuous-document-matches, fix/queued-save-intent, fix/completion-focus-boundary, perf/status-host-updates, fix/completion-composition-boundary, fix/settings-session-retention, test/native-wait-budgets, feat/editor-tab-display, feat/settings-workbench]
-    paths: ['src/**', 'src-tauri/**', 'crates/managed-env/src/**', 'crates/managed-env/packages.json', 'crates/managed-env/Cargo.toml', 'crates/managed-env/Cargo.lock', 'package*.json', 'tests/native_smoke.py', 'tests/native_wait.py', 'tests/test_native_wait.py', '.github/workflows/native.yml']
+    paths: ['scripts/verify-release-version.py', 'src/**', 'src-tauri/**', 'crates/managed-env/src/**', 'crates/managed-env/packages.json', 'crates/managed-env/Cargo.toml', 'crates/managed-env/Cargo.lock', 'package*.json', 'tests/native_smoke.py', 'tests/native_wait.py', 'tests/test_native_wait.py', '.github/workflows/native.yml']
   workflow_dispatch:
     inputs:
       snippets:
@@ -25,6 +25,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Verify release version metadata
+        run: python3 scripts/verify-release-version.py
       - name: Verify native wait and transport budgets
         run: python3 -m unittest discover -s tests -p 'test_native_wait.py' -v
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
