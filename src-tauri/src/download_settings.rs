@@ -53,20 +53,22 @@ impl DownloadSettings {
     }
 }
 #[cfg(test)]mod tests{
+    // macOS temp roots may be reached through /var -> /private/var. Resolve
+    // only the test-owned root; production symlink refusal remains unchanged.
     use super::*;use inkleet_managed_env::download_proxy::ProxyMode;
     fn custom()->DownloadProxy{DownloadProxy{mode:ProxyMode::Custom,url:"http://127.0.0.1:7890".into()}}
     #[test]fn saves_restarts_and_preserves_original_on_conflict(){
-        let temp=tempfile::tempdir().unwrap();let store=DownloadSettings::new(temp.path().into());
+        let temp=tempfile::tempdir().unwrap();let store=DownloadSettings::new(temp.path().canonicalize().unwrap());
         assert!(store.get().unwrap().revision.is_none());
         let one=store.save(custom(),None).unwrap();
-        assert_eq!(DownloadSettings::new(temp.path().into()).get().unwrap().settings.proxy,one.settings.proxy);
+        assert_eq!(DownloadSettings::new(temp.path().canonicalize().unwrap()).get().unwrap().settings.proxy,one.settings.proxy);
         let two=store.save(DownloadProxy{mode:ProxyMode::Direct,url:String::new()},one.revision.clone()).unwrap();
         assert!(store.save(custom(),one.revision.clone()).is_err());
         assert_eq!(store.get().unwrap().revision,two.revision);
         assert_eq!(std::fs::read_to_string(temp.path().join("download-settings.previous.json")).unwrap(),one.revision.unwrap());
     }
     #[test]fn invalid_or_corrupt_settings_are_never_overwritten(){
-        let temp=tempfile::tempdir().unwrap();let store=DownloadSettings::new(temp.path().into());
+        let temp=tempfile::tempdir().unwrap();let store=DownloadSettings::new(temp.path().canonicalize().unwrap());
         let invalid=DownloadProxy{mode:ProxyMode::Custom,url:"http://user:secret@localhost:7".into()};
         assert!(store.save(invalid,None).is_err());assert!(!store.path.exists());
         std::fs::write(&store.path,"corrupt").unwrap();
@@ -74,10 +76,39 @@ impl DownloadSettings {
         assert_eq!(std::fs::read_to_string(&store.path).unwrap(),"corrupt");
     }
     #[test]fn failed_backup_keeps_previous_configuration(){
-        let temp=tempfile::tempdir().unwrap();let store=DownloadSettings::new(temp.path().into());
+        let temp=tempfile::tempdir().unwrap();let store=DownloadSettings::new(temp.path().canonicalize().unwrap());
         let old=store.save(custom(),None).unwrap();
         std::fs::create_dir(temp.path().join("download-settings.previous.json")).unwrap();
         assert!(store.save(DownloadProxy::default(),old.revision.clone()).is_err());
         assert_eq!(store.get().unwrap().revision,old.revision);
+    }
+}
+
+#[cfg(all(test,unix))]
+mod symlink_regression_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+    #[test]
+    fn refuses_linked_root_config_and_backup_without_changing_targets() {
+        let temp=tempfile::tempdir().unwrap();
+        let root=temp.path().canonicalize().unwrap();
+        let real=root.join("real");std::fs::create_dir(&real).unwrap();
+        let alias=root.join("alias");symlink(&real,&alias).unwrap();
+        let linked=DownloadSettings::new(alias);
+        assert!(linked.get().is_err());
+        assert!(linked.save(DownloadProxy::default(),None).is_err());
+        assert!(!real.join("download-settings.json").exists());
+        let target=root.join("untouched");std::fs::write(&target,"original").unwrap();
+        let store=DownloadSettings::new(real.clone());
+        symlink(&target,&store.path).unwrap();
+        assert!(store.get().is_err());
+        assert!(store.save(DownloadProxy::default(),None).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(),"original");
+        std::fs::remove_file(&store.path).unwrap();
+        let saved=store.save(DownloadProxy::default(),None).unwrap();
+        symlink(&target,real.join("download-settings.previous.json")).unwrap();
+        assert!(store.save(DownloadProxy::default(),saved.revision.clone()).is_err());
+        assert_eq!(store.get().unwrap().revision,saved.revision);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(),"original");
     }
 }

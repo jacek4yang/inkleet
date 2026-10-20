@@ -76,6 +76,8 @@ impl EditorSettings {
 }
 
 #[cfg(test)]mod tests{
+    // macOS temp roots may be reached through /var -> /private/var. Resolve
+    // only the test-owned root; production symlink refusal remains unchanged.
     use super::*;
     #[test]fn tab_size_defaults_bounds_and_round_trip(){
         let legacy=r#"{"version":1,"formatOnSave":true,"overrides":{}}"#;
@@ -110,11 +112,11 @@ impl EditorSettings {
         }
     }
     #[test]fn tab_size_persistence_keeps_cas_and_backup(){
-        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().into());
+        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().canonicalize().unwrap());
         let original=store.save(Document::default(),None).unwrap();
         let mut next=original.settings.clone();next.tab_size=Some(8);
         let saved=store.save(next,original.revision.clone()).unwrap();
-        assert_eq!(EditorSettings::new(dir.path().into()).get().unwrap().settings.tab_size,Some(8));
+        assert_eq!(EditorSettings::new(dir.path().canonicalize().unwrap()).get().unwrap().settings.tab_size,Some(8));
         assert_eq!(std::fs::read_to_string(dir.path().join("editor-settings.previous.json")).unwrap(),original.revision.unwrap());
         assert!(store.save(Document::default(),None).is_err());
         assert_eq!(store.get().unwrap().revision,saved.revision);
@@ -122,24 +124,24 @@ impl EditorSettings {
     #[test]fn legacy_vim_default_and_persistence(){
         let old:Document=serde_json::from_str(r#"{"version":1,"formatOnSave":false,"overrides":{}}"#).unwrap();
         assert!(!old.vim);
-        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().into());
+        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().canonicalize().unwrap());
         let mut next=old;next.vim=true;let saved=store.save(next,None).unwrap();
-        assert!(EditorSettings::new(dir.path().into()).get().unwrap().settings.vim);
+        assert!(EditorSettings::new(dir.path().canonicalize().unwrap()).get().unwrap().settings.vim);
         assert!(store.save(Document::default(),None).is_err());assert_eq!(store.get().unwrap().revision,saved.revision);
     }
     #[test]fn defaults_cas_overrides_and_restart(){
-        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().into());
+        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().canonicalize().unwrap());
         assert!(store.get().unwrap().settings.format_on_save);
         let mut settings=Document::default();settings.overrides.insert("rust".into(),false);
         let saved=store.save(settings,None).unwrap();
-        assert_eq!(EditorSettings::new(dir.path().into()).get().unwrap().settings.overrides["rust"],false);
+        assert_eq!(EditorSettings::new(dir.path().canonicalize().unwrap()).get().unwrap().settings.overrides["rust"],false);
         assert!(store.save(Document::default(),None).is_err());
         assert_eq!(store.get().unwrap().revision,saved.revision);
         let mut invalid=Document::default();invalid.overrides.insert("shell".into(),true);
         assert!(store.save(invalid,saved.revision).is_err());
     }
     #[test]fn corrupt_or_failed_persistence_keeps_original(){
-        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().into());
+        let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().canonicalize().unwrap());
         let old=store.save(Document::default(),None).unwrap();
         std::fs::create_dir(dir.path().join("editor-settings.previous.json")).unwrap();
         assert!(store.save(Document::default(),old.revision.clone()).is_err());
@@ -150,3 +152,32 @@ impl EditorSettings {
     }
 }
 
+
+#[cfg(all(test,unix))]
+mod symlink_regression_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+    #[test]
+    fn refuses_linked_root_config_and_backup_without_changing_targets() {
+        let temp=tempfile::tempdir().unwrap();
+        let root=temp.path().canonicalize().unwrap();
+        let real=root.join("real");std::fs::create_dir(&real).unwrap();
+        let alias=root.join("alias");symlink(&real,&alias).unwrap();
+        let linked=EditorSettings::new(alias);
+        assert!(linked.get().is_err());
+        assert!(linked.save(Document::default(),None).is_err());
+        assert!(!real.join("editor-settings.json").exists());
+        let target=root.join("untouched");std::fs::write(&target,"original").unwrap();
+        let store=EditorSettings::new(real.clone());
+        symlink(&target,&store.path).unwrap();
+        assert!(store.get().is_err());
+        assert!(store.save(Document::default(),None).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(),"original");
+        std::fs::remove_file(&store.path).unwrap();
+        let saved=store.save(Document::default(),None).unwrap();
+        symlink(&target,real.join("editor-settings.previous.json")).unwrap();
+        assert!(store.save(Document::default(),saved.revision.clone()).is_err());
+        assert_eq!(store.get().unwrap().revision,saved.revision);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(),"original");
+    }
+}
