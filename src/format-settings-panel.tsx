@@ -15,7 +15,7 @@ export type EditorFormReport = {
 };
 const rows = preferenceRows.filter((row): row is EditorSettingRow => row.owner === "editor-settings");
 
-export function FormatSettings({ snapshot, error, formattingStatus, reload, save, visibleRows, onReport }: {
+export function FormatSettings({ snapshot, error, formattingStatus, reload, save, visibleRows, onReport, beginOperation }: {
   snapshot: EditorSettingsSnapshot | null;
   error: string;
   formattingStatus: string;
@@ -23,6 +23,7 @@ export function FormatSettings({ snapshot, error, formattingStatus, reload, save
   save: (settings: EditorSettings) => Promise<void>;
   visibleRows: ReadonlySet<EditorSettingId>;
   onReport: (report: EditorFormReport) => void;
+  beginOperation?: () => () => void;
 }) {
   const [draft, setDraft] = useState<EditorSettings | null>(snapshot?.settings ?? null);
   const [operation, setOperation] = useState<"save" | "reload" | null>(null);
@@ -40,25 +41,25 @@ export function FormatSettings({ snapshot, error, formattingStatus, reload, save
 
   async function submit() {
     if (!draft || guard.current) return;
-    guard.current = true; setOperation("save"); setFailure("");
+    guard.current = true; const finish=beginOperation?.(); setOperation("save"); setFailure("");
     try {
       // Canonicalize a copy; a failed save must retain the user's exact draft.
       const settings = { ...draft };
       if (settings.tabSize === 4) delete settings.tabSize;
       await save(settings);
     } catch (error) { if (alive.current) setFailure(String(error)); }
-    finally { guard.current = false; if (alive.current) setOperation(null); }
+    finally { guard.current = false; if (alive.current) setOperation(null); finish?.(); }
   }
   async function reread() {
     if (guard.current) return;
-    guard.current = true; setOperation("reload");
+    guard.current = true; const finish=beginOperation?.(); setOperation("reload");
     try {
       const loaded = await reload();
       // Null means a newer App operation superseded this read. Revision equality
       // is not a success signal: even a same-revision reload must complete.
       if (alive.current && loaded) { setDraft(loaded.settings); setFailure(""); }
     } catch (error) { if (alive.current) setFailure(String(error)); }
-    finally { guard.current = false; if (alive.current) setOperation(null); }
+    finally { guard.current = false; if (alive.current) setOperation(null); finish?.(); }
   }
   function renderRow(row: EditorSettingRow) {
     if (!draft) return null;

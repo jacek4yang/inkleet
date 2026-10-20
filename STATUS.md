@@ -1,48 +1,33 @@
-# InkLeet release status
+# InkLeet development status
 
-Updated: 2026-10-20 UTC. Current goal: **v0.1.0 Preview**, not mature IDE parity.
+Updated: 2026-10-20 UTC. Goal: a reliable everyday practice IDE, not package delivery alone.
 
-## One development line
-- Branch: `build/preview-installers`
-- Review: [PR #94](https://github.com/jacek4yang/inkleet/pull/94)
-- Previous 93 PRs are closed as superseded. Their branches and evidence remain available.
-- [Integration audit](docs/INTEGRATION.md)
-- No main merge, release tag or published Release is claimed by this document.
+## Development and public release are separate
+- One integration branch: `build/preview-installers`, [Draft PR #94](https://github.com/jacek4yang/inkleet/pull/94).
+- [v0.1.0](https://github.com/jacek4yang/inkleet/releases/tag/v0.1.0) is the published first preview, source `6b5bca312a4307bd69e4b00a8e950658e5868674`.
+- Current development metadata is **0.1.1**, an unpublished test build. No new Release/tag or main merge is implied.
+- Historical 93 PRs are closed as superseded; their branches and evidence remain.
 
-## Candidate and evidence
-Version 0.1.0 is unified across npm, Cargo and Tauri metadata. A build-time guard checks the manifests and lockfiles.
-The first-release candidate includes searchable settings, explicit-save protection, named solutions, source navigation, rename preview/preparation and Rust collection views.
-Latest candidate acceptance is tracked in PR #94 and its exact-commit Actions runs. A pending or superseded run is not a pass.
+## New development changes
+- Completion browser regression synchronizes with CodeMirror's initial interaction guard and checks code/cursor/focus retention.
+- Judgement acknowledgement is duplicate-guarded and scoped to its login generation; late replies cannot replace a newer login's result.
+- Repeated explicit notes saves retain the last requested snapshot, maintain original file identity and CAS order, and do not save subsequent unrequested edits. Failure blocks queued writes without automatic retry.
+- Pending settings writes/editor reloads retain their modal owner; closing actions cannot discard that owner before completion. Independent operations release independent tokens.
+- Multi-parameter input editing retains literal drafts and focus separately from serialized input. Structured fields must each be one JSON value before run/debug; explicit raw mode supports multiple calls. Metadata refresh invalidates old field structure without rewriting input.
 
-### Verified earlier integrated preview
-At application checkpoint `5753647b082381e59419aa99383ec2193adad6d2`:
-- Full frontend typechecking, domain tests, build and browser regression passed.
-- Settings workbench: 14 cases, zero failures, including short/narrow viewport and keyboard Save accessibility.
-- Linux release installed and extracted-tar startup, native IPC, save/restart, named solutions, recovery and conflict checks passed.
-- Full diagnostic native run confirmed real Pyright prepareRename/preview/application/undo and Rust logical collections, but **failed later** because the test attempted a coordinate click on an offscreen Settings Save button. Do not call that whole run green.
-- The candidate corrects that test using actual wheel scrolling, without removing assertions or replaying a save.
+## Verification
+These source changes are not all automatically qualified merely because they are listed here. Use exact-commit Actions results and artifacts linked in PR #94.
+- Prior post-release checkpoint `303380ea85d235603b1d516db6627a9051110398`: frontend, all platform build/inspection jobs and complete configured Native Linux suite passed. Native evidence: 63 PASS records; public CN NOT RUN.
+- Notes-save checkpoint `9ca7c132466b5389b0f55d23498e70f3fbaeb2fe`: full frontend browser regression passed. Other gates must be checked on their actual run.
+- The newer settings/input/0.1.1 changes require fresh exact-source frontend, native and package verification. Do not reuse older installer success as new delivery.
 
-At test/packaging checkpoint `7bac16c2396559df9ad87057c00f93b87e1f83cc` (same application behavior, version 0.0.1):
-- Linux tar, Windows EXE/MSI and macOS Intel DMG artifacts were generated and inspected.
-- macOS fixture roots were canonicalized; production symlink protection was not relaxed. Added linked-root/config/backup rejection tests passed.
-- Windows MSI property-output handling was corrected and tested; x64 package identity/hash checks passed.
-These earlier artifacts are **not** the version 0.1.0 release assets. The release must use one newly verified candidate commit.
+## Remaining acceptance gaps
+- Real-account login, full catalogue workflow, online Run/Submit and real native IME are not fully accepted.
+- Windows/macOS interactive install, upgrade, uninstall and GUI behavior need separate acceptance. Same application identity does not prove upgrade compatibility.
+- Ventura and long-session performance remain unqualified.
+- Windows/macOS packages remain unsigned; macOS is unnotarized. Never disable OS security protections.
+- Linux packages target Ubuntu 24.04 / Mint 22-style dependencies, not every distribution.
+- Managed language tools are not a security sandbox; execute only trusted code.
+- Android, macOS ARM and full design-class/special-interface support are not claimed.
 
-## Required release gate
-- Consistent 0.1.0 metadata and unchanged dependency lock selection.
-- Exact-source frontend typecheck, tests, build and full browser regression.
-- Required complete native Linux regression, including the corrected Settings Save path.
-- Windows x64 EXE/MSI, macOS Intel DMG and Linux tar build/inspection; recorded commit and SHA-256 for every file.
-- Review release notes and publish only after the requested publication approval.
-
-## Explicit limitations
-- Real-account login and online Run/Submit are not fully accepted. Public browsing and mocked IPC are not proof of authenticated use.
-- Windows/macOS interactive installation, upgrade, uninstall and GUI acceptance remain separate from build/metadata tests.
-- Real native IME, long-session performance and Ventura compatibility are not fully qualified.
-- macOS/Windows packages are unsigned; macOS is unnotarized.
-- Diagnostic snippet features are excluded from distributable builds.
-- Managed language tools do not form a security sandbox; execute only trusted code.
-- Android and macOS ARM are out of this first-release scope.
-- Design-class problems and special interfaces are not claimed complete.
-
-[Release notes](docs/releases/v0.1.0.md) · [User manual](docs/USER_MANUAL.md) · [Historical October 14 status](docs/history/status-2026-10-14.md)
+[User manual](docs/USER_MANUAL.md) · [First-preview limitations](docs/releases/v0.1.0.md) · [Integration audit](docs/INTEGRATION.md)

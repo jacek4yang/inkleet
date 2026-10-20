@@ -13,7 +13,7 @@ type Watch = { id: number; expression: string; result?: string; error?: string; 
 // One owned snapshot survives panel unmounts; never adopt an unknown session.
 let ownedSnapshot: { id: number; snapshot: Snapshot } | null = null;
 const active = (state: State | null) => state && state.phase !== "finished";
-export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, running, onReveal }: { onReveal?:()=>void; snapshot: Omit<Snapshot,"code">; codeSource: LiveCode; breakpoints: number[]; onPauseLine: (position:DebugPosition|null) => void; running: boolean }) {
+export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, running, onReveal, beforeStart }: { beforeStart?:()=>void; onReveal?:()=>void; snapshot: Omit<Snapshot,"code">; codeSource: LiveCode; breakpoints: number[]; onPauseLine: (position:DebugPosition|null) => void; running: boolean }) {
   const [state, setState] = useState<State | null>(null), [original, setOriginal] = useState<Snapshot | null>(null);
   const [targets,setTargets]=useState<{id:number;label:string}[]>([]),[choosing,setChoosing]=useState(false);
   const targetVersion=useRef(0),targetContext=useRef<{id:number;epoch:number;frame:number;thread:number|null}|null>(null);
@@ -168,6 +168,7 @@ export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, run
     guard.current = true; ++targetVersion.current;setTargets([]);setChoosing(false);setPending(true); setError(""); setNotice("");
     try {
       if (kind === "start") {
+        beforeStart?.();
         const value = { ...snapshot,code:codeSource.read() };
         const id = await invoke<number>("start_debug", { snapshot: value, lines: breakpoints });
         ownedSnapshot = { id, snapshot: value };

@@ -6,10 +6,11 @@ import { inspectProxyDraft, readProxySettingState, resetProxyBundle } from "./se
 
 type Snapshot = { settings: { version: 1; proxy: DownloadProxyDraft }; revision: string | null };
 export type DownloadFormReport = { dirty: boolean; busy: boolean; loading: boolean; error: string };
-export function DownloadSettings({ visibleRows, addressMatch, onReport }: {
+export function DownloadSettings({ visibleRows, addressMatch, onReport, beginOperation }: {
   visibleRows: ReadonlySet<ProxySettingId>;
   addressMatch: boolean;
   onReport: (report: DownloadFormReport) => void;
+  beginOperation?: () => () => void;
 }) {
   const [saved, setSaved] = useState<Snapshot | null>(null);
   const [draft, setDraft] = useState<DownloadProxyDraft>(defaultDownloadProxy);
@@ -37,13 +38,13 @@ export function DownloadSettings({ visibleRows, addressMatch, onReport }: {
   }, []);
   async function save() {
     if (!saved || guard.current || reading.current !== null) return;
-    guard.current = true; setSaving(true); setError(""); setNotice("");
+    guard.current = true; const finish=beginOperation?.(); setSaving(true); setError(""); setNotice("");
     const proxy = { ...draft };
     try {
       const snapshot = await invoke<Snapshot>("save_download_settings", { proxy, expected: saved.revision });
       if (alive.current) { setSaved(snapshot); setDraft(snapshot.settings.proxy); setNotice("已保存，下次下载生效"); }
     } catch (error) { if (alive.current) setError(String(error)); }
-    finally { guard.current = false; if (alive.current) setSaving(false); }
+    finally { guard.current = false; if (alive.current) setSaving(false); finish?.(); }
   }
   const comparison = inspectProxyDraft(saved?.settings.proxy ?? null, draft);
   const dirty = comparison.status === "known" && comparison.dirty;

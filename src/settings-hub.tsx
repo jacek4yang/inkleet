@@ -35,6 +35,17 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
   const [editorReport, setEditorReport] = useState<EditorFormReport | null>(null);
   const [downloadReport, setDownloadReport] = useState<DownloadFormReport | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const pendingOperations=useRef(new Set<symbol>());
+  const [operationPending,setOperationPending]=useState(false);
+  const beginOperation=useCallback(()=>{
+    const token=Symbol("settings-operation");
+    pendingOperations.current.add(token);setOperationPending(true);
+    return ()=>{pendingOperations.current.delete(token);setOperationPending(pendingOperations.current.size>0);};
+  },[]);
+  function close(){
+    if(pendingOperations.current.size){setAnnouncement("设置正在保存或读取，请完成后关闭");return;}
+    onClose();
+  }
   const lastErrors = useRef({ editor: "", downloads: "" });
   const currentRevision = useRef(editorSettings?.revision ?? null);
   currentRevision.current = editorSettings?.revision ?? null;
@@ -127,8 +138,8 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
   }, [editorError, downloadReport?.error, showEditor, showDownloads]);
   return <dialog ref={dialog} className="settings-hub" aria-labelledby="settings-title" onKeyDown={onKeyDown} onFocusCapture={event => {
     if (event.target instanceof HTMLElement) lastFocus.current = { element: event.target, key: event.target.dataset.settingsFocus ?? null };
-  }} onCancel={event => { if (event.target !== event.currentTarget) return; event.preventDefault(); onClose(); }}>
-    <header><h2 id="settings-title">设置</h2><IconButton type="button" icon="file" label="第三方许可" onClick={() => setCredits(true)} /><IconButton type="button" icon="info" label="使用手册" onClick={() => setManual(true)} /><IconButton type="button" icon="close" label="关闭设置" onClick={onClose} /></header>
+  }} onCancel={event => { if (event.target !== event.currentTarget) return; event.preventDefault(); close(); }}>
+    <header><h2 id="settings-title">设置</h2><IconButton type="button" icon="file" label="第三方许可" onClick={() => setCredits(true)} /><IconButton type="button" icon="info" label="使用手册" onClick={() => setManual(true)} /><IconButton type="button" icon="close" label="关闭设置" disabled={operationPending} title={operationPending?"设置正在处理，请稍候":"关闭设置"} onClick={close} /></header>
     <div className="settings-body">
       <nav aria-label="设置分类">{categories.map(category => <button key={category.id} type="button" aria-label={category.label} aria-current={section === category.id ? "page" : undefined} onClick={() => changeSection(category.id as SettingsSection)}>
         <span>{category.label}</span>{normalized && !modified && <span className="settings-category-count" aria-hidden="true">{result.categoryCounts[category.id]}</span>}
@@ -147,9 +158,9 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
         <div className="settings-owner-notices">{hiddenErrors.map(item => <div key={item.owner} className="settings-owner-error"><span title={item.error}>{item.label}</span><button type="button" data-settings-reveal={item.owner} onClick={() => reveal(item.owner)}>查看</button></div>)}</div>
         {result.issue ? <p className="muted settings-empty">{searchMessages[result.issue]}</p> : result.directMatchCount === 0 && result.modifiedState !== "unknown" ? <p className="muted settings-empty">没有匹配项</p> : null}
         {/* Fixed slots preserve the state/guard owners regardless of result order. */}
-        {visited.editor && <div hidden={!showEditor}><FormatSettings key={editorSettings?.revision ?? "unloaded"} snapshot={editorSettings} error={editorSettingsError} formattingStatus={formattingStatus} reload={onReloadEditorSettings} save={onSaveEditorSettings} visibleRows={editorRows} onReport={reportEditor} /></div>}
-        {visited.downloads && <div hidden={!showDownloads}><DownloadSettings visibleRows={downloadRows} addressMatch={addressMatch} onReport={reportDownloads} /></div>}
-        {visibleActions.length > 0 && <div className="settings-actions">{visibleActions.map(row => <button key={row.id} type="button" disabled={row.action.disabled} data-action={row.action.dataAction} data-setting-action={row.action.id} data-setting-id={row.id} onClick={row.action.run}><Icon name={row.action.icon} /><span>{row.action.label}</span></button>)}</div>}
+        {visited.editor && <div hidden={!showEditor}><FormatSettings key={editorSettings?.revision ?? "unloaded"} snapshot={editorSettings} error={editorSettingsError} formattingStatus={formattingStatus} reload={onReloadEditorSettings} save={onSaveEditorSettings} visibleRows={editorRows} onReport={reportEditor} beginOperation={beginOperation} /></div>}
+        {visited.downloads && <div hidden={!showDownloads}><DownloadSettings visibleRows={downloadRows} addressMatch={addressMatch} onReport={reportDownloads} beginOperation={beginOperation} /></div>}
+        {visibleActions.length > 0 && <div className="settings-actions">{visibleActions.map(row => <button key={row.id} type="button" disabled={operationPending||row.action.disabled} data-action={row.action.dataAction} data-setting-action={row.action.id} data-setting-id={row.id} onClick={()=>{if(!pendingOperations.current.size)row.action.run();}}><Icon name={row.action.icon} /><span>{row.action.label}</span></button>)}</div>}
         {!normalized && section === "environment" && <p className="settings-service" role="status">{languageStatus || "语言服务未启动"}</p>}
       </section>
     </div>

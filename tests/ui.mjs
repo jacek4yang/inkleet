@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { runTabSizeUI } from "./tab-size-ui.mjs";
 import { runSettingsWorkbenchUI } from "./settings-workbench-ui.mjs";
 import { runNotesSaveUI } from "./notes-save-ui.mjs";
+import { runCaseInputUI } from "./case-input-ui.mjs";
 
 async function openSettings(page, category) {
   await page.locator('[data-action="open-settings"]').click();
@@ -1976,7 +1977,7 @@ try {
           editor:{settings:{version:1,vim:false,formatOnSave:true,overrides:{}},revision:"editor-initial"},
           downloads:{settings:{version:1,proxy:{mode:"system",url:""}},revision:"downloads-initial"},
           reads:{editor:0,downloads:0}, writes:{editor:[],downloads:[]},
-          mode:{editor:"immediate",downloads:"immediate"}, pending:[],
+          mode:{editor:"immediate",downloads:"immediate"}, readMode:{editor:"immediate",downloads:"immediate"}, pending:[],
           commits:{editor:0,downloads:0}, settled:{editor:0,downloads:0}, unexpected:[],
         };
         window.__TAURI_INTERNALS__ = {invoke:async (command,args={}) => {
@@ -1991,6 +1992,7 @@ try {
           if (command === "get_editor_settings" || command === "get_download_settings") {
             const kind = command === "get_editor_settings" ? "editor" : "downloads";
             state.reads[kind]++;
+            if(state.readMode[kind]==="delay")await new Promise(resolve=>state.pending.push({kind:kind+"-read",release:resolve}));
             return copy(state[kind]);
           }
           if (command === "save_editor_settings" || command === "save_download_settings") {
@@ -2307,6 +2309,83 @@ try {
         kind === "editor" ? {version:1,vim:true,tabSize:8,formatOnSave:false,overrides:{python3:true}} : {version:1,proxy:settingsProxyDraft});
     });
   }
+  for(const kind of ["editor","downloads"])for(const outcome of ["success","failure"]){
+    await settingsNavigationCase(kind+" pending operation cannot dismiss "+outcome,async(settingsPage,check)=>{
+      let dialog=await openSettings(settingsPage,kind==="editor"?"编辑器":"下载");
+      const panel=dialog.locator(kind==="editor"?".format-settings":".download-settings");
+      if(kind==="editor")await settingsEditEditor(dialog);else await settingsEditProxy(dialog);
+      await settingsPage.evaluate(kind=>{window.__settingsNavigationTest.mode[kind]="delay";},kind);
+      await panel.getByRole("button",{name:kind==="editor"?"保存设置":"保存下载设置",exact:true}).click();
+      await settingsPage.waitForFunction(kind=>window.__settingsNavigationTest.pending.some(p=>p.kind===kind),kind);
+      check("close control is disabled during pending save",await dialog.getByRole("button",{name:"关闭设置",exact:true}).isDisabled(),true);
+      await dialog.getByRole("button",{name:"关闭设置",exact:true}).evaluate(button=>button.click());
+      await dialog.getByRole("textbox",{name:"搜索设置",exact:true}).focus();
+      await settingsPage.keyboard.press("Escape");
+      check("Escape cannot discard pending form owner",await dialog.isVisible(),true);
+      await settingsCategory(dialog,"源码");
+      const actions=dialog.locator("[data-setting-action]");
+      check("close-producing actions cannot bypass pending owner",await actions.evaluateAll(nodes=>nodes.length>0&&nodes.every(node=>node.disabled)),true);
+      check("no duplicate request from dismissal attempts",await settingsWriteCounts(settingsPage),{editor:kind==="editor"?1:0,downloads:kind==="downloads"?1:0});
+      await settingsPage.evaluate(({kind,outcome})=>{
+        const s=window.__settingsNavigationTest;
+        if(outcome==="failure")s[kind].revision="external-change";
+        for(const p of s.pending.splice(0))p.release();
+      },{kind,outcome});
+      await settingsPage.waitForFunction(kind=>window.__settingsNavigationTest.settled[kind]===1,kind);
+      await settingsPage.waitForFunction(()=>!document.querySelector('[aria-label="关闭设置"]').disabled);
+      check("close recovers after settlement",await dialog.getByRole("button",{name:"关闭设置",exact:true}).isEnabled(),true);
+      await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
+      await dialog.waitFor({state:"hidden"});
+      dialog=await openSettings(settingsPage,kind==="editor"?"编辑器":"下载");
+      if(outcome==="success")check("reopen reads committed values",kind==="editor"?await settingsEditorValues(dialog):await settingsProxyValues(dialog),kind==="editor"?settingsEditorDraft:settingsProxyDraft);
+      else check("failed write never committed",await settingsPage.evaluate(kind=>window.__settingsNavigationTest.commits[kind],kind),0);
+      if(kind==="editor"){
+        const field=dialog.getByRole("combobox",{name:"Tab 显示宽度",exact:true});await field.selectOption("2");
+        await settingsPaint(settingsPage);check("new dialog draft is stable",await field.inputValue(),"2");
+      }else{
+        const mode=dialog.getByLabel("连接方式",{exact:true});await mode.selectOption("direct");
+        await settingsPaint(settingsPage);check("new dialog draft is stable",await mode.inputValue(),"direct");
+      }
+    },{withQuestion:true});
+  }
+  await settingsNavigationCase("concurrent pending owners keep close locked",async(settingsPage,check)=>{
+    const dialog=await openSettings(settingsPage,"编辑器");
+    await settingsEditEditor(dialog);
+    await settingsPage.evaluate(()=>{const s=window.__settingsNavigationTest;s.mode.editor="delay";s.mode.downloads="delay";});
+    await dialog.getByRole("button",{name:"保存设置",exact:true}).click();
+    await settingsPage.waitForFunction(()=>window.__settingsNavigationTest.pending.some(p=>p.kind==="editor"));
+    await settingsCategory(dialog,"下载");await settingsEditProxy(dialog);
+    await dialog.getByRole("button",{name:"保存下载设置",exact:true}).click();
+    await settingsPage.waitForFunction(()=>window.__settingsNavigationTest.pending.length===2);
+    await settingsPage.evaluate(()=>{const s=window.__settingsNavigationTest,index=s.pending.findIndex(p=>p.kind==="editor");s.pending.splice(index,1)[0].release();});
+    await settingsPage.waitForFunction(()=>window.__settingsNavigationTest.settled.editor===1);
+    await settingsPaint(settingsPage);
+    check("one completed owner cannot unlock the other",await dialog.getByRole("button",{name:"关闭设置",exact:true}).isDisabled(),true);
+    await settingsPage.keyboard.press("Escape");
+    check("second owner survives Escape",await dialog.isVisible(),true);
+    await settingsPage.evaluate(()=>{for(const p of window.__settingsNavigationTest.pending.splice(0))p.release();});
+    await settingsPage.waitForFunction(()=>!document.querySelector('[aria-label="关闭设置"]').disabled);
+    check("both requests commit exactly once",await settingsPage.evaluate(()=>window.__settingsNavigationTest.commits),{editor:1,downloads:1});
+    await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
+    await dialog.waitFor({state:"hidden"});
+  });
+  await settingsNavigationCase("pending reload and nested modal escape",async(settingsPage,check)=>{
+    const dialog=await openSettings(settingsPage,"编辑器");
+    await settingsPage.evaluate(()=>{window.__settingsNavigationTest.readMode.editor="delay";});
+    await dialog.getByRole("button",{name:"重新读取",exact:true}).click();
+    await settingsPage.waitForFunction(()=>window.__settingsNavigationTest.pending.some(p=>p.kind==="editor-read"));
+    check("reload owns close protection",await dialog.getByRole("button",{name:"关闭设置",exact:true}).isDisabled(),true);
+    await dialog.getByRole("button",{name:"使用手册",exact:true}).click();
+    const manual=settingsPage.getByRole("dialog",{name:"使用手册",exact:true});await manual.waitFor();
+    await settingsPage.keyboard.press("Escape");await manual.waitFor({state:"hidden"});
+    check("nested Escape leaves settings owner alive",await dialog.isVisible(),true);
+    await settingsPage.keyboard.press("Escape");
+    check("parent Escape cannot drop reload",await dialog.isVisible(),true);
+    await settingsPage.evaluate(()=>{for(const p of window.__settingsNavigationTest.pending.splice(0))p.release();});
+    await settingsPage.waitForFunction(()=>!document.querySelector('[aria-label="关闭设置"]').disabled);
+    check("reload never writes settings",await settingsWriteCounts(settingsPage),{editor:0,downloads:0});
+    await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();await dialog.waitFor({state:"hidden"});
+  });
   await writeFile("evidence/SETTINGS_NAVIGATION_UI_RESULT.json",JSON.stringify({
     scope:"Actual App in Chromium with mocked settings IPC. Visible DOM controls, drafts, search, lazy reads, errors and duplicate-save guards only; no native accessibility or IME qualification.",
     result:settingsNavigationFailures.length ? "FAIL" : "PASS",
@@ -2681,6 +2760,7 @@ try {
 
 
   await runNotesSaveUI(testPage);
+  await runCaseInputUI(testPage);
 
   const recoveryPage=await testPage({viewport:{width:1200,height:800}});
   recoveryPage.on("dialog",dialog=>dialog.accept());
