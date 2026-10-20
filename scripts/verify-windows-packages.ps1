@@ -1,4 +1,5 @@
 # GitHub Actions-only package inspection. Does not launch or install the app.
+param([switch] $TestOnly)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -20,13 +21,31 @@ function Read-PeHeader([string] $Path) {
 function Read-MsiProperty($Database, [string] $Name) {
     $view = $Database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = '$Name'")
     try {
-        $view.Execute()
+        [void]$view.Execute()
         $record = $view.Fetch()
         if ($null -eq $record) { throw "Missing MSI property: $Name" }
         return [string]$record.StringData(1)
-    } finally { $view.Close() }
+    } finally { [void]$view.Close() }
 }
 
+if ($TestOnly) {
+    $record = [pscustomobject]@{Value = 'InkLeet'}
+    $record | Add-Member ScriptMethod StringData { param($Index) if ($Index -ne 1) { throw 'Invalid index' }; return $this.Value }
+    $view = [pscustomobject]@{Record = $record; Closed = $false}
+    $view | Add-Member ScriptMethod Execute { return 0 }
+    $view | Add-Member ScriptMethod Fetch { return $this.Record }
+    $view | Add-Member ScriptMethod Close { $this.Closed = $true; return 0 }
+    $database = [pscustomobject]@{View = $view}
+    $database | Add-Member ScriptMethod OpenView { param($Query) return $this.View }
+    $value = Read-MsiProperty $database 'ProductName'
+    if ($value -isnot [string] -or $value -cne 'InkLeet' -or -not $view.Closed) { throw 'MSI reader leaked COM method output into the returned value' }
+    $view.Record = $null; $view.Closed = $false
+    $rejected = $false
+    try { Read-MsiProperty $database 'Missing' | Out-Null } catch { $rejected = $true }
+    if (-not $rejected -or -not $view.Closed) { throw 'MSI reader must reject absent records and close the view' }
+    Write-Host 'MSI scalar property and failure cleanup regressions passed.'
+    return
+}
 $target = 'x86_64-pc-windows-msvc'
 $release = Join-Path $PWD "src-tauri/target/$target/release"
 $binary = Join-Path $release 'inkleet.exe'
@@ -49,7 +68,7 @@ if (($template -split ';')[0] -ne 'x64') { throw "MSI Template Summary is not x6
 $productName = Read-MsiProperty $database 'ProductName'
 $productVersion = Read-MsiProperty $database 'ProductVersion'
 $productCode = Read-MsiProperty $database 'ProductCode'
-if ($productName -ne 'InkLeet') { throw "Unexpected MSI product: $productName" }
+if ($productName -isnot [string] -or $productName -cne 'InkLeet') { throw "Unexpected MSI product: $productName" }
 
 $version = (Get-Content -Raw 'src-tauri/tauri.conf.json' | ConvertFrom-Json).version
 if ($productVersion -ne $version) { throw 'MSI version differs from the application configuration' }

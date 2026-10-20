@@ -107,6 +107,8 @@ jobs:
         run: |
           git diff --exit-code -- package-lock.json src-tauri/Cargo.lock crates/managed-env/Cargo.lock
           if ($LASTEXITCODE -ne 0) { throw 'Dependency lockfiles changed during the build' }
+          ./scripts/verify-windows-packages.ps1 -TestOnly
+          if ($LASTEXITCODE -ne 0) { throw 'MSI reader self-test failed' }
           ./scripts/verify-windows-packages.ps1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
