@@ -1,0 +1,171 @@
+name: Publish verified v0.1.0 preview
+on:
+  push:
+    branches: [build/preview-installers]
+    paths: ['.github/workflows/publish-v0.1.0.yml']
+permissions:
+  contents: read
+concurrency:
+  group: publish-inkleet-v0.1.0
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'jacek4yang/inkleet' && github.event.head_commit.message == 'release: publish v0.1.0 preview'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify frozen source and assets, then publish the approved preview
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, stat, subprocess, urllib.request, urllib.error, zipfile
+          
+          REPO = "jacek4yang/inkleet"
+          SOURCE = "6b5bca312a4307bd69e4b00a8e950658e5868674"
+          TAG = "v0.1.0"
+          PACKAGE_RUN = 39391415365
+          assert os.environ["GITHUB_REPOSITORY"] == REPO
+          assert os.environ["GITHUB_REF"] == "refs/heads/build/preview-installers"
+          
+          def gh(*args, **kwargs):
+              return subprocess.run(["gh", *args], check=True, **kwargs)
+          
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise RuntimeError("Unexpected API redirect")
+          
+          def api(path, missing=False):
+              req=urllib.request.Request("https://api.github.com/repos/"+REPO+"/"+path,
+                  headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"})
+              try:
+                  with urllib.request.build_opener(NoRedirect).open(req,timeout=30) as r:
+                      return json.load(r)
+              except urllib.error.HTTPError as e:
+                  if missing and e.code==404: return None
+                  raise
+          
+          # All acceptance belongs to the frozen application commit, not this publisher commit.
+          for run_id, names in [
+              (39391421230, {"frontend"}),
+              (PACKAGE_RUN, {"frontend","windows-x64","linux-x86_64","macOS Intel DMG"}),
+              (39391415386, {"native-smoke"}),
+          ]:
+              run=api(f"actions/runs/{run_id}")
+              assert run["head_sha"]==SOURCE and run["status"]=="completed" and run["conclusion"]=="success", "Source gate is not successful"
+              jobs=api(f"actions/runs/{run_id}/jobs?per_page=100")["jobs"]
+              assert all(any(j["name"]==name and j["conclusion"]=="success" for j in jobs) for name in names), "Required job missing"
+          assert api("git/ref/tags/"+TAG,True) is None, "Existing tag: refuse overwrite"
+          assert api("releases/tags/"+TAG,True) is None, "Existing release: inspect rather than retry"
+          
+          artifacts=[
+           (12250660467,"windows","2e6b20e3445377199effc40b9f75d0480067872cba0f7fc3ca6d2c4347377916"),
+           (12250650781,"macos","fbffa9358b59cd80985f7b5f03477f1ab589d83cd1ac3d4ea14fc028b09f6598"),
+           (12249724645,"linux","4b4ea1bdb9464a59b5d986a17a3aa02f1a4bb2f4514c15f30d19ad7a3960f68c"),
+          ]
+          expected={
+           "InkLeet-0.1.0-preview-6b5bca312a43-linux-x86_64.tar.gz":"c47987c4bc4cc284715b4acfbe21355e97de94489a6a40c61255d9b26332d10f",
+           "InkLeet-0.1.0-preview-6b5bca312a43-windows-x64-setup.exe":"7cc964b18f3c41a19e89e8c33ff6ec3f94dcfa8b427bd09f890894f24e9263ba",
+           "InkLeet-0.1.0-preview-6b5bca312a43-windows-x64.msi":"c548e963b1885c65d6466f3a569d475d445a24321c07db172f5cf766b5bdfa2f",
+           "InkLeet_0.1.0_macos-x86_64_6b5bca312a43_unsigned.dmg":"6b507a7520d59133bfa8074f213ab5e69fb0821c000108ae670bc677379cd5e8",
+          }
+          root=pathlib.Path("release-assets"); root.mkdir()
+          platforms=[]
+          for artifact_id, platform, digest in artifacts:
+              info=api(f"actions/artifacts/{artifact_id}")
+              assert not info["expired"] and info["workflow_run"]["head_sha"]==SOURCE
+              assert info["digest"]=="sha256:"+digest
+              archive=pathlib.Path(platform+".zip")
+              with archive.open("wb") as out:
+                  gh("api",f"repos/{REPO}/actions/artifacts/{artifact_id}/zip",stdout=out)
+              assert hashlib.sha256(archive.read_bytes()).hexdigest()==digest, "Archive digest mismatch"
+              with zipfile.ZipFile(archive) as z:
+                  assert sum(i.file_size for i in z.infolist())<100*1024*1024
+                  for item in z.infolist():
+                      p=pathlib.PurePosixPath(item.filename)
+                      assert not p.is_absolute() and ".." not in p.parts and not stat.S_ISLNK(item.external_attr>>16)
+                  metadata=json.loads(z.read("BUILD_INFO.json"))
+                  assert metadata["commit"]==SOURCE
+                  platforms.append(metadata)
+                  for name in expected:
+                      if name in z.namelist():
+                          data=z.read(name)
+                          assert hashlib.sha256(data).hexdigest()==expected[name], "Installer digest mismatch"
+                          assert not (root/name).exists()
+                          (root/name).write_bytes(data)
+          assert {p.name for p in root.iterdir()}==set(expected)
+          (root/"SHA256SUMS").write_text("".join(f"{value}  {name}\n" for name,value in sorted(expected.items())),encoding="utf-8")
+          manifest={
+           "tag":TAG,"version":"0.1.0","prerelease":True,"source_commit":SOURCE,
+           "packaging_run":PACKAGE_RUN,"native_run":39391415386,
+           "assets":[{"file":name,"bytes":(root/name).stat().st_size,"sha256":digest} for name,digest in sorted(expected.items())],
+           "platform_evidence":platforms,
+           "limits":["unsigned Windows/macOS; macOS not notarized","Windows/macOS interactive GUI/install/uninstall not fully accepted","real-account online Run/Submit, native IME and Ventura compatibility not fully accepted","diagnostic native snippet features excluded from distributed builds"],
+          }
+          (root/"RELEASE_MANIFEST.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+          notes=pathlib.Path("release-notes.md")
+          notes.write_text("""# InkLeet v0.1.0 · 首个预览版
+          
+          面向本地算法刷题的开发预览，不代表稳定版或成熟 IDE 等价。
+          
+          ## 下载
+          - macOS Intel x86_64：DMG；不是 Apple Silicon 构建。
+          - Windows x64：setup EXE 或 MSI，任选一种，不要同时安装。
+          - Linux x86_64：tar.gz，解压运行 start.sh；面向 Ubuntu 24.04 / Mint 22 系统依赖，不是全静态通用包。
+          - SHA256SUMS 和 RELEASE_MANIFEST.json 记录全部安装包的校验值、源码提交及构建来源。
+          
+          ## 本版范围
+          本地题目与笔记工作台、多语言命名解答、可编辑测试用例与本地运行；
+          补全、诊断、重命名准备/预览、引用与源码导航；
+          显式保存/格式化、恢复草稿与冲突保护；
+          Vim、可搜索设置、语言格式化覆盖及 Tab 显示宽度；
+          基础调试与 Rust 集合逻辑视图。
+          
+          ## 验证
+          源码固定为 6b5bca312a4307bd69e4b00a8e950658e5868674。
+          [前端 CI](https://github.com/jacek4yang/inkleet/actions/runs/39391421230)、
+          [三平台构建及包检查](https://github.com/jacek4yang/inkleet/actions/runs/39391415365)、
+          [Linux 原生回归](https://github.com/jacek4yang/inkleet/actions/runs/39391415386) 已通过。
+          Linux 原生结果包含设置保存与 Tab 宽度、六语言显式格式化、Vim、Pyright 重命名预览和 Rust 集合视图。
+          公开站点及真实账号验证不计作已通过。
+          
+          ## 已知限制与升级提醒
+          Windows / macOS 包未签名，macOS 未公证；不要关闭系统安全保护。
+          Windows/macOS 的交互安装、升级、卸载及完整 GUI 仍需独立验收。
+          Ventura、真实原生输入法、长时间性能、真实账号登录与在线运行/提交尚未完成全面验收。
+          诊断用 snippet 特性不进入分发包。Android 和 macOS ARM 不属于本次首版。
+          工具环境隔离不是安全沙箱，请只运行可信代码。
+          升级前备份代码、笔记及应用数据，关闭旧版本；不要让多个版本同时写同一份数据。
+          本次发布不合并 main，不删除历史分支。
+          """,encoding="utf-8")
+          files=sorted(root.iterdir())
+          hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+          # No automatic retry of a possibly completed external mutation.
+          gh("release","create",TAG,"--repo",REPO,"--target",SOURCE,"--draft","--prerelease",
+             "--title","InkLeet v0.1.0 · Preview","--notes-file",str(notes),*[str(p) for p in files])
+          release=api("releases/tags/"+TAG)
+          assert release["draft"] and release["prerelease"] and release["target_commitish"]==SOURCE
+          assert {a["name"] for a in release["assets"]}==set(hashes)
+          verify=pathlib.Path("verify-release");verify.mkdir()
+          gh("release","download",TAG,"--repo",REPO,"--dir",str(verify),"--pattern","*")
+          assert {p.name for p in verify.iterdir()}==set(hashes)
+          for name,digest in hashes.items():
+              assert hashlib.sha256((verify/name).read_bytes()).hexdigest()==digest, "Uploaded asset failed verification"
+          existing=api("git/ref/tags/"+TAG,True)
+          if existing is not None:
+              assert existing["object"]["type"]=="commit" and existing["object"]["sha"]==SOURCE
+          gh("release","edit",TAG,"--repo",REPO,"--draft=false","--prerelease")
+          published=api("releases/tags/"+TAG)
+          assert not published["draft"] and published["prerelease"] and published["published_at"]
+          ref=api("git/ref/tags/"+TAG)
+          assert ref["object"]["type"]=="commit" and ref["object"]["sha"]==SOURCE
+          assert {a["name"] for a in published["assets"]}==set(hashes)
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as stream:
+              stream.write("Published verified preview: "+published["html_url"]+"\n\nSource: "+SOURCE+"\n")
+          print(published["html_url"])
+          
+          PY
