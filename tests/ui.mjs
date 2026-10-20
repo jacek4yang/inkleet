@@ -4133,10 +4133,25 @@ try {
   assert.ok(fullRows.labelHeight>20&&fullRows.detailHeight>18,"long content uses actual extra lines instead of ellipsis");
   assert.ok(fullRows.row.left>=0&&fullRows.row.right<=400);
   await presentationPage.screenshot({path:"evidence/completion-full-content-narrow.png"});
+  // A rendered option is not yet keyboard-ready: CodeMirror deliberately
+  // ignores navigation during its initial interaction guard. A screenshot is
+  // not a synchronization primitive and may finish before that guard expires.
+  await presentationPage.locator(".inkleet-completion li[aria-selected]").waitFor();
+  const longRowsBefore=await presentationPage.evaluate(()=>{
+    const v=window.__presentation.view();
+    return {text:v.state.doc.toString(),selection:v.state.selection.toJSON()};
+  });
+  await presentationPage.waitForTimeout(150); // Match the guarded navigation cases below.
   await presentationCode.press("ArrowDown");
   assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] .cm-completionLabel").innerText(),"HashSet");
   await presentationCode.press("ArrowUp");
   assert.equal(await presentationPage.locator(".inkleet-completion li[aria-selected] .cm-completionLabel").innerText(),fullRows.name);
+  assert.deepEqual(await presentationPage.evaluate(()=>{
+    const v=window.__presentation.view();
+    return {text:v.state.doc.toString(),selection:v.state.selection.toJSON()};
+  }),longRowsBefore,"completion navigation never falls through to code movement or editing");
+  assert.equal(await presentationPage.evaluate(()=>window.__presentation.view().hasFocus),true);
+  await writeFile("evidence/COMPLETION_LONG_ROWS_NAVIGATION_RESULT.txt","PASS: narrow full-content rows retain ArrowDown/ArrowUp selection, editor focus, document and cursor after the native completion interaction guard. Mocked LSP browser fixture, not native or real-server acceptance.\n");
   await presentationCode.press("Escape");
   await presentationPage.evaluate(()=>{const s=window.__presentation;s.longRows=false;s.manyRows=true;});
   await presentationCode.press("Control+Space");
