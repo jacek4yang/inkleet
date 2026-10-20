@@ -10,7 +10,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: github.repository == 'jacek4yang/inkleet' && github.event.head_commit.message == 'release: publish v0.1.0 preview'
+    if: >-
+      github.repository == 'jacek4yang/inkleet' && github.event.head_commit.message == 'release: publish v0.1.0 preview'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -61,6 +62,7 @@ jobs:
               assert all(any(j["name"]==name and j["conclusion"]=="success" for j in jobs) for name in names), "Required job missing"
           assert api("git/ref/tags/"+TAG,True) is None, "Existing tag: refuse overwrite"
           assert api("releases/tags/"+TAG,True) is None, "Existing release: inspect rather than retry"
+          assert not any(r["tag_name"]==TAG for r in api("releases?per_page=100")), "Existing draft: inspect rather than retry"
           
           artifacts=[
            (12250660467,"windows","2e6b20e3445377199effc40b9f75d0480067872cba0f7fc3ca6d2c4347377916"),
@@ -147,11 +149,15 @@ jobs:
           # No automatic retry of a possibly completed external mutation.
           gh("release","create",TAG,"--repo",REPO,"--target",SOURCE,"--draft","--prerelease",
              "--title","InkLeet v0.1.0 · Preview","--notes-file",str(notes),*[str(p) for p in files])
-          release=api("releases/tags/"+TAG)
+          drafts=[r for r in api("releases?per_page=100") if r["tag_name"]==TAG]
+          assert len(drafts)==1, "Expected exactly one created draft"
+          release=drafts[0]
           assert release["draft"] and release["prerelease"] and release["target_commitish"]==SOURCE
           assert {a["name"] for a in release["assets"]}==set(hashes)
           verify=pathlib.Path("verify-release");verify.mkdir()
-          gh("release","download",TAG,"--repo",REPO,"--dir",str(verify),"--pattern","*")
+          for asset in release["assets"]:
+              with (verify/asset["name"]).open("wb") as out:
+                  gh("api",f"repos/{REPO}/releases/assets/{asset['id']}","-H","Accept: application/octet-stream",stdout=out)
           assert {p.name for p in verify.iterdir()}==set(hashes)
           for name,digest in hashes.items():
               assert hashlib.sha256((verify/name).read_bytes()).hexdigest()==digest, "Uploaded asset failed verification"
