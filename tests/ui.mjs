@@ -5,6 +5,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { runTabSizeUI } from "./tab-size-ui.mjs";
 import { runSettingsWorkbenchUI } from "./settings-workbench-ui.mjs";
+import { runNotesSaveUI } from "./notes-save-ui.mjs";
 
 async function openSettings(page, category) {
   await page.locator('[data-action="open-settings"]').click();
@@ -2678,6 +2679,8 @@ try {
   await writeFile("evidence/FORMAT_UI_RESULT.txt","PASS: real CodeMirror + worker; mocked formatter IPC; explicit format before canonical save, idle leaves canonical untouched, dirty markers, Unicode, isolated undo/redo, no loop, disabled save skips format, settings failure+reload, stale response and disk/formatter failure protection. Native adapter formatting verified separately.\n");
 
 
+
+  await runNotesSaveUI(testPage);
 
   const recoveryPage=await testPage({viewport:{width:1200,height:800}});
   recoveryPage.on("dialog",dialog=>dialog.accept());

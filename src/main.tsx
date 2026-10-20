@@ -33,6 +33,7 @@ type Document = { code: string; notes: string };
 type RecoveredDraft={text:string;baseline:string|null};
 type LoadedDocument={code:string|null;notes:string|null;codeDraft?:RecoveredDraft|null;notesDraft?:RecoveredDraft|null;draftWarnings?:string[]};
 type SaveTarget={key:string;problem:string;language:string;solution?:string;kind:"code"|"notes"};
+type PendingNoteSave={target:SaveTarget;text:string;resolve:(saved:boolean)=>void};
 function download(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
   const a = document.createElement("a"); a.href = url; a.download = name; a.click();
@@ -84,6 +85,7 @@ function App() {
   const notes = useRef(new Map<string, string>());
   const queue = useRef(new SaveQueue()),draftQueue=useRef(new SaveQueue());
   const clean=useRef(new Map<string,string>()),dirty=useRef(new Set<string>()),saving=useRef(new Set<string>()),draftRevision=useRef(0);
+  const pendingNoteSaves=useRef(new Map<string,PendingNoteSave>());
   const draftEpoch=useRef<Promise<number>|null>(null);
   const sourceSave=useRef<(()=>boolean)|null>(null);
   const [draftError,setDraftError]=useState(""),[closeRequested,setCloseRequested]=useState(false),[closing,setClosing]=useState(false);
@@ -141,16 +143,42 @@ function App() {
   }
   async function saveSnapshot(kind:"code"|"notes",text:string):Promise<boolean>{
     const target:SaveTarget={key:activeKey,problem:problemId,language,solution,kind},key=storageKey(target);
-    if(shuttingDown.current||!isTauri()||selected.current!==target.key||currentText(target)!==text||saving.current.has(key))return false;
+    if(shuttingDown.current||!isTauri()||selected.current!==target.key||currentText(target)!==text)return false;
     if(queue.current.failed(key)){setStatus("请先处理保存失败或文件冲突");return false;}
-    saving.current.add(key);setStatus("保存中");
+    if(saving.current.has(key)){
+      if(kind!=="notes")return false; // Source formatting owns its own save-intent queue.
+      return new Promise(resolve=>{
+        pendingNoteSaves.current.get(key)?.resolve(false);
+        pendingNoteSaves.current.set(key,{target,text,resolve});
+        setStatus("已排队保存笔记");
+      });
+    }
+    return saveOwnedSnapshot(target,text);
+  }
+  function saveOwnedSnapshot(target:SaveTarget,text:string):Promise<boolean>{
+    const key=storageKey(target),kind=target.kind;
+    saving.current.add(key);if(selected.current===target.key)setStatus("保存中");
     return new Promise(resolve=>queue.current.enqueue({key,write:async()=>{
       await invoke("save_text",{problem:target.problem,language:target.language,solution:target.solution,kind,text,expected:persisted.current.get(key)??null});
       persisted.current.set(key,text);clean.current.set(key,text);reconcileDirty(target);
       // A newer live draft must never be cleared by completion of an older save.
       checkpoint(target,currentText(target),text);
-    },saved:()=>{saving.current.delete(key);refresh(n=>n+1);if(selected.current===target.key)setStatus("已保存到本机文件");resolve(true);},
-    failed:()=>{saving.current.delete(key);dirty.current.add(key);refresh(n=>n+1);if(selected.current===target.key)setStatus("保存失败 · 草稿仍在，请先导出");resolve(false);}}));
+    },saved:()=>{
+      saving.current.delete(key);refresh(n=>n+1);
+      if(selected.current===target.key)setStatus(dirty.current.has(key)?"已保存快照 · 仍有未保存修改":"已保存到本机文件");
+      resolve(true);
+      const next=pendingNoteSaves.current.get(key);pendingNoteSaves.current.delete(key);
+      // Enqueue synchronously before SaveQueue becomes idle. Closing/switching
+      // must wait for already requested snapshots, never save later plain edits.
+      if(next)void saveOwnedSnapshot(next.target,next.text).then(next.resolve);
+    },
+    failed:()=>{
+      saving.current.delete(key);
+      const next=pendingNoteSaves.current.get(key);pendingNoteSaves.current.delete(key);next?.resolve(false);
+      dirty.current.add(key);refresh(n=>n+1);
+      if(selected.current===target.key)setStatus("保存失败 · 草稿仍在，请先导出");
+      resolve(false);
+    }}));
   }
   useEffect(()=>{setFormatMessage("");},[activeKey]);
 
