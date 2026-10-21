@@ -4,7 +4,7 @@ import {localResultReport,type OutputRow} from "./local-result-model";
 import {validateRunContext,sameRunStatus,type RunContext} from "./run-context";
 import {canonicalJson,compareJson,invocationCount,type Expectation} from "./case-expectations";
 import "./case-results.css";
-import {parameterNames,seedCases,validateCases,inputParts,compactCaseValue,type LocalCase} from "./test-cases";
+import {parameterNames,seedCases,appendExampleCases,validateCases,inputParts,compactCaseValue,type LocalCase} from "./test-cases";
 import { useResizablePanel } from "./resizable-panel";
 import type { DebugPosition } from "./debug-position";
 import { Icon, IconButton } from "./icons";
@@ -38,6 +38,7 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
   });
   const [cases,setCases]=useState<LocalCase[]>(initial.cases),[selected,setSelected]=useState(initial.selected);
   const [caseError,setCaseError]=useState(initial.error),[rename,setRename]=useState<string|null>(null);
+  const [importNotice,setImportNotice]=useState("");
   type InputDraft={input:string;metadata:string;parts:string[]|null};
   const [inputDrafts,setInputDrafts]=useState<Record<string,InputDraft>>(()=>Object.fromEntries(initial.cases.map(item=>[item.id,{input:item.input,metadata,parts:names.length>1?inputParts(item.input,names):null}])));
   const currentCase=cases.find(item=>item.id===selected)??cases[0],input=currentCase.input;
@@ -61,6 +62,14 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
   function addCase(){const next={id:crypto.randomUUID(),name:"用例 "+(cases.length+1),input:currentCase.input,expectation:currentCase.expectation};
     if(cases.reduce((n,c)=>n+(inputDrafts[c.id]?.parts?.join("\n")??c.input).length+(c.expectation?.value.length??0),0)+(parts?.join("\n")??next.input).length+(next.expectation?.value.length??0)>2*1024*1024){setCaseError("用例超过大小限制");return;}
     if(updateCases([...cases,next],next.id))setInputDrafts(current=>({...current,[next.id]:{input:next.input,metadata,parts:parts?[...parts]:null}}));
+  }
+  function importExamples(){
+    setImportNotice("");
+    try{
+      const next=appendExampleCases(cases,sampleInput,exampleInputs,names);
+      if(!next.added){setImportNotice(sampleInput.trim()||exampleInputs.trim()?"题目示例已在用例中":"当前题目暂无可导入的示例输入");return;}
+      if(updateCases(next.cases))setImportNotice("已导入 "+next.added+" 个示例，原有用例未改变");
+    }catch(error){setCaseError(error instanceof Error?error.message:"导入示例失败，现有用例未改变");}
   }
   function removeCase(){if(cases.length===1)return;const next=cases.filter(item=>item.id!==selected);
     if(updateCases(next,next[0].id))setInputDrafts(current=>{const copy={...current};delete copy[selected];return copy;});
@@ -174,9 +183,9 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
       <div role="tablist" aria-label="测试用例">{cases.map(item=><button key={item.id} role="tab" aria-selected={item.id===selected} tabIndex={item.id===selected?0:-1} onClick={()=>chooseCase(item.id)} onKeyDown={event=>{if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;event.preventDefault();const i=cases.findIndex(c=>c.id===selected),next=cases[(i+(event.key==="ArrowRight"?1:-1)+cases.length)%cases.length];chooseCase(next.id);(event.currentTarget.parentElement?.children[cases.indexOf(next)] as HTMLElement)?.focus();}}>{item.name}</button>)}</div>
       {names.length>1&&<button type="button" aria-label={parts?"切换为原始输入":"切换为参数输入"} disabled={!parts&&!canSplit} onClick={toggleInputMode}>{parts?"原始输入":"参数输入"}</button>}
       <IconButton icon="add" label="添加用例" disabled={cases.length>=64} onClick={addCase}/>
-      <details className="case-menu"><summary aria-label="用例操作">···</summary><div><button onClick={()=>setRename(currentCase.name)}>重命名</button><button disabled={cases.length===1} onClick={removeCase}>删除用例</button></div></details>
+      <details className="case-menu"><summary aria-label="用例操作">···</summary><div><button type="button" title="追加缺少的题目示例输入，不覆盖自定义用例或预期结果" onClick={importExamples}>导入题目示例</button><button onClick={()=>setRename(currentCase.name)}>重命名</button><button disabled={cases.length===1} onClick={removeCase}>删除用例</button></div></details>
       {rename!==null&&<form className="case-rename" onSubmit={event=>{event.preventDefault();const name=rename.trim();if(name&&name.length<=80){updateCases(cases.map(c=>c.id===selected?{...c,name}:c));setRename(null);}}}><input autoFocus aria-label="用例名称" maxLength={80} value={rename} onChange={e=>setRename(e.target.value)} onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setRename(null);}}}/><button type="submit">确定</button></form>}
-      {caseError&&<span role="alert">{caseError}</span>}
+      {importNotice&&<span role="status">{importNotice}</span>}{caseError&&<span role="alert">{caseError}</span>}
     </div>
     <div data-runner-pane="run" hidden={pane !== "run"}>
     <div className="case-editor"><div className="case-inputs">

@@ -244,14 +244,16 @@ try {
     const geometry=await page.locator(".code-pane>.pane-heading").evaluate(heading=>{
       const outer=heading.getBoundingClientRect();
       const controls=[...heading.querySelectorAll("select,summary,.actions>button")].map(node=>{
-        const r=node.getBoundingClientRect();return {left:r.left,right:r.right,width:r.width};
+        const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width};
       });
       return {left:outer.left,right:outer.right,controls,scroll:document.documentElement.scrollWidth,viewport:innerWidth};
     });
     assert.ok(geometry.controls.every(r=>r.width>15 && r.left>=geometry.left-1 && r.right<=geometry.right+1),"all editor toolbar controls stay inside pane at "+width);
 
-    const ordered=[...geometry.controls].sort((a,b)=>a.left-b.left);
-    assert.ok(ordered.every((r,i)=>i===0 || r.left>=ordered[i-1].right-1),"toolbar controls do not overlap at "+width);
+    assert.ok(geometry.controls.every((a,i)=>geometry.controls.slice(i+1).every(b=>
+      a.right<=b.left+1||b.right<=a.left+1||a.bottom<=b.top+1||b.bottom<=a.top+1
+    )),"toolbar controls do not overlap in either row at "+width);
+    await page.screenshot({path:"evidence/editor-toolbar-"+width+".png"});
     assert.ok(geometry.scroll<=geometry.viewport+1,"no page-level horizontal overflow at "+width);
     await page.locator(".solution-menu>summary").click();
     const menuAction=page.getByRole("button",{name:"复制解答",exact:true});

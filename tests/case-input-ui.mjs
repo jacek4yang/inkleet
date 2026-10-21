@@ -5,8 +5,8 @@ export async function runCaseInputUI(testPage){
  page.on("pageerror",error=>errors.push(error.message));
  await page.addInitScript(()=>{
   window.isTauri=true;
-  const s=window.__caseInputTest={starts:[],result:null,record:null,debugStarts:0,metadata:JSON.stringify({name:"solve",params:[{name:"nums",type:"integer[]"},{name:"target",type:"integer"}],return:{type:"integer"}})};
-  const question=()=>({...window.__fixtureQuestions[0],metaData:s.metadata,sampleTestCase:"[1]\n9",exampleTestcases:"[1]\n9"});
+  const s=window.__caseInputTest={starts:[],result:null,record:null,debugStarts:0,examples:"[1]\n9",metadata:JSON.stringify({name:"solve",params:[{name:"nums",type:"integer[]"},{name:"target",type:"integer"}],return:{type:"integer"}})};
+  const question=()=>({...window.__fixtureQuestions[0],metaData:s.metadata,sampleTestCase:"[1]\n9",exampleTestcases:s.examples,translatedContent:s.examples.includes("[7]")?"<p>Updated examples fixture</p>":window.__fixtureQuestions[0].translatedContent});
   window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
    if(command==="load_recent_questions")return [question()];
    if(command==="get_question")return {question:question(),cacheWarning:null,fromCache:false};
@@ -57,6 +57,25 @@ export async function runCaseInputUI(testPage){
  assert.equal(await first.inputValue(),pretty);
  await panel.getByRole("tab",{name:"用例 2",exact:true}).click();
  assert.equal(await first.inputValue(),"[\n","case switching preserves incomplete field boundaries");
+ await panel.locator(".case-expectation summary").click();
+ await panel.getByRole("textbox",{name:"预期结果",exact:true}).fill("123");
+ await panel.locator(".case-menu summary").click();
+ await panel.getByRole("button",{name:"导入题目示例",exact:true}).click();
+ assert.equal(await panel.getByRole("tab").count(),3);
+ assert.equal(await panel.getByRole("tab",{name:"用例 2",exact:true}).getAttribute("aria-selected"),"true");
+ assert.equal(await first.inputValue(),"[\n");assert.equal(await second.inputValue(),"9");
+ assert.equal(await panel.getByRole("textbox",{name:"预期结果",exact:true}).inputValue(),"123");
+ await panel.getByRole("button",{name:"导入题目示例",exact:true}).click();
+ assert.equal(await panel.getByRole("tab").count(),3,"repeated import is idempotent");
+ await page.evaluate(()=>{window.__caseInputTest.examples="[1]\n9\n[7]\n8";});
+ await page.locator('.question-sidebar [data-slug="inkleet-test-fixture"]').click();
+ await page.getByText("Updated examples fixture",{exact:true}).waitFor();
+ await panel.getByRole("button",{name:"导入题目示例",exact:true}).click();
+ assert.equal(await panel.getByRole("tab").count(),4,"uses refreshed official examples");
+ assert.equal(await panel.getByRole("tab",{name:"题目示例 1",exact:true}).count(),1);assert.equal(await panel.getByRole("tab",{name:"题目示例 2",exact:true}).count(),1);
+ assert.equal(await first.inputValue(),"[\n");assert.equal(await panel.getByRole("textbox",{name:"预期结果",exact:true}).inputValue(),"123");
+ assert.equal(await page.evaluate(()=>window.__caseInputTest.starts.length),0,"import never runs code");
+ await panel.locator(".case-menu summary").click();
  await panel.getByRole("button",{name:"收起",exact:true}).click();
  await page.getByRole("button",{name:"本地",exact:true}).click();
  assert.equal(await first.inputValue(),"[\n","collapsing does not discard field drafts");

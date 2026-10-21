@@ -113,3 +113,21 @@ export function compactCaseValue(value:string):string{
  else if(c==='"'){quoted=true;out+=c;}else if(!/\s/.test(c))out+=c;}
  return out;
 }
+
+/** Append only missing official inputs. Existing cases and expectations are untouched. */
+export function appendExampleCases(cases:LocalCase[],sample:string,examples:string,names:string[]):{cases:LocalCase[];added:number}{
+ if(!sample.trim()&&!examples.trim())return {cases,added:0};
+ const identity=(input:string)=>input.replace(/\r\n?/g,"\n").trim().split("\n").map(line=>compactCaseValue(line.trim())).filter(Boolean).join("\n");
+ const known=new Set(cases.map(item=>identity(item.input))),ids=new Set(cases.map(item=>item.id));
+ const additions:LocalCase[]=[];let serial=1;
+ for(const item of seedCases(sample,examples,names)){
+  const key=identity(item.input);if(!key||known.has(key))continue;
+  while(ids.has("imported-example-"+serial))serial++;
+  const id="imported-example-"+serial++;ids.add(id);known.add(key);
+  additions.push({id,name:"题目示例 "+(serial-1),input:item.input});
+ }
+ if(!additions.length)return {cases,added:0};
+ const next=[...cases,...additions];
+ if(next.length>64||next.reduce((n,c)=>n+c.input.length+(c.expectation?.value.length??0),0)>2*1024*1024)throw Error("导入会超过用例大小或数量限制，未更改现有用例");
+ return {cases:next,added:additions.length};
+}
