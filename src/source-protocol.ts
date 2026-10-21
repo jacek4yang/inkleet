@@ -41,7 +41,7 @@ export function sourceTargets(value:unknown):SourceTarget[]{
  }
  return result;
 }
-export function chooseSourceTarget(targets:SourceTarget[],signal:AbortSignal):Promise<SourceTarget|null>{
+export function chooseSourceTarget(targets:SourceTarget[],signal:AbortSignal,ownership?:(dialog:HTMLDialogElement|null)=>void):Promise<SourceTarget|null>{
  if(signal.aborted)return Promise.resolve(null);
  if(targets.length<2)return Promise.resolve(targets[0]??null);
  return new Promise(resolve=>{
@@ -49,8 +49,9 @@ export function chooseSourceTarget(targets:SourceTarget[],signal:AbortSignal):Pr
   dialog.className="source-target-picker";dialog.setAttribute("aria-label","选择定义");
   const heading=document.createElement("h2");heading.textContent="转到定义";dialog.append(heading);
   let settled=false;
-  const finish=(value:SourceTarget|null)=>{if(settled)return;settled=true;signal.removeEventListener("abort",abort);dialog.close();dialog.remove();if(previous instanceof HTMLElement&&previous.isConnected)previous.focus({preventScroll:true});resolve(value);};
-  const abort=()=>finish(null);
+  const finish=(value:SourceTarget|null,restore=true)=>{if(settled)return;settled=true;restore=restore&&dialog.contains(document.activeElement);signal.removeEventListener("abort",abort);dialog.close();dialog.remove();if(restore&&previous instanceof HTMLElement&&previous.isConnected)previous.focus({preventScroll:true});ownership?.(null);resolve(value);};
+  // Cancellation can originate from a newer focus owner. Never focus the old editor then.
+  const abort=()=>finish(null,false);
   signal.addEventListener("abort",abort,{once:true});
   dialog.addEventListener("cancel",e=>{e.preventDefault();finish(null);});
   const buttons=targets.map(target=>{
@@ -68,7 +69,7 @@ export function chooseSourceTarget(targets:SourceTarget[],signal:AbortSignal):Pr
    event.preventDefault();const index=buttons.indexOf(document.activeElement as HTMLButtonElement);
    buttons[event.key==="Home"?0:event.key==="End"?buttons.length-1:(index+(event.key==="ArrowDown"?1:-1)+buttons.length)%buttons.length].focus();
   });
-  document.body.append(dialog);dialog.showModal();buttons[0].focus();
+  document.body.append(dialog);ownership?.(dialog);dialog.showModal();buttons[0].focus();
  });
 }
 

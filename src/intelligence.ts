@@ -335,18 +335,52 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     if(close)showSource(null);
   }
   async function definition(pos: number) {
-    if(!view||!session)return;
+    if(!view||!session||!view.hasFocus||view.composing)return;
     invalidateNavigation();
     const target=view,doc=target.state.doc,id=session.id,generation=navigationGeneration;
     const selection=target.state.selection,scrollTop=target.scrollDOM.scrollTop,scrollLeft=target.scrollDOM.scrollLeft;
     const abort=new AbortController();navigationAbort=abort;
     const valid=()=>!closed&&view===target&&session?.id===id&&target.state.doc===doc;
+    // Only the initial lookup owns editor focus. Once handed to the reader,
+    // recursive navigation has its own lifetime and must not require editor focus.
+    const document=target.dom.ownerDocument,window=document.defaultView;
+    let picker:HTMLDialogElement|null=null;
+    const owns=(node:EventTarget|null)=>node instanceof Node&&(target.contentDOM.contains(node)||!!picker?.contains(node));
+    const pending=()=>valid()&&generation===navigationGeneration&&!abort.signal.aborted;
+    const focused=()=>pending()&&!target.composing&&document.hasFocus()&&owns(document.activeElement);
+    const cancel=()=>abort.abort();
+    const focusIn=(event:FocusEvent)=>{if(!owns(event.target))cancel();};
+    const focusOut=(event:FocusEvent)=>{
+      if(!owns(event.target)||owns(event.relatedTarget))return;
+      // showModal may briefly report no related target during its owned handoff.
+      if(picker&&!event.relatedTarget)queueMicrotask(()=>{if(!owns(document.activeElement))cancel();});
+      else cancel();
+    };
+    const keyDown=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!event.isComposing&&!picker)cancel();};
+    const composition=()=>cancel();
+    const visibility=()=>{if(document.hidden)cancel();};
+    const cleanup=()=>{
+      document.removeEventListener("focusin",focusIn,true);
+      document.removeEventListener("focusout",focusOut,true);
+      document.removeEventListener("keydown",keyDown,true);
+      document.removeEventListener("compositionstart",composition,true);
+      document.removeEventListener("visibilitychange",visibility);
+      window?.removeEventListener("blur",cancel);
+      abort.signal.removeEventListener("abort",cleanup);
+    };
+    document.addEventListener("focusin",focusIn,true);
+    document.addEventListener("focusout",focusOut,true);
+    document.addEventListener("keydown",keyDown,true);
+    document.addEventListener("compositionstart",composition,true);
+    document.addEventListener("visibilitychange",visibility);
+    window?.addEventListener("blur",cancel);
+    abort.signal.addEventListener("abort",cleanup,{once:true});
     try {
-      const result=await request("definition",pos,doc);
-      if(!valid()||generation!==navigationGeneration||abort.signal.aborted)return;
-      const location=await chooseSourceTarget(sourceTargets(result),abort.signal);
+      const result=await request("definition",pos,doc,undefined,undefined,focused);
+      if(!focused())return;
+      const location=await chooseSourceTarget(sourceTargets(result),abort.signal,element=>{picker=element;});
       if(!location){if(!abort.signal.aborted)status("未找到定义");return;}
-      if(!valid()||generation!==navigationGeneration||abort.signal.aborted)return;
+      if(!focused())return;
       if(location.uri===session?.uri){
         const span=range(doc,location.range);if(!span)throw Error("定义位置与当前代码不一致");
         target.dispatch({selection:{anchor:span.from,head:getCM(target)?span.from:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});return;
@@ -398,8 +432,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         }
       };
       const source=await load(location,abort.signal);
-      if(source&&valid()&&generation===navigationGeneration&&!abort.signal.aborted)showSource({...source,line:location.range.start.line,range:location.range,navigation});
-    } catch(e) {if(valid()&&generation===navigationGeneration&&!abort.signal.aborted)status(String(e));}
+      if(source&&focused()){cleanup();showSource({...source,line:location.range.start.line,range:location.range,navigation});}
+    } catch(e) {if(focused())status(String(e));}
+    finally{cleanup();}
   }
   let appliedDiagnostics:DiagnosticSnapshot<Text>|null=null;
   async function poll() {
@@ -458,7 +493,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
       const pos = target.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
-      event.preventDefault(); void definition(pos); return true;
+      event.preventDefault(); target.focus(); void definition(pos); return true;
     }}),
     EditorView.updateListener.of(update => {
       if(update.docChanged||update.selectionSet)invalidateNavigation(update.docChanged);

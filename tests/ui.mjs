@@ -8,6 +8,7 @@ import { runSettingsWorkbenchUI } from "./settings-workbench-ui.mjs";
 import { runNotesSaveUI } from "./notes-save-ui.mjs";
 import { runCaseInputUI } from "./case-input-ui.mjs";
 import { runNewlineSaveUI } from "./newline-save-ui.mjs";
+import { runDefinitionFocusUI } from "./definition-focus-ui.mjs";
 
 async function openSettings(page, category) {
   await page.locator('[data-action="open-settings"]').click();
@@ -807,12 +808,19 @@ try {
         if (args.kind === "signatureHelp" && state.deferSignature) return new Promise(resolve => { state.signatureReply = resolve; });
         if (args.kind === "signatureHelp") return { signatures: [{ label: "popleft(index: int) -> int", documentation: "<img src=x onerror=alert(1)>signature docs", parameters: [{ label: "index" }] }], activeSignature: 0, activeParameter: 0 };
         if (args.kind === "hover") return { contents: { kind: "plaintext", value: "deque.popleft() -> int" } };
-        if (args.kind === "definition") return [{ uri: state.primaryDefinition?"file:///fixture/solution.py":"file:///fixture/stdlib/collections.pyi", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } } }];
+        if (args.kind === "definition") {
+          const result=[{uri:state.primaryDefinition?"file:///fixture/solution.py":"file:///fixture/stdlib/collections.pyi",range:{start:{line:0,character:0},end:{line:0,character:5}}}];
+          if(state.multiDefinition)result.push({uri:"file:///fixture/stdlib/_collections_abc.py",range:{start:{line:0,character:0},end:{line:0,character:5}}});
+          if(state.deferDefinition)return new Promise(resolve=>{state.definitionReply=()=>resolve(result);});
+          return result;
+        }
       }
       if(command==="language_cancel_source_navigation"){state.sourceCancels??=[];state.sourceCancels.push(args);return;}
       if(command==="acquire_language_source"){
         const source=args.uri.endsWith("collections.pyi")?{sourceId:1,name:"collections.pyi",text:"class deque:\n    def popleft(self) -> int: ...",declaration:true}:{sourceId:2,name:"_collections_abc.py",text:"class Iterable:\n    def __iter__(self):\n        return iter(())",declaration:false};
-        return {...source,uri:args.uri,language:"python3"};
+        const result={...source,uri:args.uri,language:"python3"};
+        if(state.deferAcquire)return new Promise(resolve=>{state.acquireReply=()=>resolve(result);});
+        return result;
       }
       if(command==="language_source_definition"){
         state.sourceRequests??=[];state.sourceRequests.push(args);
@@ -868,6 +876,8 @@ try {
   await lspPage.waitForTimeout(100);
   assert.equal(await lspPage.locator(".lsp-signature").count(), 0, "dismissed signature must not reappear from a late response");
   await lspPage.evaluate(() => { window.__lspTest.deferSignature = false; });
+
+  await runDefinitionFocusUI(lspPage,lspEditor);
 
   await lspEditor.press("F12");
   const sourceDialog = lspPage.getByRole("dialog", { name: "collections.pyi", exact: true });
