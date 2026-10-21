@@ -1523,8 +1523,10 @@ try {
   const oldLabel=await runPanel.locator(".case-result header span").first().innerText();
   await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":99,"ok":true,"value":9007199254740993}'];});
   await runPanel.locator(".local-result").getByText("9007199254740993",{exact:true}).waitFor();
-  assert.equal(await runPanel.locator(".case-result").count(),1);
-  assert.equal(await runPanel.locator(".case-result header span").first().innerText(),oldLabel.replace(/ · \d+$/,""),"single result removes ordinal suffix without dropping snapshot name");
+  assert.equal(await runPanel.locator(".case-result").count(),2,"foreign output remains visible beside the missing expected invocation");
+  assert.equal(await runPanel.getByText("未返回结果",{exact:true}).count(),1);
+  assert.equal(await runPanel.getByText("0/1 组",{exact:true}).count(),1,"foreign case 99 cannot satisfy expected invocation 1");
+  assert.equal(await runPanel.locator(".case-result header span").first().innerText(),oldLabel.replace(/ · \d+$/,""),"single foreign result retains the snapshot name without inventing a matching ordinal");
   await runPage.evaluate(()=>{window.__runTest.result.results=['{"case":99,"ok":false,"error":"changed error result"}'];});
   await runPanel.locator(".case-result [role=alert]").getByText("changed error result",{exact:true}).waitFor();
   // Void arguments are first-class output, with exact bytes and owned metadata labels.
