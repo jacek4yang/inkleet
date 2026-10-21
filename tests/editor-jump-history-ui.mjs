@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import {writeFile} from "node:fs/promises";
 export async function runEditorJumpHistoryUI(page,editor){
- const original=await editor.innerText(),fixture=Array.from({length:180},(_,i)=>"value_"+i+" = "+i+" # "+"long ".repeat(35)).join("\n");
+ const sourceText=()=>editor.evaluate(async node=>{
+  const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
+  return EditorView.findFromDOM(node.closest(".cm-editor")).state.doc.toString();
+ });
+ const original=await sourceText(),fixture=Array.from({length:180},(_,i)=>"value_"+i+" = "+i+" # "+"long ".repeat(35)).join("\n");
  const keys=await page.evaluate(()=>/Mac/i.test(navigator.platform)?{back:"Control+-",forward:"Control+Shift+-"}:/Linux/i.test(navigator.platform)?{back:"Control+Alt+-",forward:"Control+Shift+-"}:{back:"Alt+ArrowLeft",forward:"Alt+ArrowRight"});
  const snapshot=()=>page.evaluate(async()=>{
   const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
@@ -70,7 +74,7 @@ export async function runEditorJumpHistoryUI(page,editor){
  await page.waitForTimeout(100);assert.deepEqual((await snapshot()).ranges,a.ranges);
  await editor.press("End");await editor.pressSequentially("x");await editor.press("Control+z");
  const afterUndo=await snapshot();await editor.press(keys.forward);assert.deepEqual((await snapshot()).ranges,afterUndo.ranges);
- assert.equal(await editor.innerText(),fixture);
+ assert.equal(await sourceText(),fixture);
  await page.screenshot({path:"evidence/editor-jump-history.png"});
  await page.evaluate(()=>{window.__lspTest.primaryDefinition=false;delete window.__lspTest.definitionRange;});
  await editor.fill(original);await editor.press("Control+Home");
