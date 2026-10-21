@@ -83,6 +83,14 @@ export async function runDefinitionFocusUI(page,editor){
   await page.keyboard.press("ArrowDown");await page.keyboard.press("Enter");
   await page.getByRole("dialog",{name:"_collections_abc.py",exact:true}).waitFor();
   assert.equal(await page.getByLabel("只读标准库源码",{exact:true}).evaluate(node=>document.activeElement===node),true);
+  const readerSelection=()=>page.evaluate(async()=>{
+    const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
+    return EditorView.findFromDOM(document.querySelector(".source-viewer .cm-editor")).state.selection.main.empty;
+  });
+  assert.equal(await readerSelection(),false,"definition target is initially selected");
+  await page.keyboard.press("Escape");
+  assert.equal(await readerSelection(),true,"first Escape collapses the standard CodeMirror selection");
+  assert.equal(await page.locator(".source-viewer").isVisible(),true);
   await page.keyboard.press("Escape");await page.locator(".source-viewer").waitFor({state:"hidden"});
   results.push("owned-picker/newer-attempt");
 
