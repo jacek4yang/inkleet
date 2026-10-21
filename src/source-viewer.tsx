@@ -53,19 +53,20 @@ export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4}:{source
    else view.requestMeasure({read:()=>null,write:()=>{if(!destroyed&&ticket===generation){view.scrollDOM.scrollTop=visit.scroll.top;view.scrollDOM.scrollLeft=visit.scroll.left;pendingRestore=null;}}});
   };
   const move=(direction:-1|1)=>{if(destroyed)return;capture();cancel();if(history.move(direction))apply(false);else update();};
-  const follow=async(pos:number)=>{
+  const follow=async(pos:number,kind:"definition"|"implementation"="definition")=>{
    if(destroyed||view.composing||!navigation.current())return;
+   if(kind==="implementation"&&!navigation.implementation){update("当前语言服务不支持转到实现");return;}
    capture();cancel();const ticket=generation,controller=new AbortController();abort=controller;
    const origin=history.current.source,line=view.state.doc.lineAt(pos);
    const valid=()=>!destroyed&&generation===ticket&&!controller.signal.aborted&&navigation.current();
    update("正在查找");
    try{
-    const response=await navigation.definition(origin,{line:line.number-1,character:pos-line.from},controller.signal);
+    const response=await navigation.definition(origin,{line:line.number-1,character:pos-line.from},controller.signal,kind);
     if(!valid())return;
     if(response.locations.length>1)update();
-    const target=await chooseSourceTarget(response.locations,controller.signal);
+    const target=await chooseSourceTarget(response.locations,controller.signal,undefined,kind);
     if(!valid())return;
-    if(!target){update(response.locations.length?"":"未找到定义");return;}
+    if(!target){update(response.locations.length?"":kind==="implementation"?"未找到实现":"未找到定义");return;}
     const loaded=target.uri===origin.uri?origin:await navigation.load(target,controller.signal);
     if(!valid())return;
     if(!loaded){navigation.origin(target);return;}
@@ -91,6 +92,7 @@ export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4}:{source
      return false;
     }})),
     Prec.highest(keymap.of([
+     {key:"Mod-F12",run:target=>{void follow(target.state.selection.main.head,"implementation");return true;}},
      {key:"F12",run:target=>{void follow(target.state.selection.main.head);return true;}},
      {key:"Alt-ArrowLeft",run:()=>{move(-1);return true;}},{key:"Alt-ArrowRight",run:()=>{move(1);return true;}},
     ])),

@@ -1363,6 +1363,17 @@ try:
             wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
             assert text(code)==code_text, "Language scaffolding must not change the draft"
             (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
+            if group=="golang":
+                implementation_source="type Runner interface { Run() int }\ntype Worker struct{}\nfunc (Worker) Run() int { return 7 }\nfunc solve(values []int) int { var r Runner = Worker{}; return r.Run() }"
+                fill(code,implementation_source)
+                wait_for(lambda:any("solve" in cmd("GET",f"/element/{node[EID]}/text") for node in cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function"})),"gopls analyzed implementation fixture",seconds=45)
+                focus_code_editor()
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home","Right","Right","Right","Right","Right","Right","ctrl+F12"],check=True)
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":"return String(window.getSelection())","args":[]})=="Worker","real gopls implementation maps virtual package lines to source",seconds=30)
+                assert source_text(code)==implementation_source,"implementation navigation preserves editable code"
+                screenshot("golang-implementation-native.png")
+                (evidence/"IMPLEMENTATION_NATIVE_RESULT.txt").write_text("PASS: actual private gopls textDocument/implementation, Ctrl+F12 from Runner interface to Worker, virtual package offset mapped, original source unchanged. Other language providers remain separately qualified.\\n")
+                fill(code,code_text)
             if (os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1" and group in ("golang","rust")) or (os.environ.get("INKLEET_CLANG_SNIPPET_VALIDATION") == "1" and group in ("c","cpp")):
                 native_snippet_case(group,code)
             if group=="rust":

@@ -90,6 +90,7 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language,
       {id:"editor.selectAll",label:"全选",run:selectAll},
       ...(intelligence?[
         {id:"editor.rename",enabled:()=>intelligence.available(),label:"重命名符号",key:"F2",run:intelligence.commands.rename},
+        {id:"editor.implementation",enabled:()=>intelligence.implementationAvailable(),label:"转到实现",key:"Mod-F12",run:intelligence.commands.implementation},
         {id:"editor.definition",enabled:()=>intelligence.available(),label:"转到定义",key:"F12",run:intelligence.commands.definition},
         {id:"editor.references",enabled:()=>intelligence.available(),label:"查找引用",key:"Shift-F12",run:intelligence.commands.references},
         {id:"editor.signature",enabled:()=>intelligence.available(),label:"参数提示",key:"Mod-Shift-Space",run:intelligence.commands.signature},

@@ -290,9 +290,9 @@ async fn acquire_language_source(window:tauri::WebviewWindow,app:tauri::AppHandl
  tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().acquire_source(id,version,&uri)).await.map_err(|_|"源码读取任务中断".to_owned())?
 }
 #[tauri::command]
-async fn language_source_definition(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,source_id:u64,version:u32,line:u32,character:u32,sequence:u64)->Result<source_navigation::Targets,String>{
+async fn language_source_definition(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,source_id:u64,version:u32,line:u32,character:u32,sequence:u64,kind:Option<source_navigation::NavigationKind>)->Result<source_navigation::Targets,String>{
  check_origin(&window)?;
- tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().source_definition(id,source_id,version,line,character,sequence)).await.map_err(|_|"源码导航任务中断".to_owned())?
+ tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().source_definition(id,source_id,version,line,character,sequence,kind.unwrap_or_default())).await.map_err(|_|"源码导航任务中断".to_owned())?
 }
 #[tauri::command]
 async fn language_cancel_source_navigation(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,through:u64)->Result<(),String>{

@@ -51,8 +51,9 @@ impl Services {
   self.session(id)?;
   Ok(Snapshot{source_id:record.id,uri:record.uri.clone(),content:record.content.clone()})
  }
- pub fn source_definition(&self,id:u64,source_id:u64,version:u32,line:u32,character:u32,sequence:u64)->Result<Targets> {
+ pub fn source_definition(&self,id:u64,source_id:u64,version:u32,line:u32,character:u32,sequence:u64,kind:crate::source_navigation::NavigationKind)->Result<Targets> {
   let session=self.session(id)?;
+  let method=kind.method(session.implementation)?;
   let record=session.sources.lock().map_err(|_|"源码快照状态不可用")?.get(source_id)?;
   if !crate::source_navigation::valid_position(&record.content.text,line,character){return Err("源码位置无效".into());}
   let (sequence,request)={
@@ -60,7 +61,7 @@ impl Services {
    let document=session.document.lock().map_err(|_|"文档状态不可用")?;
    if document.version!=version{return Err("解答已更新，请重新跳转".into());}
    requests.begin(Some(sequence),||{
-    let request=session.client.begin_cancellable_lsp_request("textDocument/definition",json!({"textDocument":{"uri":record.uri},"position":{"line":line,"character":character}}))?;
+    let request=session.client.begin_cancellable_lsp_request(method,json!({"textDocument":{"uri":record.uri},"position":{"line":line,"character":character}}))?;
     let cancel=request.canceller();Ok((request,cancel))
    })?
   };

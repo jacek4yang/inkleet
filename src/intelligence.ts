@@ -1,6 +1,6 @@
 import {getCM} from "@replit/codemirror-vim";
 import {vimNavigation} from "./vim-navigation";
-import {chooseSourceTarget,sourceSpan,sourceTargets,validSourceSnapshot,type Source,type SourceSnapshot,type SourceTarget,type SourceNavigator} from "./source-protocol";
+import {chooseSourceTarget,sourceSpan,sourceTargets,validSourceSnapshot,type Source,type SourceSnapshot,type SourceTarget,type SourceNavigator,type NavigationKind} from "./source-protocol";
 export type {Source} from "./source-protocol";
 import {completionPopup} from "./completion-popup";
 import {renderDocumentation} from "./lsp-documentation";
@@ -32,7 +32,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; semanticTokens?: boolean; prepareRename?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
+type Started = { id: number; version: number; server: string; uri: string; implementation?: boolean; semanticTokens?: boolean; prepareRename?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 function offset(doc: Text, position: unknown): number | null {
@@ -334,8 +334,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     ++navigationGeneration;navigationAbort?.abort();navigationAbort=null;cancelSourceRequests();
     if(close)showSource(null);
   }
-  async function definition(pos: number) {
+  async function definition(pos: number,kind:NavigationKind="definition") {
     if(!view||!session||!view.hasFocus||view.composing)return;
+    if(kind==="implementation"&&session.implementation!==true){status("当前语言服务不支持转到实现");return;}
     invalidateNavigation();
     const target=view,doc=target.state.doc,id=session.id,generation=navigationGeneration;
     const selection=target.state.selection,scrollTop=target.scrollDOM.scrollTop,scrollLeft=target.scrollDOM.scrollLeft;
@@ -376,10 +377,10 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     window?.addEventListener("blur",cancel);
     abort.signal.addEventListener("abort",cleanup,{once:true});
     try {
-      const result=await request("definition",pos,doc,undefined,undefined,focused);
+      const result=await request(kind,pos,doc,undefined,undefined,focused);
       if(!focused())return;
-      const location=await chooseSourceTarget(sourceTargets(result),abort.signal,element=>{picker=element;});
-      if(!location){if(!abort.signal.aborted)status("未找到定义");return;}
+      const location=await chooseSourceTarget(sourceTargets(result),abort.signal,element=>{picker=element;},kind);
+      if(!location){if(!abort.signal.aborted)status(kind==="implementation"?"未找到实现":"未找到定义");return;}
       if(!focused())return;
       if(location.uri===session?.uri){
         const span=range(doc,location.range);if(!span)throw Error("定义位置与当前代码不一致");
@@ -397,7 +398,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         return source;
       };
       const navigation:SourceNavigator={
-        primary:primarySnapshot,originSelection:{ranges:selection.ranges.map(({anchor,head})=>({anchor,head})),mainIndex:selection.mainIndex},originScroll:{top:scrollTop,left:scrollLeft},current,cancel:cancelSourceRequests,load,
+        primary:primarySnapshot,implementation:session!.implementation===true,originSelection:{ranges:selection.ranges.map(({anchor,head})=>({anchor,head})),mainIndex:selection.mainIndex},originScroll:{top:scrollTop,left:scrollLeft},current,cancel:cancelSourceRequests,load,
         origin(location){
           if(!current())return;
           if(location){
@@ -408,16 +409,17 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           }
           target.focus();
         },
-        async definition(source,position,signal){
+        async definition(source,position,signal,kind="definition"){
+          if(kind==="implementation"&&session?.implementation!==true)throw Error("当前语言服务不支持转到实现");
           ensure(signal);
-          if(source.sourceId===0){const pos=offset(doc,position);if(pos===null)throw Error("定义位置无效");const result=await request("definition",pos,doc);ensure(signal);return {locations:sourceTargets(result),omitted:0};}
+          if(source.sourceId===0){const pos=offset(doc,position);if(pos===null)throw Error("定义位置无效");const result=await request(kind,pos,doc);ensure(signal);return {locations:sourceTargets(result),omitted:0};}
           let snapshot=source;
           for(let attempt=0;attempt<2;attempt++){
             ensure(signal);const sequence=++navigationSequence;
             const cancel=()=>cancelSourceSequence(id,sequence);
             signal.addEventListener("abort",cancel,{once:true});
             try{
-              const response=await invoke<{locations:SourceTarget[];omitted:number}>("language_source_definition",{id,version:askedVersion,sourceId:snapshot.sourceId,line:position.line,character:position.character,sequence});
+              const response=await invoke<{locations:SourceTarget[];omitted:number}>("language_source_definition",{id,version:askedVersion,sourceId:snapshot.sourceId,line:position.line,character:position.character,sequence,kind});
               ensure(signal);return {locations:sourceTargets(response.locations),omitted:response.omitted};
             }catch(error){
               ensure(signal);
@@ -473,7 +475,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     Prec.highest(keymap.of(completionKeymap.map(binding=>binding.run===startCompletion?{...binding,run:invokeCompletion}:binding))),
     keymap.of([{key:"Alt-Enter",run:target=>popup.openDocs(target)},{key:"Alt-PageDown",run:target=>popup.scrollDocs(target,1)},{key:"Alt-PageUp",run:target=>popup.scrollDocs(target,-1)}]),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } }]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
+    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } },{key:"Mod-F12",run(target:EditorView){void definition(target.state.selection.main.head,"implementation");return true;}}]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
     EditorView.domEventObservers({
       keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}},
       compositionstart(_event,target){
@@ -518,7 +520,8 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   return {
     extensions,
     available:()=>!closed&&session!==null,
-    commands:{completion:invokeCompletion,rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
+    implementationAvailable:()=>!closed&&session?.implementation===true,
+    commands:{implementation:(target:EditorView)=>{void definition(target.state.selection.main.head,"implementation");return true;},completion:invokeCompletion,rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
     async format(text:string):Promise<string>{
       if(queuedFormats>=8)throw Error("格式化请求过多，请稍后保存");
       ++queuedFormats;

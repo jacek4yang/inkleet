@@ -9,6 +9,7 @@ import { runNotesSaveUI } from "./notes-save-ui.mjs";
 import { runCaseInputUI } from "./case-input-ui.mjs";
 import { runNewlineSaveUI } from "./newline-save-ui.mjs";
 import { runDefinitionFocusUI } from "./definition-focus-ui.mjs";
+import { runImplementationUI } from "./implementation-ui.mjs";
 
 async function openSettings(page, category) {
   await page.locator('[data-action="open-settings"]').click();
@@ -784,7 +785,7 @@ try {
       if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: null, notes: null };
       if (command === "save_text") return;
-      if (command === "start_language_service") { state.text = args.text; state.version = 1; return { id: ++state.id, version: 1, server: "fixture", uri: "file:///fixture/solution.py" }; }
+      if (command === "start_language_service") { state.text = args.text; state.version = 1; return { id: ++state.id, version: 1, server: "fixture", uri: "file:///fixture/solution.py", implementation:state.implementationSupported!==false }; }
       if (command === "stop_language_service") { state.stops.push(args.id); return; }
       if (command === "update_language_document") {
         if (state.failNextUpdate) { state.failNextUpdate=false; state.events.push({type:"update-failed",...args}); throw Error("controlled sync failure"); }
@@ -808,6 +809,16 @@ try {
         if (args.kind === "signatureHelp" && state.deferSignature) return new Promise(resolve => { state.signatureReply = resolve; });
         if (args.kind === "signatureHelp") return { signatures: [{ label: "popleft(index: int) -> int", documentation: "<img src=x onerror=alert(1)>signature docs", parameters: [{ label: "index" }] }], activeSignature: 0, activeParameter: 0 };
         if (args.kind === "hover") return { contents: { kind: "plaintext", value: "deque.popleft() -> int" } };
+        if(args.kind==="implementation"){
+          if(state.implementationMode==="error")throw Error("controlled implementation failure");
+          if(state.implementationMode==="empty")return [];
+          const span={start:{line:0,character:0},end:{line:0,character:5}};
+          const result=state.implementationMode==="local"?[{uri:"file:///fixture/solution.py",range:span}]:
+            [{targetUri:"file:///fixture/stdlib/_collections_abc.py",targetRange:span,targetSelectionRange:span}];
+          if(state.implementationMode==="multiple")result.push({uri:"file:///fixture/stdlib/collections.pyi",range:span});
+          if(state.deferImplementation)return new Promise(resolve=>{state.implementationReply=()=>resolve(result);});
+          return result;
+        }
         if (args.kind === "definition") {
           const result=[{uri:state.primaryDefinition?"file:///fixture/solution.py":"file:///fixture/stdlib/collections.pyi",range:{start:{line:0,character:0},end:{line:0,character:5}}}];
           if(state.multiDefinition)result.push({uri:"file:///fixture/stdlib/_collections_abc.py",range:{start:{line:0,character:0},end:{line:0,character:5}}});
@@ -878,6 +889,7 @@ try {
   await lspPage.evaluate(() => { window.__lspTest.deferSignature = false; });
 
   await runDefinitionFocusUI(lspPage,lspEditor);
+  await runImplementationUI(lspPage,lspEditor);
 
   await lspEditor.press("F12");
   const sourceDialog = lspPage.getByRole("dialog", { name: "collections.pyi", exact: true });

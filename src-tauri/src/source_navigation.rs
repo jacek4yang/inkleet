@@ -1,7 +1,32 @@
 //! Read-only source snapshots and definition coordinates, owned by one LSP session.
-use serde::Serialize;
+use serde::{Deserialize,Serialize};
 use serde_json::Value;
 use std::{collections::{BTreeSet,HashMap},sync::Arc};
+#[derive(Clone,Copy,Debug,Default,Deserialize,PartialEq,Eq)]
+#[serde(rename_all="lowercase")]
+pub enum NavigationKind { #[default] Definition, Implementation }
+impl NavigationKind {
+ pub fn method(self,implementation:bool)->Result<&'static str,String>{
+  match self {
+   Self::Definition=>Ok("textDocument/definition"),
+   Self::Implementation if implementation=>Ok("textDocument/implementation"),
+   Self::Implementation=>Err("当前语言服务不支持转到实现".into()),
+  }
+ }
+}
+pub fn implementation_provider(value:&Value)->bool{value==&Value::Bool(true)||value.is_object()}
+#[cfg(test)]mod implementation_tests {
+ use super::*;use serde_json::json;
+ #[test]fn capability_and_method_are_explicit(){
+  for value in [json!(null),json!(false),json!("true"),json!([])]{assert!(!implementation_provider(&value));}
+  for value in [json!(true),json!({}),json!({"workDoneProgress":true})]{assert!(implementation_provider(&value));}
+  assert_eq!(NavigationKind::Definition.method(false).unwrap(),"textDocument/definition");
+  assert_eq!(NavigationKind::Implementation.method(true).unwrap(),"textDocument/implementation");
+  assert!(NavigationKind::Implementation.method(false).is_err());
+  assert_eq!(serde_json::from_value::<NavigationKind>(json!("implementation")).unwrap(),NavigationKind::Implementation);
+  assert!(serde_json::from_value::<NavigationKind>(json!("workspace/executeCommand")).is_err());
+ }
+}
 const MAX_SOURCE:usize=2*1024*1024;
 const MAX_BYTES:usize=16*1024*1024;
 const MAX_RECORDS:usize=32;

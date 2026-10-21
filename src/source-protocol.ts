@@ -1,13 +1,15 @@
+export type NavigationKind="definition"|"implementation";
 export type SourcePosition={line:number;character:number};
 export type SourceRange={start:SourcePosition;end:SourcePosition};
 export type SourceTarget={uri:string;range:SourceRange};
 export type SourceSnapshot={sourceId:number;uri:string;text:string;name:string;declaration:boolean;language:string};
 export type SourceNavigator={
  primary:SourceSnapshot;
+ implementation:boolean;
  originSelection:{ranges:{anchor:number;head:number}[];mainIndex:number};
  originScroll:{top:number;left:number};
  current:()=>boolean;
- definition:(source:SourceSnapshot,position:SourcePosition,signal:AbortSignal)=>Promise<{locations:SourceTarget[];omitted:number}>;
+ definition:(source:SourceSnapshot,position:SourcePosition,signal:AbortSignal,kind?:NavigationKind)=>Promise<{locations:SourceTarget[];omitted:number}>;
  load:(target:SourceTarget,signal:AbortSignal)=>Promise<SourceSnapshot|null>;
  origin:(target?:SourceTarget)=>void;
  cancel:()=>void;
@@ -41,13 +43,13 @@ export function sourceTargets(value:unknown):SourceTarget[]{
  }
  return result;
 }
-export function chooseSourceTarget(targets:SourceTarget[],signal:AbortSignal,ownership?:(dialog:HTMLDialogElement|null)=>void):Promise<SourceTarget|null>{
+export function chooseSourceTarget(targets:SourceTarget[],signal:AbortSignal,ownership?:(dialog:HTMLDialogElement|null)=>void,kind:NavigationKind="definition"):Promise<SourceTarget|null>{
  if(signal.aborted)return Promise.resolve(null);
  if(targets.length<2)return Promise.resolve(targets[0]??null);
  return new Promise(resolve=>{
   const previous=document.activeElement,dialog=document.createElement("dialog");
-  dialog.className="source-target-picker";dialog.setAttribute("aria-label","选择定义");
-  const heading=document.createElement("h2");heading.textContent="转到定义";dialog.append(heading);
+  dialog.className="source-target-picker";dialog.setAttribute("aria-label",kind==="implementation"?"选择实现":"选择定义");
+  const heading=document.createElement("h2");heading.textContent=kind==="implementation"?"转到实现":"转到定义";dialog.append(heading);
   let settled=false;
   const finish=(value:SourceTarget|null,restore=true)=>{if(settled)return;settled=true;restore=restore&&dialog.contains(document.activeElement);signal.removeEventListener("abort",abort);dialog.close();dialog.remove();if(restore&&previous instanceof HTMLElement&&previous.isConnected)previous.focus({preventScroll:true});ownership?.(null);resolve(value);};
   // Cancellation can originate from a newer focus owner. Never focus the old editor then.
