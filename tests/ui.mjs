@@ -10,6 +10,7 @@ import { runCaseInputUI } from "./case-input-ui.mjs";
 import { runNewlineSaveUI } from "./newline-save-ui.mjs";
 import { runDefinitionFocusUI } from "./definition-focus-ui.mjs";
 import { runImplementationUI } from "./implementation-ui.mjs";
+import { runOutputCompletenessUI } from "./output-completeness-ui.mjs";
 
 async function openSettings(page, category) {
   await page.locator('[data-action="open-settings"]').click();
@@ -2809,6 +2810,7 @@ try {
 
   await runNotesSaveUI(testPage);
   await runCaseInputUI(testPage);
+  await runOutputCompletenessUI(testPage);
   await runNewlineSaveUI(testPage,openSettings);
 
   const recoveryPage=await testPage({viewport:{width:1200,height:800}});

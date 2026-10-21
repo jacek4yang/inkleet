@@ -190,7 +190,8 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
     {!activeRecord && result && <p className="muted">上次运行</p>}
     {(error || result?.error) && <p role="alert" className="error">{error || result?.error}</p>}
     {result?.truncated && <p role="alert">输出达到上限，已截断并终止进程。</p>}
-    {activeRecord&&report&&(activeRecord.mode==="all"||activeRecord.mode==="failed"||activeRecord.cases.length>1)&&<div className="batch-summary" role="status" aria-label="批量运行汇总"><span>{report.received}/{report.expected} 组</span>{report.matched>0&&<span>符合 {report.matched}</span>}{report.mismatched>0&&<span>不符 {report.mismatched}</span>}{report.errors>0&&<span>错误 {report.errors}</span>}{report.unchecked>0&&<span>未比较 {report.unchecked}</span>}{report.missing>0&&<span>未返回 {report.missing}</span>}</div>}
+    {activeRecord&&report&&<div className="batch-summary" role="status" aria-label="批量运行汇总"><span>{report.received}/{report.expected} 组</span>{report.matched>0&&<span>符合 {report.matched}</span>}{report.mismatched>0&&<span>不符 {report.mismatched}</span>}{report.errors>0&&<span>错误 {report.errors}</span>}{report.unchecked>0&&<span>未比较 {report.unchecked}</span>}{report.missing>0&&<span>未返回 {report.missing}</span>}</div>}
+    {result&&!busy(result)&&activeRecord&&report&&!report.complete&&!result.timedOut&&!result.canceled&&<p role="alert" className="cache-warning">结果不完整或格式异常，不能判定全部用例通过。</p>}
     {report?.rows.map((row,index)=><CaseResult key={index} row={row}/>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
     {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}

@@ -52,6 +52,29 @@ function exactArray(raw:string):string[]{
  }
  return values;
 }
+/** Protocol identity is independent of the bounded expected-value comparator. */
+export function resultCaseNumber(raw:string):number|null{
+ try{
+  if(raw.length>1024*1024)return null;
+  const parsed=JSON.parse(raw);
+  if(!parsed||typeof parsed!=="object"||Array.isArray(parsed)||!Object.hasOwn(parsed,"ok")||!Object.hasOwn(parsed,"case")||typeof parsed.ok!=="boolean"||!Number.isSafeInteger(parsed.case)||parsed.case<1||parsed.case>100)return null;
+  if(parsed.ok&&!Object.hasOwn(parsed,"value")||!parsed.ok&&(!Object.hasOwn(parsed,"error")||typeof parsed.error!=="string"))return null;
+  let i=raw.indexOf("{")+1;const keys=new Set<string>();
+  while(i<raw.length){
+   while(/[\s,]/.test(raw[i]??"")&&i<raw.length)i++;
+   if(raw[i]==="}")break;
+   if(raw[i]!=='"')return null;
+   const start=i++;let escaped=false;
+   for(;i<raw.length;i++){const c=raw[i];if(!escaped&&c==='"'){i++;break;}if(c==="\\"&&!escaped)escaped=true;else escaped=false;}
+   const key=JSON.parse(raw.slice(start,i));if(keys.has(key))return null;keys.add(key);
+   while(/\s/.test(raw[i]??"")&&i<raw.length)i++;
+   if(raw[i++]!==":")return null;
+   while(/\s/.test(raw[i]??"")&&i<raw.length)i++;
+   i=valueEnd(raw,i);if(raw[i]==="}")break;
+  }
+  return parsed.case;
+ }catch{return null;}
+}
 export function displayResult(raw:string,index:number):DisplayResult{
  const fallback={caseNumber:index+1,value:raw,error:"",raw:true};
  try{

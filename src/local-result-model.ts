@@ -1,5 +1,5 @@
-import {displayResult,parameterNames,type DisplayResult} from "./test-cases.ts";
-import {canonicalJson,compareJson,type Expectation} from "./case-expectations.ts";
+import {displayResult,parameterNames,resultCaseNumber,type DisplayResult} from "./test-cases.ts";
+import {compareJson,type Expectation} from "./case-expectations.ts";
 import type {RunContext} from "./run-context.ts";
 export type RunOutput={phase:string;exitCode:number|null;timedOut:boolean;canceled:boolean;truncated:boolean;error:string;results:string[]};
 export type Comparison={label:string;state:"match"|"mismatch"|"error"|"unavailable"|"incomplete"};
@@ -8,9 +8,7 @@ export type BatchReport={rows:OutputRow[];expected:number;received:number;comple
 export function localResultReport(result:RunOutput,record:RunContext|null):BatchReport{
  const names=record?parameterNames(record.snapshot.metadata):[];
  const groups=record?.cases.map((_,index)=>record.invocations.filter(v=>v.caseIndex===index).length)??[];
- const ids=result.results.map(raw=>{
-  try{canonicalJson(raw);const v=JSON.parse(raw);return v&&typeof v.ok==="boolean"&&Number.isSafeInteger(v.case)&&v.case>0&&v.case<=100?v.case as number:null;}catch{return null;}
- });
+ const ids=result.results.map(resultCaseNumber);
  const validIds=ids.filter((id):id is number=>id!==null);
  const expected=record?.invocations.length??result.results.length;
  const unique=new Set(validIds);
@@ -38,9 +36,9 @@ export function localResultReport(result:RunOutput,record:RunContext|null):Batch
   }
   return {raw,index,value,caseId:item?.id,caseName:item?.name,multiple:record?.cases.length===1?result.results.length>1:invocation?groups[invocation.caseIndex]>1:false,names,expectation,comparison,missing:false};
  });
- // For named batches, absent output is not called "not run": the process could
+ // For every recorded invocation, absent output is not called "not run": the process could
  // have started that invocation before interruption.
- if(record&&record.cases.length>1){
+ if(record){
   for(const invocation of record.invocations){
    if(unique.has(invocation.caseNumber))continue;
    const item=record.cases[invocation.caseIndex];
