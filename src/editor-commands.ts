@@ -1,6 +1,6 @@
 import {Prec,type Extension} from "@codemirror/state";
 import {EditorView,ViewPlugin,keymap} from "@codemirror/view";
-import {CommandRegistry,type Command} from "./command-registry";
+import {CommandRegistry,commandBindingLabel,type Command} from "./command-registry";
 let nextPalette=0;
 export function editorCommands(commands:Command<EditorView>[]):Extension{
   const registry=new CommandRegistry<EditorView>();
@@ -34,7 +34,7 @@ export function editorCommands(commands:Command<EditorView>[]):Extension{
         items.forEach((command,index)=>{
           const button=document.createElement("button");button.type="button";button.id=listId+"-"+index;button.tabIndex=-1;button.setAttribute("role","option");button.setAttribute("aria-selected",String(index===selected));
           const title=document.createElement("span");title.textContent=command.label;button.append(title);
-          if(command.key){const key=document.createElement("kbd");key.textContent=command.key.replaceAll("Mod",/Mac/i.test(navigator.platform)?"⌘":"Ctrl").replaceAll("-","+");button.append(key);}
+          if(command.key){const key=document.createElement("kbd");key.textContent=commandBindingLabel(command.key,navigator.platform);button.append(key);}
           button.onclick=()=>execute(command.id);list.append(button);
         });
         if(items.length)input.setAttribute("aria-activedescendant",listId+"-"+selected);else input.removeAttribute("aria-activedescendant");

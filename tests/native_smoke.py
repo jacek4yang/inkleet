@@ -1372,6 +1372,13 @@ try:
                 wait_for(lambda:cmd("POST","/execute/sync",{"script":"return String(window.getSelection())","args":[]})=="Worker","real gopls implementation maps virtual package lines to source",seconds=30)
                 assert source_text(code)==implementation_source,"implementation navigation preserves editable code"
                 screenshot("golang-implementation-native.png")
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+alt+minus"],check=True)
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":"const s=window.getSelection();const n=s?.anchorNode;const e=n?.nodeType===1?n:n?.parentElement;return s?.isCollapsed&&e?.closest('.cm-line')?.textContent==='type Runner interface { Run() int }';","args":[]}),"native code history returns to original interface caret")
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+minus"],check=True)
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":"return String(window.getSelection())","args":[]})=="Worker","native code history advances to implementation")
+                assert source_text(code)==implementation_source,"native history never edits source"
+                (evidence/"EDITOR_JUMP_HISTORY_NATIVE_RESULT.txt").write_text("PASS: real Linux keyboard CtrlAltMinus/ControlShiftMinus navigates from gopls implementation back to original interface caret and forward, source unchanged.\\n")
+
                 (evidence/"IMPLEMENTATION_NATIVE_RESULT.txt").write_text("PASS: actual private gopls textDocument/implementation, Ctrl+F12 from Runner interface to Worker, virtual package offset mapped, original source unchanged. Other language providers remain separately qualified.\\n")
                 fill(code,code_text)
             if (os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1" and group in ("golang","rust")) or (os.environ.get("INKLEET_CLANG_SNIPPET_VALIDATION") == "1" and group in ("c","cpp")):

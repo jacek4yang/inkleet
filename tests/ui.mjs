@@ -1,3 +1,4 @@
+import {runCopyAIContextUI} from "./copy-ai-context-ui.mjs";
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -10,6 +11,7 @@ import { runCaseInputUI } from "./case-input-ui.mjs";
 import { runNewlineSaveUI } from "./newline-save-ui.mjs";
 import { runDefinitionFocusUI } from "./definition-focus-ui.mjs";
 import { runImplementationUI } from "./implementation-ui.mjs";
+import { runEditorJumpHistoryUI } from "./editor-jump-history-ui.mjs";
 import { runOutputCompletenessUI } from "./output-completeness-ui.mjs";
 
 async function openSettings(page, category) {
@@ -160,6 +162,7 @@ try {
   await editor.waitFor({ state: "visible" });
   assert.equal(await page.getByRole("button",{name:"测试用例与结果",exact:true}).locator("svg").count(),1,"test panel uses an accessible SVG toggle");
   await page.evaluate(async () => { await document.fonts.load('14px "Intel One Mono"'); await document.fonts.ready; });
+  await runCopyAIContextUI(page,editor);
   const fontLoaded = await page.evaluate(() => document.fonts.check('14px "Intel One Mono"'));
   assert.equal(fontLoaded, true, "必须实际加载内置 Intel One Mono");
   assert.equal(await page.getByRole("img",{name:"墨题 InkLeet",exact:true}).locator("svg").count(),1,"owner-approved C replaces the visible wordmark");
@@ -821,7 +824,7 @@ try {
           return result;
         }
         if (args.kind === "definition") {
-          const result=[{uri:state.primaryDefinition?"file:///fixture/solution.py":"file:///fixture/stdlib/collections.pyi",range:{start:{line:0,character:0},end:{line:0,character:5}}}];
+          const result=[{uri:state.primaryDefinition?"file:///fixture/solution.py":"file:///fixture/stdlib/collections.pyi",range:state.primaryDefinition&&state.definitionRange?state.definitionRange:{start:{line:0,character:0},end:{line:0,character:5}}}];
           if(state.multiDefinition)result.push({uri:"file:///fixture/stdlib/_collections_abc.py",range:{start:{line:0,character:0},end:{line:0,character:5}}});
           if(state.deferDefinition)return new Promise(resolve=>{state.definitionReply=()=>resolve(result);});
           return result;
@@ -891,6 +894,7 @@ try {
 
   await runDefinitionFocusUI(lspPage,lspEditor);
   await runImplementationUI(lspPage,lspEditor);
+  await runEditorJumpHistoryUI(lspPage,lspEditor);
 
   await lspEditor.press("F12");
   const sourceDialog = lspPage.getByRole("dialog", { name: "collections.pyi", exact: true });

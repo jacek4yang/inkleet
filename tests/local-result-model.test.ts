@@ -68,3 +68,10 @@ test("receipt, comparison and provenance remain separate",()=>{
  const unknown=localResultReport({...output(),results:[]},null);
  assert.equal(unknown.rows.length,0);assert.equal(unknown.expected,0);
 });
+
+test("partial selected output retains invocation ordinals",()=>{
+ const c=context();c.cases=c.cases.slice(0,1);c.invocations=[{caseIndex:0,groupIndex:0,caseNumber:1},{caseIndex:0,groupIndex:1,caseNumber:2}];
+ const r=localResultReport({...output(),results:[output().results[1]]},c);
+ assert.equal(r.rows[0].value.caseNumber,2);assert.equal(r.rows[0].multiple,true);
+ assert.equal(r.rows[1].value.caseNumber,1);assert.equal(r.rows[1].missing,true);assert.equal(r.rows[1].multiple,true);
+});

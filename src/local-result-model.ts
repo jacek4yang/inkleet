@@ -34,7 +34,7 @@ export function localResultReport(result:RunOutput,record:RunContext|null):Batch
     catch{comparison={label:"结果无法比较",state:"unavailable"};}
    }
   }
-  return {raw,index,value,caseId:item?.id,caseName:item?.name,multiple:record?.cases.length===1?result.results.length>1:invocation?groups[invocation.caseIndex]>1:false,names,expectation,comparison,missing:false};
+  return {raw,index,value,caseId:item?.id,caseName:item?.name,multiple:invocation?groups[invocation.caseIndex]>1:record?.cases.length===1?result.results.length>1:false,names,expectation,comparison,missing:false};
  });
  // For every recorded invocation, absent output is not called "not run": the process could
  // have started that invocation before interruption.

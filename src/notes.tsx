@@ -48,7 +48,8 @@ export function MarkdownPreview({ text }: { text: string }) {
       : <p className="muted">暂无笔记</p>}
   </div>;
 }
-export function Notes({ vimEnabled=false, tabSize=4, documentKey, value, loading, onChange, onSettings, onSave }: {
+export function Notes({ vimEnabled=false, tabSize=4, documentKey, value, loading, onChange, onSettings, onSave, copyAction }: {
+  copyAction?:React.ReactNode;
   vimEnabled?:boolean;
   tabSize?:number;
   documentKey: string; value: string; loading: boolean;
@@ -61,7 +62,7 @@ export function Notes({ vimEnabled=false, tabSize=4, documentKey, value, loading
   return <>
     <div className="pane-heading notes-heading"><div><IconButton icon="save" label="保存笔记" shortcut="Ctrl+S" disabled={loading} onClick={onSave} />
       <IconButton icon={preview ? "edit" : "eye"} label={preview ? "返回编辑" : "预览笔记"} disabled={loading} aria-pressed={preview} onClick={() => setPreview(v => !v)} />
-      <IconButton icon="settings" label="笔记设置" onClick={onSettings} />
+      {copyAction}<IconButton icon="settings" label="笔记设置" onClick={onSettings} />
     </div></div>
     {loading ? <p className="loading">正在读取笔记…</p> : preview
       ? <MarkdownPreview text={value} />

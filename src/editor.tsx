@@ -1,3 +1,5 @@
+import {editorJumpExtensions,moveEditorJump,settleEditorJump} from "./editor-jump-history";
+import {navigationBindings} from "./command-registry";
 import {snippetSession,moveSnippetField,endSnippet,discardSnippet,snippetChoiceOpen,moveSnippetChoice,acceptSnippetChoice,settleSnippetForAction} from "./snippet-session";
 import {snapshotText} from "./snapshot-text";
 import {createEditorSessionCache} from "./editor-session-cache";
@@ -29,7 +31,7 @@ import { SourceViewer } from "./source-viewer";
 // 仅保存本次运行的编辑器状态；正文持久化由原生存储负责。
 // 切换题目/语言时保留各自的撤销历史、光标与滚动位置。
 // Retain only recent inactive states; evictions never change workspace drafts.
-const sessions = createEditorSessionCache<{ state: EditorState; scroll: number }>();
+const sessions = createEditorSessionCache<{ state: EditorState; scroll: number; scrollLeft:number }>();
 const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "var(--surface-editor)", color: "var(--ink)", fontSize: "14px", fontWeight:"400", textShadow:"none" },
   ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", lineHeight: "1.75" },
@@ -85,6 +87,8 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language,
     vimSave.current=save;
     const commands:Command<EditorView>[]=[
       {id:"editor.save",label:"保存",key:"Mod-s",run:save},
+      {id:"editor.goBack",label:"返回上一个代码位置",key:navigationBindings(navigator.platform).back,run:target=>moveEditorJump(target,-1,()=>intelligence?.cancelNavigation())},
+      {id:"editor.goForward",label:"前进到下一个代码位置",key:navigationBindings(navigator.platform).forward,run:target=>moveEditorJump(target,1,()=>intelligence?.cancelNavigation())},
       {id:"editor.undo",label:"撤销",run:undo},
       {id:"editor.redo",label:"重做",run:redo},
       {id:"editor.selectAll",label:"全选",run:selectAll},
@@ -102,7 +106,7 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language,
     const footer=document.getElementById("vim-command-slot");
     const commandHost=footer?document.createElement("div"):null;
     if(commandHost){commandHost.className="vim-command-host";footer!.appendChild(commandHost);}
-    const extensions = [editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
+    const extensions = [...editorJumpExtensions,editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
       basicSetup, snippetSession, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), ...(language==="markdown"?[]:[indentGuides]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       tabSizeSlot.current.of(EditorState.tabSize.of(tabSize)),
@@ -138,7 +142,7 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language,
     liveView.current=view;
     saveReady.current?.(()=>save(view));
     if (debug) debugView.current = { view, stopped: debug.stopped };
-    if (cached) view.scrollDOM.scrollTop = cached.scroll;
+    if (cached) {view.scrollDOM.scrollTop = cached.scroll;view.scrollDOM.scrollLeft=cached.scrollLeft;}
     if (intelligence) void intelligence.connect(view);
     return () => {
       live=false;setSource(null);
@@ -147,7 +151,8 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language,
       debugView.current = null;
       intelligence?.destroy();
       discardSnippet(view);
-      sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop });
+      settleEditorJump(view);
+      sessions.set(documentKey, { state: view.state, scroll: view.scrollDOM.scrollTop,scrollLeft:view.scrollDOM.scrollLeft });
       view.destroy();
       commandHost?.remove();
     };

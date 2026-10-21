@@ -21,3 +21,11 @@ export function editorPlatform(platform:string):"mac"|"linux"|"windows"{
   return /mac|iphone|ipad/i.test(platform)?"mac":/linux/i.test(platform)?"linux":"windows";
 }
 export function formatBinding(platform:string){return editorPlatform(platform)==="linux"?"Ctrl-Shift-i":"Alt-Shift-f";}
+
+export function navigationBindings(platform:string){
+ const kind=editorPlatform(platform);
+ return kind==="mac"?{back:"Ctrl--",forward:"Ctrl-Shift--"}:kind==="linux"?{back:"Ctrl-Alt--",forward:"Ctrl-Shift--"}:{back:"Alt-ArrowLeft",forward:"Alt-ArrowRight"};
+}
+export function commandBindingLabel(key:string,platform:string){
+ return key.replaceAll("Mod",editorPlatform(platform)==="mac"?"⌘":"Ctrl").replace(/-(?=.)/g,"+");
+}

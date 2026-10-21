@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import {writeFile} from "node:fs/promises";
+export async function runCopyAIContextUI(page,editor){
+ const original=await editor.innerText();
+ await page.evaluate(()=>{window.__copyAI={values:[],fail:false};Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{if(window.__copyAI.fail)throw Error("denied");window.__copyAI.values.push(text);}}});});
+ const code="// current unsaved solution\nfn main() { println!(\"你好`\"); }\n";
+ await editor.fill(code);
+ await page.getByRole("button",{name:"笔记",exact:true}).click();
+ const notes=page.getByRole("textbox",{name:"Markdown 笔记",exact:true});
+ const oldNotes=await notes.innerText(),note="我的思路\n\n```rust\n保留原样\n```";
+ await notes.fill(note);
+ await page.locator(".notes-heading").getByRole("button",{name:"复制给 AI",exact:true}).click();
+ await page.waitForFunction(()=>window.__copyAI.values.length===1);
+ const first=await page.evaluate(()=>window.__copyAI.values[0]);
+ assert.ok(first.includes(code));assert.ok(first.includes(note));assert.ok(first.includes("https://leetcode.cn/problems/"));assert.ok(first.includes("## 题目描述、示例与约束"));assert.ok(first.includes("语言：Rust"));assert.ok(!first.includes("account-A"));
+ await editor.fill(code+"// newest edit");
+ await page.locator(".code-pane .actions").getByRole("button",{name:"复制给 AI",exact:true}).click();
+ await page.waitForFunction(()=>window.__copyAI.values.length===2);
+ assert.ok((await page.evaluate(()=>window.__copyAI.values[1])).includes("// newest edit"),"reads live source, not stale React render");
+ await page.evaluate(()=>{window.__copyAI.fail=true;});
+ await page.locator(".notes-heading").getByRole("button",{name:"复制给 AI",exact:true}).click();
+ const dialog=page.getByRole("dialog",{name:"手动复制给 AI",exact:true});
+ await dialog.waitFor();const area=dialog.getByRole("textbox",{name:"待复制的题目与题解",exact:true});
+ assert.equal(await area.inputValue(),await page.evaluate(()=>window.__copyAI.values[1]));
+ assert.deepEqual(await area.evaluate(node=>[node.selectionStart,node.selectionEnd]),[0,(await area.inputValue()).length]);
+ await page.screenshot({path:"evidence/copy-ai-context-fallback.png"});
+ await dialog.getByRole("button",{name:"关闭",exact:true}).click();
+ assert.equal(await editor.innerText(),code+"// newest edit");assert.equal(await notes.innerText(),note);
+ const html=await page.evaluate(async()=>{
+  const {statementText}=await import("/src/ai-context-html.ts");
+  return statementText('<p>约束：n &lt; 10<sup>4</sup></p><ul><li>第一项</li><li>第二项</li></ul><ol start="3"><li>A</li><li value="7">B</li><li>C</li></ol><pre>  a\n    b\n\n\n c</pre><table><tr><td>x</td><td>y</td></tr></table><script>SECRET_SCRIPT</script><img src="https://example.invalid/private">');
+ });
+ assert.ok(html.includes("n < 10^(4)"));assert.ok(html.includes("- 第一项"));assert.ok(html.includes("3. A"));assert.ok(html.includes("7. B"));assert.ok(html.includes("8. C"));assert.ok(html.includes("  a\n    b\n\n\n c"));assert.ok(html.includes("x\ty"));assert.ok(!html.includes("SECRET_SCRIPT"));assert.ok(!html.includes("example.invalid"));
+ await page.evaluate(()=>Object.defineProperty(navigator,"clipboard",{configurable:true,value:undefined}));
+ await page.locator(".notes-heading").getByRole("button",{name:"复制给 AI",exact:true}).click();
+ await dialog.waitFor();assert.equal(await area.inputValue(),await page.evaluate(()=>window.__copyAI.values[1]));
+ await page.keyboard.press("Escape");await dialog.waitFor({state:"hidden"});
+ await notes.fill(oldNotes);await editor.fill(original);await page.getByRole("button",{name:"题目",exact:true}).click();
+ await writeFile("evidence/COPY_AI_CONTEXT_RESULT.txt","PASS: current unsaved code and shared notes, problem context, live source after repeated edits, clipboard rejection/manual selection, unchanged drafts, inert HTML text conversion. Clipboard API mocked; native clipboard not yet qualified.\n");
+}

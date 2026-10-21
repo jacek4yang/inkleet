@@ -1,3 +1,4 @@
+import {jumpEditor,captureEditorVisit} from "./editor-jump-history";
 import {getCM} from "@replit/codemirror-vim";
 import {vimNavigation} from "./vim-navigation";
 import {chooseSourceTarget,sourceSpan,sourceTargets,validSourceSnapshot,type Source,type SourceSnapshot,type SourceTarget,type SourceNavigator,type NavigationKind} from "./source-protocol";
@@ -26,7 +27,7 @@ import { findReferences } from "./references";
 import { renameSymbol } from "./rename";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
-import { Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
+import { EditorSelection, Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
 import { autocompletion, completionKeymap, startCompletion, closeCompletion, type Completion, type CompletionContext } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
@@ -339,7 +340,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     if(kind==="implementation"&&session.implementation!==true){status("当前语言服务不支持转到实现");return;}
     invalidateNavigation();
     const target=view,doc=target.state.doc,id=session.id,generation=navigationGeneration;
-    const selection=target.state.selection,scrollTop=target.scrollDOM.scrollTop,scrollLeft=target.scrollDOM.scrollLeft;
+    const selection=target.state.selection,origin=captureEditorVisit(target),scrollTop=origin.scroll.top,scrollLeft=origin.scroll.left;
     const abort=new AbortController();navigationAbort=abort;
     const valid=()=>!closed&&view===target&&session?.id===id&&target.state.doc===doc;
     // Only the initial lookup owns editor focus. Once handed to the reader,
@@ -384,7 +385,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if(!focused())return;
       if(location.uri===session?.uri){
         const span=range(doc,location.range);if(!span)throw Error("定义位置与当前代码不一致");
-        target.dispatch({selection:{anchor:span.from,head:getCM(target)?span.from:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});return;
+        jumpEditor(target,EditorSelection.single(span.from,getCM(target)?span.from:span.to),origin);return;
       }
       const askedVersion=version,primary=session!.uri;
       const current=()=>valid()&&version===askedVersion;
@@ -403,7 +404,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
           if(!current())return;
           if(location){
             const span=range(doc,location.range);if(!span)throw Error("定义位置与当前代码不一致");
-            showSource(null);target.dispatch({selection:{anchor:span.from,head:getCM(target)?span.from:span.to},effects:EditorView.scrollIntoView(span.from,{y:"center"})});
+            showSource(null);jumpEditor(target,EditorSelection.single(span.from,getCM(target)?span.from:span.to),origin);
           }else{
             showSource(null);target.dispatch({selection});target.scrollDOM.scrollTop=scrollTop;target.scrollDOM.scrollLeft=scrollLeft;
           }
@@ -520,6 +521,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   return {
     extensions,
     available:()=>!closed&&session!==null,
+    cancelNavigation:()=>invalidateNavigation(),
     implementationAvailable:()=>!closed&&session?.implementation===true,
     commands:{implementation:(target:EditorView)=>{void definition(target.state.selection.main.head,"implementation");return true;},completion:invokeCompletion,rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
     async format(text:string):Promise<string>{
