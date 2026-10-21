@@ -1,0 +1,104 @@
+name: Public CN installed-client acceptance
+on:
+  push:
+    branches: [build/preview-installers]
+    paths: ['.github/workflows/public-cn-installed.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: public-cn-installed-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  public-client:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      APP_COMMIT: 8cb5c18d642e085de02e3c755c88ca5f2e708f0e
+      ARTIFACT_ID: '12320893350'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Retrieve the already delivered Linux package without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/public-cn package
+          git diff --exit-code "$APP_COMMIT" HEAD -- src src-tauri crates package.json package-lock.json icon.svg
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > package.zip
+          echo 'bc677df2d801d1bba28483717e8fb036c09cfadbce6d97a54296ea9ff034f545  package.zip' | sha256sum --check
+          python3 -m zipfile -e package.zip package
+          (cd package && sha256sum --check ./*.sha256)
+          test "$(cat package/SOURCE_COMMIT.txt)" = "$APP_COMMIT"
+          mkdir -p "$RUNNER_TEMP/InkLeet public acceptance"
+          tar -xzf package/InkLeet-0.1.1-preview-8cb5c18d642e-linux-x86_64.tar.gz -C "$RUNNER_TEMP/InkLeet public acceptance"
+          mapfile -d '' launchers < <(find "$RUNNER_TEMP/InkLeet public acceptance" -type f -name start.sh -print0)
+          test "${#launchers[@]}" -eq 1
+          test -x "${launchers[0]}"
+          root="$(dirname "${launchers[0]}")"
+          test "$(cat "$root/SOURCE_COMMIT.txt")" = "$APP_COMMIT"
+          printf 'INKLEET_TEST_BINARY=%s\n' "${launchers[0]}" >> "$GITHUB_ENV"
+          printf '%s\n' "$APP_COMMIT" > evidence/public-cn/APP_COMMIT.txt
+          git rev-parse HEAD > evidence/public-cn/HARNESS_COMMIT.txt
+          cp package/BUILD_INFO.json evidence/public-cn/ORIGINAL_BUILD_INFO.json
+          printf '%s\n' 'Already delivered release/default-feature tar; no application rebuild, no credentials, no authenticated Run or Submit.' > evidence/public-cn/SCOPE.txt
+      - name: Install GUI driver and system runtime prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0t64 libayatana-appindicator3-1 librsvg2-2 webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Verify existing wait helpers
+        run: python3 -m unittest discover -s tests -p 'test_native_wait.py' -v
+      - name: Exercise real public CN and local recovery in the delivered app
+        id: public-flow
+        env:
+          INKLEET_MANAGED_ENV: '0'
+          INKLEET_LIVE_CN: '1'
+          INKLEET_SNIPPET_VALIDATION: '0'
+          INKLEET_CLANG_SNIPPET_VALIDATION: '0'
+          INKLEET_JAVA_SNIPPET_VALIDATION: '0'
+          INKLEET_EVIDENCE_DIR: evidence/public-cn/native
+        run: |
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          test ! -e "$INKLEET_EVIDENCE_DIR"
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - name: Require an actual live result, never equate UNVERIFIED with success
+        if: always()
+        env:
+          NATIVE_OUTCOME: ${{ steps.public-flow.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, sys
+          root = pathlib.Path('evidence/public-cn')
+          root.mkdir(parents=True, exist_ok=True)
+          def read(name):
+              p = root / 'native' / name
+              return p.read_text() if p.exists() else 'NOT RUN: no result file'
+          local, live, login = read('RESULT.txt'), read('LIVE_CN_RESULT.txt'), read('LOGIN_UI_RESULT.txt')
+          sidebar = read('SIDEBAR_LIVE_RESULT.txt')
+          sidebar_ok = not sidebar.startswith('UNVERIFIED') and all((root / 'native' / n).exists() for n in ['real-question-sidebar-native.png', 'real-sidebar-question-native.png'])
+          result = {
+              'native_step_outcome': os.environ.get('NATIVE_OUTCOME', ''),
+              'sidebar_verified': sidebar_ok,
+              'local': local, 'live_public_cn': live, 'anonymous_login_ui': login,
+              'authenticated_login_run_submit': 'NOT RUN',
+              'accepted': os.environ.get('NATIVE_OUTCOME') == 'success' and sidebar_ok and local.startswith('PASS:') and live.startswith('PASS:'),
+          }
+          (root / 'ACCEPTANCE.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          sys.exit(0 if result['accepted'] else 1)
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: public-cn-installed-8cb5c18-${{ github.sha }}
+          path: evidence/public-cn/
+          if-no-files-found: error
+          retention-days: 14
