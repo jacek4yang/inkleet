@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import {writeFile} from "node:fs/promises";
 export async function runCopyAIContextUI(page,editor){
- const original=await editor.innerText();
+ const sourceText=locator=>locator.evaluate(async node=>{
+  const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");
+  return EditorView.findFromDOM(node.closest(".cm-editor")).state.doc.toString();
+ });
+ const original=await sourceText(editor);
  await page.evaluate(()=>{window.__copyAI={values:[],fail:false};Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{if(window.__copyAI.fail)throw Error("denied");window.__copyAI.values.push(text);}}});});
  const code="// current unsaved solution\nfn main() { println!(\"你好`\"); }\n";
  await editor.fill(code);
  await page.getByRole("button",{name:"笔记",exact:true}).click();
  const notes=page.getByRole("textbox",{name:"Markdown 笔记",exact:true});
- const oldNotes=await notes.innerText(),note="我的思路\n\n```rust\n保留原样\n```";
+ const oldNotes=await sourceText(notes),note="我的思路\n\n```rust\n保留原样\n```";
  await notes.fill(note);
  await page.locator(".notes-heading").getByRole("button",{name:"复制给 AI",exact:true}).click();
  await page.waitForFunction(()=>window.__copyAI.values.length===1);
@@ -25,7 +29,7 @@ export async function runCopyAIContextUI(page,editor){
  assert.deepEqual(await area.evaluate(node=>[node.selectionStart,node.selectionEnd]),[0,(await area.inputValue()).length]);
  await page.screenshot({path:"evidence/copy-ai-context-fallback.png"});
  await dialog.getByRole("button",{name:"关闭",exact:true}).click();
- assert.equal(await editor.innerText(),code+"// newest edit");assert.equal(await notes.innerText(),note);
+ assert.equal(await sourceText(editor),code+"// newest edit");assert.equal(await sourceText(notes),note);
  const html=await page.evaluate(async()=>{
   const {statementText}=await import("/src/ai-context-html.ts");
   return statementText('<p>约束：n &lt; 10<sup>4</sup></p><ul><li>第一项</li><li>第二项</li></ul><ol start="3"><li>A</li><li value="7">B</li><li>C</li></ol><pre>  a\n    b\n\n\n c</pre><table><tr><td>x</td><td>y</td></tr></table><script>SECRET_SCRIPT</script><img src="https://example.invalid/private">');
