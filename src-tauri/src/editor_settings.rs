@@ -20,11 +20,11 @@ pub struct Document {
 }
 
 const KEYBINDING_COMMANDS:&[&str]=&["workbench.settings","workbench.catalogue","workbench.link","workbench.focus","workbench.notes","workbench.code","workbench.local","workbench.environment","workbench.manual","editor.save","editor.goBack","editor.goForward","editor.undo","editor.redo","editor.selectAll","editor.rename","editor.implementation","editor.definition","editor.references","editor.signature","editor.completion","editor.format","debug.toggleBreakpoint"];
-fn valid_keybindings(bindings:&BTreeMap<String,String>)->bool{
+fn valid_keybindings(bindings:&BTreeMap<String,String>,allow_reserved:bool)->bool{
  let mut used=std::collections::BTreeSet::new();
  bindings.iter().all(|(id,key)|{
   let suffix=key.strip_prefix("Mod-Alt-Shift-").or_else(||key.strip_prefix("Mod-Alt-"));
-  KEYBINDING_COMMANDS.contains(&id.as_str())&&suffix.is_some_and(|s|s.len()==1&&s.as_bytes()[0].is_ascii_lowercase()&&s!="g")&&used.insert(key)
+  KEYBINDING_COMMANDS.contains(&id.as_str())&&suffix.is_some_and(|s|s.len()==1&&s.as_bytes()[0].is_ascii_lowercase()&&(allow_reserved||s!="g"))&&used.insert(key)
  })
 }
 fn deserialize_keybindings<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<BTreeMap<String,String>>,D::Error>{
@@ -37,7 +37,7 @@ fn deserialize_keybindings<'de,D:serde::Deserializer<'de>>(deserializer:D)->Resu
    while let Some((id,key))=map.next_entry::<String,String>()?{
     if bindings.insert(id,key).is_some(){return Err(serde::de::Error::custom("duplicate command key"));}
    }
-   if !valid_keybindings(&bindings){return Err(serde::de::Error::custom("invalid or conflicting shortcut"));}
+   if !valid_keybindings(&bindings,true){return Err(serde::de::Error::custom("invalid or conflicting shortcut"));}
    Ok(bindings)
   }
  }
@@ -185,7 +185,7 @@ impl Default for Document{fn default()->Self{Self{font_family:None,keybindings:N
 impl Document{
     fn validated(&self)->Result<(),String>{
         if self.font_family.as_ref().is_some_and(|name|!["","Intel One Mono","Maple Mono NF CN","Maple Mono CN","JetBrains Mono","Fira Code","Cascadia Code","Consolas","Menlo","SFMono-Regular","Noto Sans Mono CJK SC","monospace"].contains(&name.as_str())){return Err("不支持的字体选项".into());}
-        if self.keybindings.as_ref().is_some_and(|keys|!valid_keybindings(keys)){return Err("快捷键无效或冲突".into());}
+        if self.keybindings.as_ref().is_some_and(|keys|!valid_keybindings(keys,false)){return Err("快捷键无效或冲突".into());}
         if let Some(colors)=&self.color_overrides{colors.validated()?;}
         if self.font_size.is_some_and(|v|!(10..=32).contains(&v))||self.line_height.is_some_and(|v|!v.is_finite()||!(1.2..=2.4).contains(&v)){return Err("编辑器字号或行高超出允许范围".into());}
 
@@ -213,11 +213,18 @@ impl EditorSettings {
         self.check()?;
         let revision=storage::read(&self.path)?;
         if revision.as_ref().is_some_and(|s|s.len()>4096){return Err("编辑器配置超过大小限制".into());}
-        let settings=match revision.as_deref(){
+        let mut settings=match revision.as_deref(){
             None=>Document::default(),
             Some(text)=>serde_json::from_str::<Document>(text).map_err(|_|"编辑器配置损坏，原文件未修改")?,
         };
         if settings.version!=1{return Err("编辑器配置来自不支持的版本，原文件未修改".into());}
+        // A short-lived development build allowed gotoLine's reserved chord.
+        // Normalize only those bindings in memory; retain exact disk revision
+        // for CAS and backup on the next explicit save.
+        if let Some(bindings)=settings.keybindings.as_mut(){
+            bindings.retain(|_,key|key!="Mod-Alt-g"&&key!="Mod-Alt-Shift-g");
+            if bindings.is_empty(){settings.keybindings=None;}
+        }
         settings.validated()?;
         Ok(Snapshot{settings,revision})
     }
@@ -439,5 +446,22 @@ mod symlink_regression_tests {
   assert_eq!(store.get().unwrap().settings.color_overrides.unwrap().dark.unwrap().semantic_type.as_deref(),Some("#aabbcc"));
   let mut invalid=saved.settings;invalid.font_family=Some("url(untrusted)".into());
   assert!(store.save(invalid,saved.revision.clone()).is_err());assert_eq!(store.get().unwrap().revision,saved.revision);
+ }
+}
+
+#[cfg(test)]mod legacy_shortcut_tests{
+ use super::*;
+ #[test]fn reserved_development_bindings_do_not_block_recovery(){
+  let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().canonicalize().unwrap());
+  let old=r#"{"version":1,"formatOnSave":true,"overrides":{},"fontSize":18,"keybindings":{"editor.save":"Mod-Alt-g","workbench.settings":"Mod-Alt-s"}}"#;
+  std::fs::write(&store.path,old).unwrap();
+  let loaded=store.get().unwrap();assert_eq!(loaded.settings.font_size,Some(18));
+  assert!(!loaded.settings.keybindings.as_ref().unwrap().contains_key("editor.save"));
+  assert_eq!(loaded.settings.keybindings.as_ref().unwrap()["workbench.settings"],"Mod-Alt-s");
+  assert_eq!(loaded.revision.as_deref(),Some(old));assert_eq!(std::fs::read_to_string(&store.path).unwrap(),old);
+  store.save(loaded.settings,loaded.revision).unwrap();
+  assert_eq!(std::fs::read_to_string(store.path.with_file_name("editor-settings.previous.json")).unwrap(),old);
+  let mut invalid=Document::default();invalid.keybindings=Some(BTreeMap::from([("editor.save".into(),"Mod-Alt-g".into())]));
+  assert!(invalid.validated().is_err());
  }
 }

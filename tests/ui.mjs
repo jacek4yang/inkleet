@@ -3247,7 +3247,7 @@ try {
   await commandDialog.getByRole("combobox",{name:"搜索编辑器命令"}).press("Escape");
   await commandPage.screenshot({path:"evidence/editor-command-palette-closed.png"});
   await commandPage.close();
-  await writeFile("evidence/COMMAND_UI_RESULT.txt","PASS: real editor palette search and shared select-all execution, Escape focus restoration, no placeholder commands. Global workbench registry remains future work.\n");
+  await writeFile("evidence/COMMAND_UI_RESULT.txt","PASS: real editor palette search and shared select-all execution, Escape focus restoration, no placeholder commands. Workbench command integration is covered separately by SETTINGS_JSON_RESULT.\n");
 
 
   // The actual App must not expose CPP's ready clangd status while C loads.

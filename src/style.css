@@ -711,8 +711,8 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 :root[data-active-line="false"]{--editor-active-line:transparent}
 :root[data-theme="dark"] .cm-editor{color-scheme:dark}
 :root[data-theme="dark"] .cm-matchingBracket{background:#435368;color:#fff}
-:root[data-theme="dark"] .cm-semantic-function,:root[data-theme="dark"] .lsp-code-function{color:#8dbce0}
-:root[data-theme="dark"] .cm-semantic-type,:root[data-theme="dark"] .lsp-code-type{color:#d3b4e9}
+:root[data-theme="dark"] .cm-semantic-function,:root[data-theme="dark"] .lsp-code-function{color:var(--semantic-function,#8dbce0)}
+:root[data-theme="dark"] .cm-semantic-type,:root[data-theme="dark"] .lsp-code-type{color:var(--semantic-type,#d3b4e9)}
 
 .settings-view-switch{display:flex;gap:6px;margin:8px 16px}
 .settings-view-switch button[aria-pressed=true]{background:var(--selection);color:var(--ink)}
