@@ -1,3 +1,4 @@
+import {waitForCloseWrites} from "./window-close";
 import {CommandPreferences,type WorkbenchCommand} from "./command-preferences";
 import {WorkbenchCommands} from "./workbench-commands";
 import {useEditorAppearance} from "./editor-appearance";
@@ -98,7 +99,8 @@ function App() {
   const sourceSave=useRef<(()=>boolean)|null>(null);
   const [draftError,setDraftError]=useState(""),[closeRequested,setCloseRequested]=useState(false),[closing,setClosing]=useState(false);
   const shuttingDown=useRef(false),formatEpoch=useRef(0),failedDrafts=useRef(new Set<string>());
-  const closeAllowed=useRef(false),closeDialog=useRef<HTMLDialogElement>(null);
+  const closeDialog=useRef<HTMLDialogElement>(null);
+  const [closeError,setCloseError]=useState("");
   const activeKey = problemId ? draftKey({ account: "local", problem: problemId, language, solution }) : "";
   const selected = useRef(activeKey); selected.current = activeKey;
   const problem = problems.find(p => p.id === problemId);
@@ -264,21 +266,31 @@ function App() {
   useEffect(()=>{
     if(!isTauri()||!(window as unknown as {__TAURI_INTERNALS__?:{metadata?:unknown}}).__TAURI_INTERNALS__?.metadata)return;let alive=true,unlisten:(()=>void)|undefined;
     getCurrentWindow().onCloseRequested(event=>{
-      if(closeAllowed.current)return;
-      if(dirty.current.size||queue.current.busy||draftQueue.current.busy){event.preventDefault();setCloseRequested(true);}
+      // Tauri's implicit continuation calls destroy(), not close(). Own it
+      // explicitly so native errors do not become silent rejected promises.
+      event.preventDefault();
+      if(shuttingDown.current)return;
+      if(dirty.current.size||queue.current.busy||draftQueue.current.busy){setCloseError("");setCloseRequested(true);}
+      else void closeWindow(false);
     }).then(stop=>{if(alive)unlisten=stop;else stop();}).catch(error=>setDraftError("关闭保护不可用 · "+String(error)));
     return()=>{alive=false;unlisten?.();};
   },[]);
   useEffect(()=>{if(closeRequested&&!closeDialog.current?.open)closeDialog.current?.showModal();},[closeRequested]);
-  async function closeWithDrafts(){
-    if(shuttingDown.current)return;shuttingDown.current=true;++formatEpoch.current;setClosing(true);
+  async function closeWindow(preserveDrafts:boolean){
+    if(shuttingDown.current)return;
+    shuttingDown.current=true;++formatEpoch.current;setClosing(true);setCloseError("");
     try{
-      await queue.current.idle;await draftQueue.current.idle;
-      if(draftQueue.current.busy||saving.current.size>0)throw Error("请先处理草稿或文件保存错误，或导出内容");
-      closeAllowed.current=true;await getCurrentWindow().close();
-    }catch(error){shuttingDown.current=false;closeAllowed.current=false;setDraftError(String(error));}
-    finally{setClosing(false);}
+      if(preserveDrafts){
+        await waitForCloseWrites(async()=>{await queue.current.idle;await draftQueue.current.idle;});
+        if(draftQueue.current.busy||saving.current.size>0)throw Error("恢复草稿尚未写入，请先处理保存错误或导出内容，再重试关闭");
+      }
+      await getCurrentWindow().destroy();
+    }catch(error){
+      shuttingDown.current=false;
+      setCloseError("关闭未完成 · "+String(error));setCloseRequested(true);
+    }finally{setClosing(false);}
   }
+  async function closeWithDrafts(){await closeWindow(true);}
   async function readConflict(target: Omit<FileConflict, "local" | "external">): Promise<FileConflict> {
     await queue.current.idle;
     const loaded = await invoke<{ code: string | null; notes: string | null }>("load_document", { problem: target.problem, language: target.language, solution: target.solution });
@@ -480,7 +492,7 @@ function App() {
     {catalogue && <Catalogue initialMode={catalogueMode} onChoose={chooseQuestion} onClose={() => setCatalogue(false)} />}
     {recovery && <RecoveryDialog target={recovery} onClose={() => setRecovery(null)} onRefresh={async () => { setRecovery(await readConflict(recovery)); }} onRestore={restoreRecovery} />}
     {conflict && <ConflictDialog conflict={conflict} onClose={() => { ++conflictSequence.current; setConflict(null); }} onRefresh={async () => { setConflict(await readConflict(conflict)); }} onResolve={resolveConflict} />}
-    {closeRequested&&<dialog ref={closeDialog} className="close-drafts" aria-label="未保存更改" onCancel={event=>{event.preventDefault();if(!closing)setCloseRequested(false);}}><h3>未保存更改</h3><p>保留恢复草稿后退出？源码文件不会被覆盖。</p><button disabled={closing} onClick={()=>setCloseRequested(false)}>取消</button><button disabled={closing} onClick={()=>void closeWithDrafts()}>保留草稿并退出</button>{draftError&&<p role="alert">{draftError}</p>}</dialog>}
+    {closeRequested&&<dialog ref={closeDialog} className="close-drafts" aria-label="未保存更改" onCancel={event=>{event.preventDefault();if(!closing)setCloseRequested(false);}}><h3>{closeError?"关闭未完成":"未保存更改"}</h3><p>{closeError?"窗口保持打开，草稿未丢弃。可以处理错误后重试。":"保留恢复草稿后退出？源码文件不会被覆盖。"}</p><button disabled={closing} onClick={()=>setCloseRequested(false)}>取消</button><button disabled={closing} onClick={()=>void closeWithDrafts()}>保留草稿并退出</button>{closeError&&<p role="alert">{closeError}</p>}{draftError&&<p role="alert">{draftError}</p>}</dialog>}
     <footer className="statusbar" role="status" data-storage-state={status}><EditorStatus/><div id="vim-command-slot"/><span className="storage-status">{draftError&&<span role="alert">{draftError}<button onClick={()=>{for(const key of failedDrafts.current)draftQueue.current.retry(key);}}>重试草稿</button></span>}{["选择题目", "已读取本机文件", "已保存到本机文件", "已处理冲突 · 两份内容已保留", "已恢复所选副本 · 恢复前的两份内容仍已保留", "已重新读取外部笔记", "已请求外部编辑器打开笔记 · 返回时自动检查更新"].includes(status) ? "" : status}{queue.current.failed(activeKey) && <button data-action="review-code-conflict" onClick={() => void openConflict("code")}>对比源码</button>}{queue.current.failed(problemId + "/notes") && <button data-action="review-notes-conflict" onClick={() => void openConflict("notes")}>对比笔记</button>}{(queue.current.failed(activeKey) || queue.current.failed(problemId + "/notes")) && <button onClick={retrySave}>重试保存</button>}</span>{problem&&<button type="button" className={"lsp-status "+(languageStatus.includes("已连接")?"ready":"unavailable")} data-status={languageStatus} aria-label="语言服务设置" title={languageStatus||"语言服务未启动"} onClick={()=>setSettings("environment")}><i/><span>LSP</span></button>}{(formatConfigError||formatMessage)&&<IconButton icon="info" label="格式化状态" title={formatConfigError||formatMessage} onClick={()=>setSettings("editor")} />}</footer>
   </main></CommandPreferences.Provider>;
 }
