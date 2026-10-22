@@ -6,7 +6,8 @@ use crate::storage;
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all="camelCase")]
-pub struct Document { #[serde(deserialize_with="deserialize_version")] pub version:u32, #[serde(default)] pub vim:bool, #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_tab_size")] pub tab_size:Option<u8>, pub format_on_save:bool, #[serde(deserialize_with="deserialize_overrides")] pub overrides:BTreeMap<String,bool>,
+pub struct Document {
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub color_overrides:Option<ColorOverrides>, #[serde(deserialize_with="deserialize_version")] pub version:u32, #[serde(default)] pub vim:bool, #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_tab_size")] pub tab_size:Option<u8>, pub format_on_save:bool, #[serde(deserialize_with="deserialize_overrides")] pub overrides:BTreeMap<String,bool>,
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub theme:Option<Theme>,
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_font_size")] pub font_size:Option<u8>,
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub line_height:Option<f64>,
@@ -15,6 +16,39 @@ pub struct Document { #[serde(deserialize_with="deserialize_version")] pub versi
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub indent_guides:Option<bool>,
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub highlight_active_line:Option<bool>,
 }
+
+#[derive(Clone,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ColorOverrides{
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub light:Option<ColorPalette>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub dark:Option<ColorPalette>,
+}
+#[derive(Clone,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ColorPalette{
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub surface:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub editor:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub side:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub ink:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub muted:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub line:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub hover:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub accent:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub selection:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub active:Option<String>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub cursor:Option<String>,
+}
+impl ColorOverrides{
+ fn validated(&self)->Result<(),String>{
+  for palette in [&self.light,&self.dark].into_iter().flatten(){
+   for color in [&palette.surface,&palette.editor,&palette.side,&palette.ink,&palette.muted,&palette.line,&palette.hover,&palette.accent,&palette.selection,&palette.active,&palette.cursor].into_iter().flatten(){
+    if color.len()!=7||!color.starts_with('#')||!color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit){return Err("自定义颜色仅支持 #RRGGBB".into());}
+   }
+  }
+  Ok(())
+ }
+}
+
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(rename_all="lowercase")]
 pub enum Theme{Light,Dark,System}
@@ -46,9 +80,10 @@ where D:serde::Deserializer<'de>{
 fn deserialize_version<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<u32,D::Error>{deserialize_integer(deserializer,1,1)}
 fn deserialize_font_size<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<u8>,D::Error>{deserialize_integer(deserializer,10,32).map(|v|Some(v as u8))}
 fn deserialize_tab_size<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<u8>,D::Error>{deserialize_integer(deserializer,1,8).map(|v|Some(v as u8))}
-impl Default for Document{fn default()->Self{Self{version:1,vim:false,tab_size:None,format_on_save:true,overrides:BTreeMap::new(),theme:None,font_size:None,line_height:None,word_wrap:None,line_numbers:None,indent_guides:None,highlight_active_line:None}}}
+impl Default for Document{fn default()->Self{Self{color_overrides:None,version:1,vim:false,tab_size:None,format_on_save:true,overrides:BTreeMap::new(),theme:None,font_size:None,line_height:None,word_wrap:None,line_numbers:None,indent_guides:None,highlight_active_line:None}}}
 impl Document{
     fn validated(&self)->Result<(),String>{
+        if let Some(colors)=&self.color_overrides{colors.validated()?;}
         if self.font_size.is_some_and(|v|!(10..=32).contains(&v))||self.line_height.is_some_and(|v|!v.is_finite()||!(1.2..=2.4).contains(&v)){return Err("编辑器字号或行高超出允许范围".into());}
 
         if self.tab_size.is_some_and(|value|!(1..=8).contains(&value)){
@@ -93,6 +128,7 @@ impl EditorSettings {
         let previous=self.load()?;
         if previous.revision!=expected{return Err("编辑器配置已被其他窗口或程序修改，请重新读取后再保存".into());}
         let text=serde_json::to_string_pretty(&settings).map_err(|_|"编辑器配置编码失败")?;
+        if text.len()>4096{return Err("编辑器配置超过大小限制".into());}
         // Keep the exact prior valid bytes before replacing. A late fsync error
         // must not destroy the user's only recoverable original configuration.
         if let Some(prior)=previous.revision.as_deref(){
@@ -246,5 +282,28 @@ mod symlink_regression_tests {
   let parsed:Document=serde_json::from_str(r#"{"version":1e0,"formatOnSave":true,"overrides":{},"fontSize":14.0,"tabSize":4e0}"#).unwrap();
   assert_eq!(parsed.version,1);assert_eq!(parsed.font_size,Some(14));assert_eq!(parsed.tab_size,Some(4));
   assert!(parsed.validated().is_ok());
+ }
+}
+
+#[cfg(test)]mod custom_color_tests{
+ use super::*;
+ fn parse(colors:&str)->Result<Document,String>{
+  let text=format!(r#"{{"version":1,"formatOnSave":true,"overrides":{{}},"colorOverrides":{colors}}}"#);
+  let value:Document=serde_json::from_str(&text).map_err(|e|e.to_string())?;value.validated()?;Ok(value)
+ }
+ #[test]fn color_shapes_and_duplicates_are_checked(){
+  for raw in [r##"{"light":{"accent":"#123AbC"},"dark":{"editor":"#001122"}}"##,"{}"]{assert!(parse(raw).is_ok());}
+  for raw in ["null","[]",r#"{"light":null}"#,r#"{"light":[]}"#,r#"{"other":{}}"#,r##"{"dark":{"unknown":"#112233"}}"##,r#"{"light":{"accent":null}}"#,r#"{"light":{"accent":"red"}}"#,r##"{"light":{"accent":"#fff"}}"##,r#"{"light":{},"light":{}}"#,r##"{"dark":{"accent":"#112233","acc\u0065nt":"#445566"}}"##]{assert!(parse(raw).is_err(),"{raw}");}
+ }
+ #[test]fn custom_colors_keep_backup_and_reject_programmatic_invalid_values(){
+  let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().canonicalize().unwrap());
+  let original=store.save(Document::default(),None).unwrap();
+  let settings=parse(r##"{"light":{"accent":"#123456"},"dark":{"editor":"#234567"}}"##).unwrap();
+  let saved=store.save(settings,original.revision.clone()).unwrap();
+  assert_eq!(store.get().unwrap().settings.color_overrides.unwrap().dark.unwrap().editor.as_deref(),Some("#234567"));
+  assert_eq!(std::fs::read_to_string(dir.path().join("editor-settings.previous.json")).unwrap(),original.revision.unwrap());
+  let mut invalid=saved.settings;invalid.color_overrides.as_mut().unwrap().light.as_mut().unwrap().accent=Some("url(https://example.test)".into());
+  assert!(store.save(invalid,saved.revision.clone()).is_err());
+  assert_eq!(store.get().unwrap().revision,saved.revision);
  }
 }

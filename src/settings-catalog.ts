@@ -27,7 +27,7 @@ export const languageFormatSettingIds = {
   java: "editor.formatOnSave.java",
 } as const satisfies Record<Language, string>;
 export type LanguageFormatSettingId = typeof languageFormatSettingIds[Language];
-export type EditorSettingId = `editor.${EditorOptionKey}` | "editor.vim" | "editor.tabSize" | "editor.formatOnSave" | LanguageFormatSettingId;
+export type EditorSettingId = "editor.colorOverrides" | `editor.${EditorOptionKey}` | "editor.vim" | "editor.tabSize" | "editor.formatOnSave" | LanguageFormatSettingId;
 export type ProxySettingId = "downloads.proxy.mode" | "downloads.proxy.url";
 
 interface RowBase {
@@ -42,6 +42,7 @@ interface EditorRowBase extends RowBase {
   readonly category: "editor";
 }
 export type EditorSettingRow =
+  | (EditorRowBase & {readonly id:"editor.colorOverrides";readonly kind:"color-overrides";readonly defaultValue:"跟随主题";readonly reset:"remove-colors"})
   | (EditorRowBase & {readonly id:`editor.${EditorOptionKey}`;readonly kind:"editor-option";readonly option:EditorOptionDefinition;readonly defaultValue:string|number|boolean;readonly reset:"remove-option"})
   | (EditorRowBase & { readonly id: "editor.vim"; readonly kind: "boolean"; readonly defaultValue: boolean; readonly reset: "vim-default" })
   | (EditorRowBase & { readonly id: "editor.tabSize"; readonly kind: "integer"; readonly defaultValue: number; readonly min: 1; readonly max: 8; readonly reset: "remove-tab-size" })
@@ -74,6 +75,7 @@ const languageRows: readonly EditorSettingRow[] = languages.map<EditorSettingRow
   kind: "language-format", language: language.id, defaultValue: "inherit", reset: "remove-language-override",
 }));
 export const preferenceRows: readonly PreferenceRow[] = [
+  {id:"editor.colorOverrides",owner:"editor-settings",category:"editor",group:"appearance",order:28,label:"自定义配色",aliases:["colorOverrides","colors","palette","theme","配色","背景","文字颜色","强调色","选区","光标"],kind:"color-overrides",defaultValue:"跟随主题",reset:"remove-colors"},
   ...editorOptions.map<EditorSettingRow>((option,index)=>({id:`editor.${option.key}`,owner:"editor-settings",category:"editor",group:option.group,order:21+index,label:option.label,aliases:[option.key,option.description,"appearance","编辑显示"],kind:"editor-option",option,defaultValue:option.defaultValue,reset:"remove-option"})),
   { id: "editor.vim", owner: "editor-settings", category: "editor", group: "behavior", order: 10,
     label: "Vim", aliases: ["vim", "vim mode", "modal editing", "模式编辑"], kind: "boolean", defaultValue: defaultEditorSettings.vim ?? false, reset: "vim-default" },

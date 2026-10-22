@@ -733,3 +733,14 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 :root[data-theme="dark"]{--syntax-invalid:#ff9b9b;--semantic-type:#8bd5ca;--semantic-function:#8dbce0;--semantic-property:#c4b5a5;--semantic-namespace:#c4a7e7;--semantic-constant:#a6d6a9}
 
 :root[data-indent-guides="false"] .cm-indent-guides::before,:root[data-indent-guides="false"] .cm-indent-guide-active::after{display:none}
+
+.settings-colors{min-width:0;margin:6px 0;padding:8px;border:1px solid var(--line);border-radius:5px;display:grid;gap:8px}
+.settings-colors>legend{font-size:12px;padding:0 4px}
+.settings-colors>label{display:grid;grid-template-columns:48px minmax(0,1fr);align-items:center;gap:8px;font-size:12px}
+.settings-colors select{width:100%;min-width:0;font-size:12px;padding:5px}
+.settings-color-value,.settings-color-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.settings-color-value input[type=color]{width:42px;height:28px;padding:2px;border:1px solid var(--line);background:var(--surface)}
+.settings-color-value code{font-size:12px}
+.settings-color-actions button{font-size:11px;padding:5px 8px}
+.settings-colors small{font-size:11px;line-height:1.5}
+.settings-colors-row>.settings-colors{grid-column:1;grid-row:1}

@@ -85,6 +85,112 @@
     "highlightActiveLine": {
       "type": "boolean",
       "default": true
+    },
+    "colorOverrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "light": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "surface": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "editor": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "side": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "ink": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "muted": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "line": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "hover": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "accent": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "selection": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "active": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "cursor": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            }
+          }
+        },
+        "dark": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "surface": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "editor": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "side": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "ink": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "muted": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "line": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "hover": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "accent": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "selection": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "active": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "cursor": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            }
+          }
+        }
+      }
     }
   }
 }

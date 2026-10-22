@@ -53,12 +53,16 @@ export async function runSettingsJSONUI(browser,fixtures){
   await page.keyboard.press("Escape");await discard.waitFor();await discard.getByRole("button",{name:"继续编辑",exact:true}).click();assert.equal(await model(),broken);
   assert.equal(await json().evaluate(node=>node===document.activeElement),true,"cancel discard restores JSON editor focus");
   assert.deepEqual(await json().evaluate(async node=>{const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");return EditorView.findFromDOM(node.closest(".cm-editor")).state.selection.toJSON();}),beforeDiscardSelection);
-  const custom={version:1,vim:false,formatOnSave:true,overrides:{rust:false},theme:"dark",fontSize:18,lineHeight:1.6,wordWrap:true,lineNumbers:false,indentGuides:false,highlightActiveLine:false};
+  const custom={colorOverrides:{light:{accent:"#445566"},dark:{accent:"#88aacc"}},version:1,vim:false,formatOnSave:true,overrides:{rust:false},theme:"dark",fontSize:18,lineHeight:1.6,wordWrap:true,lineNumbers:false,indentGuides:false,highlightActiveLine:false};
   await json().fill(JSON.stringify(custom,null,2));
   await dialog.getByRole("button",{name:"可视化",exact:true}).click();
   assert.equal(await dialog.getByRole("combobox",{name:"配色主题",exact:true}).inputValue(),"dark");
   await dialog.getByRole("combobox",{name:"编辑器字号",exact:true}).selectOption("20");
+  await dialog.getByRole("button",{name:"恢复此颜色",exact:true}).click();
+  await dialog.getByRole("button",{name:"使用此颜色",exact:true}).click();
   await jsonMode();assert.equal(JSON.parse(await model()).fontSize,20);
+  assert.deepEqual(JSON.parse(await model()).colorOverrides,{light:{accent:"#a56543"},dark:{accent:"#88aacc"}});
+  assert.equal(await page.evaluate(()=>document.documentElement.style.getPropertyValue("--theme-accent")),"","draft colors do not apply before save");
   await page.evaluate(()=>window.__settingsJSON.hold=true);
   await save().evaluate(button=>{button.click();button.click();});
   await page.waitForFunction(()=>window.__settingsJSON.writes.length===1);
@@ -66,6 +70,7 @@ export async function runSettingsJSONUI(browser,fixtures){
   assert.equal(await dialog.getByRole("button",{name:"关闭设置",exact:true}).isDisabled(),true);
   await page.evaluate(()=>{window.__settingsJSON.hold=false;window.__settingsJSON.resolve();});
   await page.waitForFunction(()=>document.documentElement.dataset.theme==="dark");
+  assert.equal(await page.evaluate(()=>document.documentElement.style.getPropertyValue("--theme-accent")),"#88aacc");
   await page.waitForFunction(()=>!document.querySelector('[aria-label="关闭设置"]').disabled);
   await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();await dialog.waitFor({state:"hidden"});
   assert.deepEqual(await code.evaluate(async node=>{
@@ -97,11 +102,17 @@ export async function runSettingsJSONUI(browser,fixtures){
   await page.emulateMedia({colorScheme:"dark"});await page.waitForFunction(()=>document.documentElement.dataset.theme==="dark");
   await page.emulateMedia({colorScheme:"light"});await page.waitForFunction(()=>document.documentElement.dataset.theme==="light");
   await page.screenshot({path:"evidence/settings-json-editor.png"});
+  assert.equal(await page.evaluate(()=>document.documentElement.style.getPropertyValue("--theme-accent")),"#445566");
+  await dialog.getByRole("button",{name:"可视化",exact:true}).click();
+  await dialog.getByRole("button",{name:"重置 自定义配色",exact:true}).click();await save().click();
+  await page.waitForFunction(()=>!document.documentElement.style.getPropertyValue("--theme-accent"));
+  await page.emulateMedia({colorScheme:"dark"});await page.waitForFunction(()=>document.documentElement.style.getPropertyValue("--theme-accent")==="#e3aa7b");
+  await jsonMode();
   await json().fill("{");await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();await discard.waitFor();
   await discard.getByRole("button",{name:"放弃修改并继续",exact:true}).click();await dialog.waitFor({state:"hidden"});
   await page.reload();await code.waitFor();assert.equal(await page.evaluate(()=>window.__settingsJSON.snapshot.settings.theme),"system");
   assert.equal(await page.evaluate(()=>window.__settingsJSON.snapshot.settings.vim),false);
   assert.deepEqual(errors,[]);
-  await writeFile("evidence/SETTINGS_JSON_RESULT.txt","PASS: strict shared JSON/visual draft, invalid retention, discard/reload confirmations, guarded save, stale revision conflict, live theme/font/wrap/line numbers without editor remount, system-theme updates and fixture-backed restart. Mocked settings IPC; native filesystem safety is tested separately.\n");
+  await writeFile("evidence/SETTINGS_JSON_RESULT.txt","PASS: per-mode custom colors, saved-only application and reset clearing stale properties; strict shared JSON/visual draft, invalid retention, discard/reload confirmations, guarded save, stale revision conflict, live theme/font/wrap/line numbers without editor remount, system-theme updates and fixture-backed restart. Mocked settings IPC; native filesystem safety is tested separately.\n");
  }finally{await page.close();}
 }

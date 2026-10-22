@@ -1,3 +1,4 @@
+import {SettingsColors} from "./settings-colors";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { languages } from "./domain";
 import {parseEditorSettingsJSON,serializeEditorSettings,defaultEditorSettings,editorOptions,type EditorSettings,type EditorSettingsSnapshot} from "./format-settings";
@@ -82,6 +83,11 @@ export function FormatSettings({ snapshot, error, formattingStatus, reload, save
     if (!draft) return null;
     const state = readEditorSettingState(draft, row.id);
     if (state.status !== "known") return null;
+    if(row.kind==="color-overrides")return <div key={row.id} className="settings-row settings-colors-row" data-setting-id={row.id} data-setting-source={state.isDefault?"default":"modified"} hidden={!visibleRows.has(row.id)}>
+      <SettingsColors draft={draft} busy={busy} onChange={setDraft}/>
+      <IconButton type="button" icon="refresh" label="重置 自定义配色" className="settings-reset" disabled={busy||!state.canReset} onClick={()=>setDraft(resetEditorSetting(draft,row.id))}/>
+      <span className="settings-row-description">{state.value}<code>{row.id}</code></span>
+    </div>;
     const language = row.kind === "language-format" ? languages.find(item => item.id === row.language) : undefined;
     const label = language?.label ?? row.label;
     const controlId = "setting-" + row.id;
