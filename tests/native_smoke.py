@@ -1552,6 +1552,14 @@ try:
             click('[data-action="open-settings"]')
             category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='编辑器']"})[EID]
             click_native_node(category)
+            # Use the real searchable Settings UI before clicking a control below
+            # the expanded appearance section. Keep native hit testing and all
+            # checkbox, save, and on-disk assertions; do not synthesize a click.
+            search='[aria-label="搜索设置"]'
+            fill(search, "editor.formatOnSave")
+            wait_for(lambda:cmd("GET",f"/element/{element(search)}/property/value")=="editor.formatOnSave","native format setting search applied")
+            wait_for(lambda:element('[data-settings-result-count="1"]'),"exact format setting result rendered")
+            wait_for(lambda:cmd("GET",f"/element/{element('.format-switch input')}/displayed"),"format setting checkbox displayed")
             check=element(".format-switch input")
             selected=cmd("GET",f"/element/{check}/selected")
             if bool(selected)!=enabled: click_debug_action(".format-switch input")
