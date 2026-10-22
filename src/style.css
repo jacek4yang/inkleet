@@ -707,7 +707,7 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 :root{--selection:var(--theme-selection,#e8e9e2);--active-line:var(--theme-active,#f4f4f080);--vim-cursor:var(--theme-cursor,rgba(91,112,88,.38))}
 .cm-editor{font-size:var(--editor-font-size,14px)!important}
 .cm-editor .cm-scroller{line-height:var(--editor-line-height,1.75)!important}
-:root[data-line-numbers="false"] .cm-lineNumbers{display:none}
+:root[data-line-numbers="false"] .cm-editor .cm-lineNumbers{display:none!important}
 :root[data-active-line="false"]{--editor-active-line:transparent}
 :root[data-theme="dark"] .cm-editor{color-scheme:dark}
 :root[data-theme="dark"] .cm-matchingBracket{background:#435368;color:#fff}

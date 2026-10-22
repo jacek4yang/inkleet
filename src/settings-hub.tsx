@@ -176,7 +176,7 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
 
 function DiscardSettingsDialog({onKeep,onDiscard}:{onKeep:()=>void;onDiscard:()=>void}){
  const dialog=useRef<HTMLDialogElement>(null);
- useEffect(()=>{dialog.current?.showModal();},[]);
+ useLayoutEffect(()=>{const opener=document.activeElement,element=dialog.current!;element.showModal();return()=>{element.close();if(opener instanceof HTMLElement&&opener.isConnected)opener.focus();};},[]);
  return <dialog ref={dialog} className="settings-discard-dialog" aria-label="未保存的设置" onCancel={event=>{event.preventDefault();onKeep();}}>
   <p>设置草稿尚未保存，关闭会丢弃这些修改。</p>
   <button type="button" autoFocus onClick={onKeep}>继续编辑</button>

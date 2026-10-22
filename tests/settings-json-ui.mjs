@@ -48,7 +48,11 @@ export async function runSettingsJSONUI(browser,fixtures){
   await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
   const discard=page.getByRole("dialog",{name:"未保存的设置",exact:true});await discard.waitFor();
   await discard.getByRole("button",{name:"继续编辑",exact:true}).click();assert.equal(await model(),broken);
+  await json().focus();
+  const beforeDiscardSelection=await json().evaluate(async node=>{const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");return EditorView.findFromDOM(node.closest(".cm-editor")).state.selection.toJSON();});
   await page.keyboard.press("Escape");await discard.waitFor();await discard.getByRole("button",{name:"继续编辑",exact:true}).click();assert.equal(await model(),broken);
+  assert.equal(await json().evaluate(node=>node===document.activeElement),true,"cancel discard restores JSON editor focus");
+  assert.deepEqual(await json().evaluate(async node=>{const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");return EditorView.findFromDOM(node.closest(".cm-editor")).state.selection.toJSON();}),beforeDiscardSelection);
   const custom={version:1,vim:false,formatOnSave:true,overrides:{rust:false},theme:"dark",fontSize:18,lineHeight:1.6,wordWrap:true,lineNumbers:false,indentGuides:false,highlightActiveLine:false};
   await json().fill(JSON.stringify(custom,null,2));
   await dialog.getByRole("button",{name:"可视化",exact:true}).click();
