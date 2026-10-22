@@ -2,21 +2,22 @@ name: Preview desktop installers
 
 on:
   push:
-    branches: [build/preview-installers]
-    paths: ['src/**', 'src-tauri/**', 'crates/**', 'tests/**', 'package*.json', 'icon.svg', 'scripts/**', '.github/workflows/preview-installers.yml']
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: preview-installers-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref == 'refs/heads/build/preview-installers' }}
+  group: preview-installers-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Preview artifacts only. No release, tag, deployment, signing credentials, or
 # debug/native-snippet feature is used by any distributable build.
 jobs:
   frontend:
+    name: Packaging Frontend Regression
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -61,6 +62,7 @@ jobs:
           retention-days: 14
 
   windows-x64:
+    name: Packaging Windows x64
     needs: frontend
     runs-on: windows-2025
     timeout-minutes: 60
@@ -131,6 +133,7 @@ jobs:
           retention-days: 14
 
   linux-x86_64:
+    name: Packaging Linux x86_64
     needs: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -256,7 +259,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
   macos-intel:
-    name: macOS Intel DMG
+    name: Packaging macOS Intel
     needs: frontend
     runs-on: macos-15-intel
     timeout-minutes: 60
@@ -325,3 +328,23 @@ jobs:
             src-tauri/Cargo.lock
           if-no-files-found: warn
           retention-days: 30
+
+  packaging-required:
+    name: Packaging Required
+    needs: [frontend, windows-x64, linux-x86_64, macos-intel]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every package verification to pass
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['JOB_RESULTS'])
+          expected = {'frontend', 'windows-x64', 'linux-x86_64', 'macos-intel'}
+          assert set(results) == expected, 'Missing packaging dependency'
+          failed = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          assert not failed, f'Packaging verification did not pass: {failed}'
+          PY
