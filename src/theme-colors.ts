@@ -21,7 +21,7 @@ export function validateColorOverrides(value:unknown):ColorOverrides{
  for(const [mode,palette] of Object.entries(value)){
   if(!colorModes.includes(mode as ColorMode)||!palette||typeof palette!=="object"||Array.isArray(palette))throw Error("colorOverrides 仅支持 light / dark 配色对象");
   for(const [key,color] of Object.entries(palette)){
-   if(!themeColors.some(token=>token.key===key)||typeof color!=="string"||!/^#[0-9a-fA-F]{6}$/.test(color))throw Error("自定义颜色仅支持已列出的颜色项及 #RRGGBB");
+   if(!themeColors.some(token=>token.key===key)||typeof color!=="string"||color.length!==7||!/^#[0-9a-fA-F]{6}$/.test(color))throw Error("自定义颜色仅支持已列出的颜色项及 #RRGGBB");
   }
  }
  return value as ColorOverrides;

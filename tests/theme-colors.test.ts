@@ -18,7 +18,7 @@ test("custom colors preserve separate modes and reset immutable nested values",(
  assert.equal((inspectEditorDraft(defaultEditorSettings,settings) as {dirty:boolean}).dirty,true);
 });
 test("custom colors only accept fixed keys and six hex digits",()=>{
- for(const value of [null,[],{other:{}},{light:null},{light:[]},{light:{accent:null}},{dark:{accent:"red"}},{light:{accent:"#fff"}},{light:{accent:"url(https://example.test)"}},{dark:{unknown:"#112233"}},{light:{accent:123}}]){
+ for(const value of [null,[],{other:{}},{light:null},{light:[]},{light:{accent:null}},{dark:{accent:"red"}},{light:{accent:"#fff"}},{light:{accent:"url(https://example.test)"}},{dark:{unknown:"#112233"}},{light:{accent:"#123456\n"}},{dark:{accent:"#123456\r"}},{light:{accent:123}}]){
   assert.throws(()=>validateColorOverrides(value));
  }
  for(const colors of [{},{light:{}},{light:{accent:"#123AbC"},dark:{editor:"#001122"}}]){
