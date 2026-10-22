@@ -72,9 +72,13 @@ export async function runSettingsJSONUI(browser,fixtures){
    const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");const view=EditorView.findFromDOM(node.closest(".cm-editor"));
    return {same:view===window.__settingsOriginalView,text:view.state.doc.toString(),size:getComputedStyle(view.dom).fontSize,wrap:view.contentDOM.classList.contains("cm-lineWrapping"),lineNumbers:getComputedStyle(view.dom.querySelector(".cm-lineNumbers")).display};
   }),{same:true,text:"// retained across setting changes",size:"20px",wrap:true,lineNumbers:"none"});
-  await code.evaluate(node=>{const line=node.querySelector(".cm-line");line.classList.add("cm-activeLine","cm-debug-stopped");});
-  assert.notEqual(await code.locator(".cm-debug-stopped").evaluate(node=>getComputedStyle(node).backgroundColor),"rgba(0, 0, 0, 0)");
-  await code.evaluate(node=>node.querySelector(".cm-debug-stopped").classList.remove("cm-debug-stopped"));
+  // CSS precedence probe only; inspect synchronously before CodeMirror repairs DOM.
+  const pausedTint=await code.evaluate(node=>{
+   const line=node.querySelector(".cm-line"),original=line.className;
+   try{line.classList.add("cm-activeLine","cm-debug-stopped");return getComputedStyle(line).backgroundColor;}
+   finally{line.className=original;}
+  });
+  assert.notEqual(pausedTint,"rgba(0, 0, 0, 0)","disabling active-line tint must not erase debug pause styling");
   await page.screenshot({path:"evidence/settings-dark-editor.png"});
   dialog=await open();await jsonMode();
   const conflicting=JSON.stringify({...custom,fontSize:22},null,2);await json().fill(conflicting);
