@@ -101,6 +101,7 @@ function App() {
   const shuttingDown=useRef(false),formatEpoch=useRef(0),failedDrafts=useRef(new Set<string>());
   const closeDialog=useRef<HTMLDialogElement>(null);
   const [closeError,setCloseError]=useState("");
+  const [closeProtectionReady,setCloseProtectionReady]=useState(false);
   const activeKey = problemId ? draftKey({ account: "local", problem: problemId, language, solution }) : "";
   const selected = useRef(activeKey); selected.current = activeKey;
   const problem = problems.find(p => p.id === problemId);
@@ -272,7 +273,7 @@ function App() {
       if(shuttingDown.current)return;
       if(dirty.current.size||queue.current.busy||draftQueue.current.busy){setCloseError("");setCloseRequested(true);}
       else void closeWindow(false);
-    }).then(stop=>{if(alive)unlisten=stop;else stop();}).catch(error=>setDraftError("关闭保护不可用 · "+String(error)));
+    }).then(stop=>{if(alive){unlisten=stop;setCloseProtectionReady(true);}else stop();}).catch(error=>setDraftError("关闭保护不可用 · "+String(error)));
     return()=>{alive=false;unlisten?.();};
   },[]);
   useEffect(()=>{if(closeRequested&&!closeDialog.current?.open)closeDialog.current?.showModal();},[closeRequested]);
@@ -462,7 +463,7 @@ function App() {
     {id:"workbench.manual",label:"帮助 · 使用手册",run:()=>{setManual(true);return true;}},
   ];
   const commandPreferences={commands:workbenchCommands,bindings:editorSettings?.settings.keybindings??{}};
-  return <CommandPreferences.Provider value={commandPreferences}><main className={focus ? "workbench focus" : "workbench"}>
+  return <CommandPreferences.Provider value={commandPreferences}><main data-close-protection={closeProtectionReady?"ready":"unavailable"} className={focus ? "workbench focus" : "workbench"}>
     <header className="topbar"><div className="brand-group"><IconButton icon="panel" label={focus ? "退出专注" : "专注"} onClick={() => setFocus(!focus)} /><span className="brand-mark" role="img" aria-label="墨题 InkLeet" title="墨题 InkLeet"><Icon name="inkleet" /></span></div>
       <div><WorkbenchCommands commands={workbenchCommands} bindings={commandPreferences.bindings}/><Login onIdentity={setIdentity} /><IconButton icon="search" label="中国站题库" disabled={!isTauri()} data-action="open-catalogue" onClick={() => { setCatalogueMode("search"); setCatalogue(true); }} /><IconButton icon="link" label="链接打开" disabled={!isTauri()} data-action="open-link" onClick={() => { setCatalogueMode("link"); setCatalogue(true); }} /><IconButton icon="settings" label="设置" data-action="open-settings" onClick={() => setSettings("editor")} /></div>
     </header>

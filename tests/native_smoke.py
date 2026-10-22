@@ -1,6 +1,7 @@
 """Linux WebKitGTK smoke test against the built native application, not a browser mock."""
 import base64, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.error, http.client
 from native_wait import JsonlDiagnostics, Polling, operation_label, read_only_command
+from native_window_close import check_clean_close
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
@@ -550,6 +551,16 @@ try:
     assert not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="代码编辑器"]'}), "fresh installation must not create a sample document"
     assert "整数数组求和" not in text("body") and "寻找最大值" not in text("body")
     screenshot("empty-real-workspace-native.png")
+    wait_for(lambda:cmd("GET",f"/element/{element('main.workbench')}/attribute/data-close-protection")=="ready","native close guard registered")
+    check_clean_close(evidence, wait_for)
+    # The close result was established before WebDriver session cleanup.
+    try:
+        stop()
+    except RuntimeError as error:
+        if not any(message in str(error).lower() for message in ("invalid session", "no such window", "disconnected")):
+            raise
+        session = None
+    start(empty=True)
     if os.environ.get("INKLEET_LIVE_CN") == "1":
         # Verify the new real sidebar before the slower six-language fixture loop.
         outcome=wait_for(lambda: ("ready" if cmd("POST","/elements",{"using":"css selector","value":'.question-sidebar button[data-slug="two-sum"]'}) else "error" if cmd("POST","/elements",{"using":"css selector","value":'.question-sidebar [role="alert"]'}) else None),"real native sidebar response",seconds=30)
