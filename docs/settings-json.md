@@ -13,6 +13,20 @@
 
 主题提供浅色、深色和跟随系统。可选 colorOverrides 对象分别保存 light / dark 模式的颜色覆盖；未填写的颜色继承原有配色，不会把一套颜色自动复制到另一模式。自定义配色控件与 JSON 共用草稿，保存后生效。
 
-允许的颜色键：surface（窗口背景）、editor（编辑区背景）、side（侧栏）、ink（正文）、muted（次要文字）、line（分隔线）、hover（悬停）、accent（强调色及普通光标）、selection（选区）、active（当前行）、cursor（Vim 块状光标）。只接受 #RRGGBB 六位十六进制，不接受 CSS 表达式、URL、变量或其他键。任意语法高亮色与任意键位映射尚未接入。
+允许的颜色键：surface（窗口背景）、editor（编辑区背景）、side（侧栏）、ink（正文）、muted（次要文字）、line（分隔线）、hover（悬停）、accent（强调色及普通光标）、selection（选区）、active（当前行）、cursor（Vim 块状光标）。只接受 #RRGGBB 六位十六进制，不接受 CSS 表达式、URL、变量或其他键。任意语法高亮色尚未接入。快捷键使用下面列出的受支持命令与附加键格式，不接受任意 Vim 映射。
 
 [自定义配色示例](editor-settings.colors.example.json) 可以直接粘贴。自选颜色可能降低对比度，保存前请检查前景/背景搭配；“恢复此颜色”只删除当前模式的当前项，行右侧重置删除全部颜色覆盖。切换主题本身不会删除颜色配置。
+
+## 命令面板与附加快捷键
+
+Ctrl+Shift+P（macOS Command+Shift+P）从工作台打开命令面板；在代码或笔记编辑器中打开时，同时列出该编辑器的命令与工作台命令。工具栏也有命令面板入口。已有弹窗保持自己的键盘焦点，不从其背后打开其他窗口。
+
+可选 keybindings 对象将命令 ID 映射到附加快捷键。例子：
+```json
+{"version":1,"formatOnSave":true,"overrides":{},"keybindings":{"workbench.settings":"Mod-Alt-s","editor.definition":"Mod-Alt-Shift-d"}}
+```
+只允许 Mod-Alt-a 到 Mod-Alt-z，以及 Mod-Alt-Shift-a 到 z；Mod 在 macOS 对应 Command，其余平台对应 Ctrl。不同命令不能配置相同附加键。组合输入、AltGr 和长按重复不触发。操作系统可能截获某些组合，可另选附加键。
+
+附加键不删除或替换默认快捷键，也不是 Vim 的普通模式字符映射。删除该命令的字段或在界面选“无”即可移除附加键。编辑命令仅作用于当前获得焦点的编辑器，并保持原有语言服务、保存和版本保护。没有连接语言服务的命令不会变成假可用。
+
+支持的命令 ID：`workbench.settings`、`workbench.catalogue`、`workbench.link`、`workbench.focus`、`workbench.notes`、`workbench.code`、`workbench.local`、`workbench.environment`、`workbench.manual`、`editor.save`、`editor.goBack`、`editor.goForward`、`editor.undo`、`editor.redo`、`editor.selectAll`、`editor.rename`、`editor.implementation`、`editor.definition`、`editor.references`、`editor.signature`、`editor.completion`、`editor.format`、`debug.toggleBreakpoint`。没有任意脚本、终端命令、自动在线提交或账号操作入口。

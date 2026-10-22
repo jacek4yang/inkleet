@@ -1,3 +1,4 @@
+import {CommandPreferences} from "./command-preferences";
 import {editorSyntaxTheme} from "./editor-syntax-theme";
 import {editorJumpExtensions,moveEditorJump,settleEditorJump} from "./editor-jump-history";
 import {navigationBindings} from "./command-registry";
@@ -11,7 +12,7 @@ import {editorCommands} from "./editor-commands";
 import {formatBinding,type Command} from "./command-registry";
 import type { DebugPosition } from "./debug-position";
 import { formatOnSave, formatDocument, saveDocument } from "./format-on-save";
-import React, { useLayoutEffect, useRef, useState } from "react";
+import React, { useContext, useLayoutEffect, useRef, useState } from "react";
 import { EditorState, StateEffect, Prec, Compartment } from "@codemirror/state";
 import { EditorView, keymap, tooltips, panels } from "@codemirror/view";
 import { basicSetup } from "codemirror";
@@ -68,6 +69,7 @@ type Props = {
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
 export function CodeEditor({ vimEnabled=false, tabSize=4, wordWrap=false, showIndentGuides=true, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, statusOwner, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
+  const commandPreferences=useContext(CommandPreferences),preferencesRef=useRef(commandPreferences);preferencesRef.current=commandPreferences;
   const wrapSlot=useRef(new Compartment()),guideSlot=useRef(new Compartment());
   const formatOptions=useRef(formatting);formatOptions.current=formatting;
   const saveCallback=useRef(onSave),saveReady=useRef(onSaveReady);saveCallback.current=onSave;saveReady.current=onSaveReady;
@@ -109,7 +111,7 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, wordWrap=false, showIn
     const footer=document.getElementById("vim-command-slot");
     const commandHost=footer?document.createElement("div"):null;
     if(commandHost){commandHost.className="vim-command-host";footer!.appendChild(commandHost);}
-    const extensions = [...editorJumpExtensions,editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
+    const extensions = [...editorJumpExtensions,editorCommands(commands,()=>preferencesRef.current.commands.map(command=>({...command,enabled:()=>!command.enabled||command.enabled(undefined),run:()=>command.run(undefined)})),()=>preferencesRef.current.bindings), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
       basicSetup, editorSyntaxTheme, snippetSession, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), guideSlot.current.of(language!=="markdown"&&showIndentGuides?indentGuides:[]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       tabSizeSlot.current.of(EditorState.tabSize.of(tabSize)),

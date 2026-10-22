@@ -1,3 +1,5 @@
+import {CommandPreferences,type WorkbenchCommand} from "./command-preferences";
+import {WorkbenchCommands} from "./workbench-commands";
 import {useEditorAppearance} from "./editor-appearance";
 import {CopyAIContext} from "./copy-ai-context";
 import {buildAIContext} from "./ai-context";
@@ -436,9 +438,21 @@ function App() {
     { id:"external-editor", label:"系统编辑器", section:"notes", icon:"file", disabled:editorLoading || !externalEditors, run:() => settingsRun(() => void openExternalNotes("default")) },
     { id:"refresh-notes", label:"刷新文件", section:"notes", icon:"refresh", disabled:editorLoading || !externalEditors, run:() => settingsRun(() => void refreshExternalNotes()) },
   ];
-  return <main className={focus ? "workbench focus" : "workbench"}>
+  const workbenchCommands:WorkbenchCommand[]=[
+    {id:"workbench.settings",label:"设置 · 打开设置",run:()=>{setSettings("editor");return true;}},
+    {id:"workbench.catalogue",label:"题库 · 搜索中国站题目",enabled:()=>isTauri(),run:()=>{setCatalogueMode("search");setCatalogue(true);return true;}},
+    {id:"workbench.link",label:"题库 · 通过链接打开题目",enabled:()=>isTauri(),run:()=>{setCatalogueMode("link");setCatalogue(true);return true;}},
+    {id:"workbench.focus",label:focus?"布局 · 退出专注":"布局 · 进入专注",run:()=>{setFocus(value=>!value);return true;}},
+    {id:"workbench.notes",label:"工作区 · 显示笔记",enabled:()=>!!problem&&!editorLoading,run:()=>{setTab("notes");return true;}},
+    {id:"workbench.code",label:"工作区 · 显示代码",enabled:()=>!!problem&&!editorLoading,run:()=>{setTab("code");return true;}},
+    {id:"workbench.local",label:"运行 · 打开本地运行与调试面板",enabled:()=>isTauri()&&!editorLoading,run:()=>{setLocalOpened(true);setLocalRunner(true);return true;}},
+    {id:"workbench.environment",label:"环境 · 管理语言工具链",enabled:()=>isTauri(),run:()=>{setEnvironments(true);return true;}},
+    {id:"workbench.manual",label:"帮助 · 使用手册",run:()=>{setManual(true);return true;}},
+  ];
+  const commandPreferences={commands:workbenchCommands,bindings:editorSettings?.settings.keybindings??{}};
+  return <CommandPreferences.Provider value={commandPreferences}><main className={focus ? "workbench focus" : "workbench"}>
     <header className="topbar"><div className="brand-group"><IconButton icon="panel" label={focus ? "退出专注" : "专注"} onClick={() => setFocus(!focus)} /><span className="brand-mark" role="img" aria-label="墨题 InkLeet" title="墨题 InkLeet"><Icon name="inkleet" /></span></div>
-      <div><Login onIdentity={setIdentity} /><IconButton icon="search" label="中国站题库" disabled={!isTauri()} data-action="open-catalogue" onClick={() => { setCatalogueMode("search"); setCatalogue(true); }} /><IconButton icon="link" label="链接打开" disabled={!isTauri()} data-action="open-link" onClick={() => { setCatalogueMode("link"); setCatalogue(true); }} /><IconButton icon="settings" label="设置" data-action="open-settings" onClick={() => setSettings("editor")} /></div>
+      <div><WorkbenchCommands commands={workbenchCommands} bindings={commandPreferences.bindings}/><Login onIdentity={setIdentity} /><IconButton icon="search" label="中国站题库" disabled={!isTauri()} data-action="open-catalogue" onClick={() => { setCatalogueMode("search"); setCatalogue(true); }} /><IconButton icon="link" label="链接打开" disabled={!isTauri()} data-action="open-link" onClick={() => { setCatalogueMode("link"); setCatalogue(true); }} /><IconButton icon="settings" label="设置" data-action="open-settings" onClick={() => setSettings("editor")} /></div>
     </header>
     <QuestionSidebar account={identity?.account ?? null} recent={problems} selected={problemId} onSelectRecent={setProblemId} onChoose={chooseQuestion} />
 
@@ -468,6 +482,6 @@ function App() {
     {conflict && <ConflictDialog conflict={conflict} onClose={() => { ++conflictSequence.current; setConflict(null); }} onRefresh={async () => { setConflict(await readConflict(conflict)); }} onResolve={resolveConflict} />}
     {closeRequested&&<dialog ref={closeDialog} className="close-drafts" aria-label="未保存更改" onCancel={event=>{event.preventDefault();if(!closing)setCloseRequested(false);}}><h3>未保存更改</h3><p>保留恢复草稿后退出？源码文件不会被覆盖。</p><button disabled={closing} onClick={()=>setCloseRequested(false)}>取消</button><button disabled={closing} onClick={()=>void closeWithDrafts()}>保留草稿并退出</button>{draftError&&<p role="alert">{draftError}</p>}</dialog>}
     <footer className="statusbar" role="status" data-storage-state={status}><EditorStatus/><div id="vim-command-slot"/><span className="storage-status">{draftError&&<span role="alert">{draftError}<button onClick={()=>{for(const key of failedDrafts.current)draftQueue.current.retry(key);}}>重试草稿</button></span>}{["选择题目", "已读取本机文件", "已保存到本机文件", "已处理冲突 · 两份内容已保留", "已恢复所选副本 · 恢复前的两份内容仍已保留", "已重新读取外部笔记", "已请求外部编辑器打开笔记 · 返回时自动检查更新"].includes(status) ? "" : status}{queue.current.failed(activeKey) && <button data-action="review-code-conflict" onClick={() => void openConflict("code")}>对比源码</button>}{queue.current.failed(problemId + "/notes") && <button data-action="review-notes-conflict" onClick={() => void openConflict("notes")}>对比笔记</button>}{(queue.current.failed(activeKey) || queue.current.failed(problemId + "/notes")) && <button onClick={retrySave}>重试保存</button>}</span>{problem&&<button type="button" className={"lsp-status "+(languageStatus.includes("已连接")?"ready":"unavailable")} data-status={languageStatus} aria-label="语言服务设置" title={languageStatus||"语言服务未启动"} onClick={()=>setSettings("environment")}><i/><span>LSP</span></button>}{(formatConfigError||formatMessage)&&<IconButton icon="info" label="格式化状态" title={formatConfigError||formatMessage} onClick={()=>setSettings("editor")} />}</footer>
-  </main>;
+  </main></CommandPreferences.Provider>;
 }
 createRoot(document.getElementById("root")!).render(<App />);

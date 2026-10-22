@@ -1,3 +1,4 @@
+import {SettingsKeybindings} from "./settings-keybindings";
 import {SettingsColors} from "./settings-colors";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { languages } from "./domain";
@@ -83,6 +84,10 @@ export function FormatSettings({ snapshot, error, formattingStatus, reload, save
     if (!draft) return null;
     const state = readEditorSettingState(draft, row.id);
     if (state.status !== "known") return null;
+    if(row.kind==="keybindings")return <div key={row.id} className="settings-row settings-keybindings-row" data-setting-id={row.id} data-setting-source={state.isDefault?"default":"modified"} hidden={!visibleRows.has(row.id)}>
+      <SettingsKeybindings draft={draft} busy={busy} onChange={setDraft}/>
+      <IconButton type="button" icon="refresh" label="重置 自定义附加快捷键" disabled={busy||!state.canReset} onClick={()=>setDraft(resetEditorSetting(draft,row.id))}/>
+    </div>;
     if(row.kind==="color-overrides")return <div key={row.id} className="settings-row settings-colors-row" data-setting-id={row.id} data-setting-source={state.isDefault?"default":"modified"} hidden={!visibleRows.has(row.id)}>
       <SettingsColors draft={draft} busy={busy} onChange={setDraft}/>
       <IconButton type="button" icon="refresh" label="重置 自定义配色" className="settings-reset" disabled={busy||!state.canReset} onClick={()=>setDraft(resetEditorSetting(draft,row.id))}/>

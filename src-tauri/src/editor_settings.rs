@@ -7,6 +7,7 @@ use crate::storage;
 #[serde(deny_unknown_fields)]
 #[serde(rename_all="camelCase")]
 pub struct Document {
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_keybindings")] pub keybindings:Option<BTreeMap<String,String>>,
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub color_overrides:Option<ColorOverrides>, #[serde(deserialize_with="deserialize_version")] pub version:u32, #[serde(default)] pub vim:bool, #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_tab_size")] pub tab_size:Option<u8>, pub format_on_save:bool, #[serde(deserialize_with="deserialize_overrides")] pub overrides:BTreeMap<String,bool>,
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub theme:Option<Theme>,
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_font_size")] pub font_size:Option<u8>,
@@ -17,6 +18,30 @@ pub struct Document {
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub highlight_active_line:Option<bool>,
 }
 
+const KEYBINDING_COMMANDS:&[&str]=&["workbench.settings","workbench.catalogue","workbench.link","workbench.focus","workbench.notes","workbench.code","workbench.local","workbench.environment","workbench.manual","editor.save","editor.goBack","editor.goForward","editor.undo","editor.redo","editor.selectAll","editor.rename","editor.implementation","editor.definition","editor.references","editor.signature","editor.completion","editor.format","debug.toggleBreakpoint"];
+fn valid_keybindings(bindings:&BTreeMap<String,String>)->bool{
+ let mut used=std::collections::BTreeSet::new();
+ bindings.iter().all(|(id,key)|{
+  let suffix=key.strip_prefix("Mod-Alt-Shift-").or_else(||key.strip_prefix("Mod-Alt-"));
+  KEYBINDING_COMMANDS.contains(&id.as_str())&&suffix.is_some_and(|s|s.len()==1&&s.as_bytes()[0].is_ascii_lowercase())&&used.insert(key)
+ })
+}
+fn deserialize_keybindings<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<BTreeMap<String,String>>,D::Error>{
+ struct UniqueBindings;
+ impl<'de> serde::de::Visitor<'de> for UniqueBindings{
+  type Value=BTreeMap<String,String>;
+  fn expecting(&self,f:&mut std::fmt::Formatter)->std::fmt::Result{write!(f,"a unique command-to-shortcut object")}
+  fn visit_map<A:serde::de::MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+   let mut bindings=BTreeMap::new();
+   while let Some((id,key))=map.next_entry::<String,String>()?{
+    if bindings.insert(id,key).is_some(){return Err(serde::de::Error::custom("duplicate command key"));}
+   }
+   if !valid_keybindings(&bindings){return Err(serde::de::Error::custom("invalid or conflicting shortcut"));}
+   Ok(bindings)
+  }
+ }
+ deserializer.deserialize_map(UniqueBindings).map(Some)
+}
 #[derive(Clone,Serialize,Default)]
 pub struct ColorOverrides{
  #[serde(skip_serializing_if="Option::is_none")] pub light:Option<ColorPalette>,
@@ -129,9 +154,10 @@ where D:serde::Deserializer<'de>{
 fn deserialize_version<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<u32,D::Error>{deserialize_integer(deserializer,1,1)}
 fn deserialize_font_size<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<u8>,D::Error>{deserialize_integer(deserializer,10,32).map(|v|Some(v as u8))}
 fn deserialize_tab_size<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<u8>,D::Error>{deserialize_integer(deserializer,1,8).map(|v|Some(v as u8))}
-impl Default for Document{fn default()->Self{Self{color_overrides:None,version:1,vim:false,tab_size:None,format_on_save:true,overrides:BTreeMap::new(),theme:None,font_size:None,line_height:None,word_wrap:None,line_numbers:None,indent_guides:None,highlight_active_line:None}}}
+impl Default for Document{fn default()->Self{Self{keybindings:None,color_overrides:None,version:1,vim:false,tab_size:None,format_on_save:true,overrides:BTreeMap::new(),theme:None,font_size:None,line_height:None,word_wrap:None,line_numbers:None,indent_guides:None,highlight_active_line:None}}}
 impl Document{
     fn validated(&self)->Result<(),String>{
+        if self.keybindings.as_ref().is_some_and(|keys|!valid_keybindings(keys)){return Err("快捷键无效或冲突".into());}
         if let Some(colors)=&self.color_overrides{colors.validated()?;}
         if self.font_size.is_some_and(|v|!(10..=32).contains(&v))||self.line_height.is_some_and(|v|!v.is_finite()||!(1.2..=2.4).contains(&v)){return Err("编辑器字号或行高超出允许范围".into());}
 
@@ -354,5 +380,22 @@ mod symlink_regression_tests {
   let mut invalid=saved.settings;invalid.color_overrides.as_mut().unwrap().light.as_mut().unwrap().accent=Some("url(https://example.test)".into());
   assert!(store.save(invalid,saved.revision.clone()).is_err());
   assert_eq!(store.get().unwrap().revision,saved.revision);
+ }
+}
+
+#[cfg(test)]mod keybinding_tests{
+ use super::*;
+ #[test]fn bindings_validate_and_preserve_store_guards(){
+  let text=r#"{"version":1,"formatOnSave":true,"overrides":{},"keybindings":{"workbench.settings":"Mod-Alt-s","editor.definition":"Mod-Alt-Shift-d"}}"#;
+  let value:Document=serde_json::from_str(text).unwrap();value.validated().unwrap();
+  let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().canonicalize().unwrap());
+  let saved=store.save(value,None).unwrap();
+  assert_eq!(store.get().unwrap().settings.keybindings.unwrap()["workbench.settings"],"Mod-Alt-s");
+  assert!(store.save(Document::default(),None).is_err());
+  assert_eq!(store.get().unwrap().revision,saved.revision);
+  for raw in ["null","[]",r#"{"editor.save":null}"#,r#"{"unknown":"Mod-Alt-s"}"#,r#"{"editor.save":"Ctrl-s"}"#,r#"{"editor.save":"Mod-Alt-S"}"#,r#"{"editor.save":"Mod-Alt-s","editor.undo":"Mod-Alt-s"}"#,r#"{"editor.save":"Mod-Alt-s","editor.save":"Mod-Alt-a"}"#]{
+   let invalid=format!(r#"{{"version":1,"formatOnSave":true,"overrides":{{}},"keybindings":{raw}}}"#);
+   assert!(serde_json::from_str::<Document>(&invalid).is_err(),"{invalid}");
+  }
  }
 }

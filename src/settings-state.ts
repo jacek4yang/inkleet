@@ -26,6 +26,7 @@ function overrideLanguage(id: EditorSettingId) {
 
 export function readEditorSettingState(settings: EditorSettings | null, id: EditorSettingId): EditorSettingState {
   if (!settings) return { status: "unknown" };
+  if(id==="editor.keybindings"){const count=Object.keys(settings.keybindings??{}).length;return {status:"known",value:count?count+" 个附加键":"默认快捷键",effectiveValue:count?count+" 个附加键":"默认快捷键",defaultValue:"默认快捷键",isDefault:!count,hasExplicitValue:settings.keybindings!==undefined,hasLanguageOverride:false,canReset:settings.keybindings!==undefined};}
   if(id==="editor.colorOverrides"){const count=colorOverrideCount(settings.colorOverrides),explicit=settings.colorOverrides!==undefined;return {status:"known",value:count?count+" 项覆盖":"跟随主题",effectiveValue:count?count+" 项覆盖":"跟随主题",defaultValue:"跟随主题",isDefault:!explicit,hasExplicitValue:explicit,hasLanguageOverride:false,canReset:explicit};}
   if (id === "editor.vim") {
     const value = settings.vim ?? false, defaultValue = defaultEditorSettings.vim ?? false;
@@ -52,6 +53,7 @@ export function readEditorSettingState(settings: EditorSettings | null, id: Edit
 // These return drafts only. The calling owner still decides when to Save and
 // retains the original revision token and all existing conflict/error guards.
 export function resetEditorSetting(settings: EditorSettings, id: EditorSettingId): EditorSettings {
+  if(id==="editor.keybindings"){const next={...settings};delete next.keybindings;return next;}
   if(id==="editor.colorOverrides"){const next={...settings};delete next.colorOverrides;return next;}
   if (id === "editor.vim") return { ...settings, vim: defaultEditorSettings.vim ?? false };
   if (id === "editor.tabSize") {
@@ -78,7 +80,7 @@ export type EditorDraftState =
 // an unchanged loaded tabSize:4 still needs the existing Save canonicalization.
 export function inspectEditorDraft(saved: EditorSettings | null, draft: EditorSettings | null): EditorDraftState {
   if (!saved || !draft) return { status: "unknown" };
-  const dirty = !sameColorOverrides(saved.colorOverrides,draft.colorOverrides) || saved.vim !== draft.vim || saved.tabSize !== draft.tabSize || saved.formatOnSave !== draft.formatOnSave
+  const dirty = JSON.stringify(Object.entries(saved.keybindings??{}).sort())!==JSON.stringify(Object.entries(draft.keybindings??{}).sort()) || !sameColorOverrides(saved.colorOverrides,draft.colorOverrides) || saved.vim !== draft.vim || saved.tabSize !== draft.tabSize || saved.formatOnSave !== draft.formatOnSave
     || languages.some(language => saved.overrides[language.id] !== draft.overrides[language.id]) || editorOptions.some(option=>saved[option.key]!==draft[option.key]);
   return { status: "known", dirty, needsTabSizeCanonicalization: draft.tabSize === DEFAULT_TAB_SIZE };
 }

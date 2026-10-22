@@ -1,7 +1,8 @@
+import {validateKeybindings,type UserKeybindings} from "./keybindings.ts";
 import {validateColorOverrides,type ColorOverrides} from "./theme-colors.ts";
 import type {Language} from "./domain";
 import {canonicalJson} from "./case-expectations.ts";
-export type EditorSettings={version:1;colorOverrides?:ColorOverrides;vim?:boolean;tabSize?:number;formatOnSave:boolean;overrides:Partial<Record<Language,boolean>>;
+export type EditorSettings={version:1;keybindings?:UserKeybindings;colorOverrides?:ColorOverrides;vim?:boolean;tabSize?:number;formatOnSave:boolean;overrides:Partial<Record<Language,boolean>>;
  theme?:"light"|"dark"|"system";fontSize?:number;lineHeight?:number;wordWrap?:boolean;lineNumbers?:boolean;indentGuides?:boolean;highlightActiveLine?:boolean};
 export type EditorSettingsSnapshot={settings:EditorSettings;revision:string|null};
 export const defaultEditorSettings:EditorSettings={version:1,vim:false,formatOnSave:true,overrides:{}};
@@ -21,8 +22,9 @@ export function formatEnabled(settings:EditorSettings|null,language:Language){re
 export function validateEditorDocument(value:unknown):EditorSettings{
  const fail=(message:string):never=>{throw Error(message+"，原配置未修改");};
  if(!value||typeof value!=="object"||Array.isArray(value))return fail("设置必须是 JSON 对象");
- const s=value as Record<string,unknown>,allowed=new Set(["version","vim","tabSize","formatOnSave","overrides","colorOverrides",...editorOptions.map(o=>o.key)]);
+ const s=value as Record<string,unknown>,allowed=new Set(["version","vim","tabSize","formatOnSave","overrides","colorOverrides","keybindings",...editorOptions.map(o=>o.key)]);
  for(const key of Object.keys(s))if(!allowed.has(key))fail("不支持的设置字段："+key);
+ if(Object.hasOwn(s,"keybindings"))validateKeybindings(s.keybindings);
  if(Object.hasOwn(s,"colorOverrides"))validateColorOverrides(s.colorOverrides);
  if(s.version!==1)fail("不支持的设置版本");
  if(s.vim!==undefined&&typeof s.vim!=="boolean")fail("vim 必须为布尔值");

@@ -744,3 +744,16 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 .settings-color-actions button{font-size:11px;padding:5px 8px}
 .settings-colors small{font-size:11px;line-height:1.5}
 .settings-colors-row>.settings-colors{grid-column:1;grid-row:1}
+
+/* Workbench commands share the editor palette's compact list style. */
+.workbench-command-palette{width:min(560px,calc(100vw - 32px));max-height:70vh;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.workbench-command-palette::backdrop{background:#0004}
+.workbench-command-palette>input{width:100%;margin-bottom:8px}
+.workbench-command-palette .editor-command-list{max-height:45vh;overflow:auto}
+.workbench-command-palette .editor-command-list button{display:flex;justify-content:space-between;width:100%;gap:16px;text-align:left}
+.workbench-command-palette [aria-selected=true]{background:var(--hover)}
+.settings-keybindings-row{display:flex;align-items:flex-start}
+.settings-keybindings{min-width:0;flex:1}
+.settings-keybindings label{display:flex;gap:12px;align-items:center;margin-bottom:8px}
+.settings-keybindings select{min-width:0;max-width:100%}
+.settings-keybindings p{font-size:12px;color:var(--muted)}
