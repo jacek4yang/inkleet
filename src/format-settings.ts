@@ -3,12 +3,13 @@ import {validateColorOverrides,type ColorOverrides} from "./theme-colors.ts";
 import type {Language} from "./domain";
 import {canonicalJson} from "./case-expectations.ts";
 export type EditorSettings={version:1;keybindings?:UserKeybindings;colorOverrides?:ColorOverrides;vim?:boolean;tabSize?:number;formatOnSave:boolean;overrides:Partial<Record<Language,boolean>>;
- theme?:"light"|"dark"|"system";fontSize?:number;lineHeight?:number;wordWrap?:boolean;lineNumbers?:boolean;indentGuides?:boolean;highlightActiveLine?:boolean};
+ fontFamily?:string;theme?:"light"|"dark"|"system";fontSize?:number;lineHeight?:number;wordWrap?:boolean;lineNumbers?:boolean;indentGuides?:boolean;highlightActiveLine?:boolean};
 export type EditorSettingsSnapshot={settings:EditorSettings;revision:string|null};
 export const defaultEditorSettings:EditorSettings={version:1,vim:false,formatOnSave:true,overrides:{}};
-export type EditorOptionKey="theme"|"fontSize"|"lineHeight"|"wordWrap"|"lineNumbers"|"indentGuides"|"highlightActiveLine";
+export type EditorOptionKey="fontFamily"|"theme"|"fontSize"|"lineHeight"|"wordWrap"|"lineNumbers"|"indentGuides"|"highlightActiveLine";
 export type EditorOptionDefinition={key:EditorOptionKey;label:string;description:string;kind:"enum"|"number"|"boolean";defaultValue:string|number|boolean;min?:number;max?:number;step?:number;choices?:readonly {value:string;label:string}[];group:"appearance"|"behavior"};
 export const editorOptions:readonly EditorOptionDefinition[]=[
+ {key:"fontFamily",label:"编辑器字体",description:"使用本机已安装字体；不存在时回退到默认等宽字体，不自动下载。",kind:"enum",defaultValue:"",choices:[{"value":"","label":"默认 · Intel One Mono 与中文回退"},{"value":"Intel One Mono","label":"Intel One Mono"},{"value":"Maple Mono NF CN","label":"Maple Mono NF CN"},{"value":"Maple Mono CN","label":"Maple Mono CN"},{"value":"JetBrains Mono","label":"JetBrains Mono"},{"value":"Fira Code","label":"Fira Code"},{"value":"Cascadia Code","label":"Cascadia Code"},{"value":"Consolas","label":"Consolas"},{"value":"Menlo","label":"Menlo"},{"value":"SFMono-Regular","label":"SFMono-Regular"},{"value":"Noto Sans Mono CJK SC","label":"Noto Sans Mono CJK SC"},{"value":"monospace","label":"monospace"}],group:"appearance"},
  {key:"theme",label:"配色主题",description:"默认保持当前浅色；也可使用深色或跟随系统。",kind:"enum",defaultValue:"light",choices:[{value:"light",label:"浅色 · 默认"},{value:"dark",label:"深色"},{value:"system",label:"跟随系统"}],group:"appearance"},
  {key:"fontSize",label:"编辑器字号",description:"代码、笔记与源码阅读器的字体大小（px）。",kind:"number",defaultValue:14,min:10,max:32,step:1,group:"appearance"},
  {key:"lineHeight",label:"编辑器行高",description:"行高相对于字号的倍数。",kind:"number",defaultValue:1.75,min:1.2,max:2.4,step:0.05,group:"appearance"},

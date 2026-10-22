@@ -159,6 +159,84 @@
               "pattern": "^#[0-9A-Fa-f]{6}$",
               "minLength": 7,
               "maxLength": 7
+            },
+            "syntaxKeyword": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxAtom": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxNumber": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxString": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxComment": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxFunction": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxType": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxInvalid": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticType": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticFunction": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticProperty": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticNamespace": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticConstant": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
             }
           }
         },
@@ -231,6 +309,84 @@
               "pattern": "^#[0-9A-Fa-f]{6}$",
               "minLength": 7,
               "maxLength": 7
+            },
+            "syntaxKeyword": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxAtom": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxNumber": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxString": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxComment": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxFunction": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxType": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "syntaxInvalid": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticType": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticFunction": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticProperty": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticNamespace": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
+            },
+            "semanticConstant": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "minLength": 7,
+              "maxLength": 7
             }
           }
         }
@@ -243,143 +399,162 @@
       "properties": {
         "workbench.settings": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "workbench.catalogue": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "workbench.link": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "workbench.focus": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "workbench.notes": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "workbench.code": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "workbench.local": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "workbench.environment": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "workbench.manual": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.save": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.goBack": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.goForward": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.undo": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.redo": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.selectAll": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.rename": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.implementation": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.definition": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.references": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.signature": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.completion": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "editor.format": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         },
         "debug.toggleBreakpoint": {
           "type": "string",
-          "pattern": "^Mod-Alt-(Shift-)?[a-z]$",
+          "pattern": "^Mod-Alt-(Shift-)?[a-fh-z]$",
           "minLength": 9,
           "maxLength": 15
         }
       }
+    },
+    "fontFamily": {
+      "type": "string",
+      "enum": [
+        "",
+        "Intel One Mono",
+        "Maple Mono NF CN",
+        "Maple Mono CN",
+        "JetBrains Mono",
+        "Fira Code",
+        "Cascadia Code",
+        "Consolas",
+        "Menlo",
+        "SFMono-Regular",
+        "Noto Sans Mono CJK SC",
+        "monospace"
+      ],
+      "default": "",
+      "description": "Installed local font preference; missing fonts fall back without downloading."
     }
   }
 }

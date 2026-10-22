@@ -12,6 +12,19 @@ export const themeColors=[
  {key:"selection",label:"选区背景",light:"#e8e9e2",dark:"#42546b"},
  {key:"active",label:"当前行背景",light:"#f4f4f0",dark:"#2b323b"},
  {key:"cursor",label:"Vim 块状光标",light:"#5b7058",dark:"#8ba6bc"},
+ {"key":"syntaxKeyword","label":"语法 · 关键字","light":"#770088","dark":"#c4a7e7"},
+ {"key":"syntaxAtom","label":"语法 · 常量字面量","light":"#221199","dark":"#a8c7fa"},
+ {"key":"syntaxNumber","label":"语法 · 数字","light":"#116644","dark":"#a6d6a9"},
+ {"key":"syntaxString","label":"语法 · 字符串","light":"#aa1111","dark":"#e5c07b"},
+ {"key":"syntaxComment","label":"语法 · 注释","light":"#994400","dark":"#9aa6b2"},
+ {"key":"syntaxFunction","label":"语法 · 函数","light":"#0000ff","dark":"#8dbce0"},
+ {"key":"syntaxType","label":"语法 · 类型","light":"#008855","dark":"#8bd5ca"},
+ {"key":"syntaxInvalid","label":"语法 · 无效标记","light":"#ff0000","dark":"#ff9b9b"},
+ {"key":"semanticType","label":"语言服务 · 类型","light":"#866447","dark":"#8bd5ca"},
+ {"key":"semanticFunction","label":"语言服务 · 函数","light":"#4c728c","dark":"#8dbce0"},
+ {"key":"semanticProperty","label":"语言服务 · 参数与属性","light":"#766044","dark":"#c4b5a5"},
+ {"key":"semanticNamespace","label":"语言服务 · 命名空间","light":"#61725e","dark":"#c4a7e7"},
+ {"key":"semanticConstant","label":"语言服务 · 常量","light":"#96674e","dark":"#a6d6a9"},
 ] as const;
 export type ThemeColorKey=typeof themeColors[number]["key"];
 export type ColorOverrides=Partial<Record<ColorMode,Partial<Record<ThemeColorKey,string>>>>;

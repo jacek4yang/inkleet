@@ -16,6 +16,6 @@ export function SettingsColors({draft,busy,onChange}:{draft:EditorSettings;busy:
   <div className="settings-color-value"><input type="color" disabled={busy} aria-label="选择自定义颜色" value={value} onChange={event=>change(event.target.value)}/><code>{explicit??"继承默认"}</code></div>
   <div className="settings-color-actions"><button type="button" disabled={busy} onClick={()=>change(value)}>使用此颜色</button><button type="button" disabled={busy||explicit===undefined} onClick={()=>change(undefined)}>恢复此颜色</button></div>
   <small>保存后生效；浅色和深色分别保留。继承时选择器仅显示参考色，不改变原配色。仅接受 #RRGGBB，可通过 JSON 精确填写。</small>
-  <small>自选前景与背景可能降低可读性；右侧重置可恢复全部默认配色。这里不包含语法高亮颜色。</small>
+  <small>自选前景与背景可能降低可读性；右侧重置可恢复全部默认配色。语法色与语言服务语义色分别设置；语言服务不支持的分类不会凭空出现。</small>
  </fieldset>;
 }

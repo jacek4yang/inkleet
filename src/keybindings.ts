@@ -11,19 +11,20 @@ export const commandChoices=[
 ] as const;
 export type BindableCommand=typeof commandChoices[number][0];
 export type UserKeybindings=Partial<Record<BindableCommand,string>>;
-export const shortcutChoices=Array.from("abcdefghijklmnopqrstuvwxyz",letter=>["Mod-Alt-"+letter,"Mod-Alt-Shift-"+letter]).flat();
+export const shortcutChoices=Array.from("abcdefhijklmnopqrstuvwxyz",letter=>["Mod-Alt-"+letter,"Mod-Alt-Shift-"+letter]).flat();
 export function validateKeybindings(value:unknown):asserts value is UserKeybindings{
  if(!value||typeof value!=="object"||Array.isArray(value))throw Error("keybindings 必须为对象");
  const used=new Set<string>();
  for(const [id,key] of Object.entries(value)){
   if(!commandChoices.some(([command])=>command===id))throw Error("不支持的命令："+id);
-  if(typeof key!=="string"||!shortcutChoices.includes(key))throw Error("快捷键使用 Mod-Alt-a 到 z，或 Mod-Alt-Shift-a 到 z");
+  if(typeof key!=="string"||!shortcutChoices.includes(key))throw Error("快捷键使用 Mod-Alt-a 到 z，或 Mod-Alt-Shift-a 到 z（保留 g 给转到行）");
   if(used.has(key))throw Error("快捷键冲突："+key);
   used.add(key);
  }
 }
 export function matchUserShortcut(event:KeyboardEvent,key:string,mac:boolean):boolean{
  if(event.isComposing||event.keyCode===229||event.repeat||event.getModifierState("AltGraph"))return false;
+ const letter=mac&&/^Key[A-Z]$/.test(event.code)?event.code.slice(3).toLowerCase():event.key.toLowerCase();
  return event.altKey&&event.shiftKey===key.includes("-Shift-")&&
-  (mac?event.metaKey&&!event.ctrlKey:event.ctrlKey&&!event.metaKey)&&event.key.toLowerCase()===key.slice(-1);
+  (mac?event.metaKey&&!event.ctrlKey:event.ctrlKey&&!event.metaKey)&&letter===key.slice(-1);
 }

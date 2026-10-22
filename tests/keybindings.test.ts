@@ -3,7 +3,7 @@ import {validateKeybindings,matchUserShortcut,commandChoices} from "../src/keybi
 test("finite additional shortcuts reject ambiguity and duplicates",()=>{
  validateKeybindings({});validateKeybindings({"editor.save":"Mod-Alt-s","workbench.settings":"Mod-Alt-Shift-s"});
  assert.equal(new Set(commandChoices.map(c=>c[0])).size,commandChoices.length);
- for(const value of [null,[],{"editor.save":null},{"editor.save":"Ctrl-s"},{"editor.save":"Mod-Alt-S"},{"editor.save":"Mod-Alt-s","editor.undo":"Mod-Alt-s"},{"shell.run":"Mod-Alt-a"}])assert.throws(()=>validateKeybindings(value));
+ for(const value of [null,[],{"editor.save":null},{"editor.save":"Ctrl-s"},{"editor.save":"Mod-Alt-S"},{"editor.save":"Mod-Alt-g"},{"editor.save":"Mod-Alt-Shift-g"},{"editor.save":"Mod-Alt-s","editor.undo":"Mod-Alt-s"},{"shell.run":"Mod-Alt-a"}])assert.throws(()=>validateKeybindings(value));
 });
 test("matching respects platforms, composition, AltGraph and repeat",()=>{
  const base={key:"s",altKey:true,ctrlKey:true,metaKey:false,shiftKey:false,isComposing:false,keyCode:83,repeat:false,getModifierState:()=>false};
@@ -11,4 +11,5 @@ test("matching respects platforms, composition, AltGraph and repeat",()=>{
  assert.equal(matches({}),true);assert.equal(matches({ctrlKey:false,metaKey:true},true),true);
  for(const changes of [{isComposing:true},{keyCode:229},{repeat:true},{shiftKey:true},{metaKey:true},{getModifierState:()=>true}])assert.equal(matches(changes),false);
  assert.equal(matches({},true),false);
+ assert.equal(matches({key:"ß",code:"KeyS",ctrlKey:false,metaKey:true},true),true);
 });
