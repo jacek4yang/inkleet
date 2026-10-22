@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InkLeet editor settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "formatOnSave",
+    "overrides"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "vim": {
+      "type": "boolean",
+      "default": false
+    },
+    "tabSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8,
+      "default": 4
+    },
+    "formatOnSave": {
+      "type": "boolean",
+      "default": true
+    },
+    "overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "python3": {
+          "type": "boolean"
+        },
+        "rust": {
+          "type": "boolean"
+        },
+        "golang": {
+          "type": "boolean"
+        },
+        "c": {
+          "type": "boolean"
+        },
+        "cpp": {
+          "type": "boolean"
+        },
+        "java": {
+          "type": "boolean"
+        }
+      }
+    },
+    "theme": {
+      "enum": [
+        "light",
+        "dark",
+        "system"
+      ],
+      "default": "light"
+    },
+    "fontSize": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 32,
+      "default": 14
+    },
+    "lineHeight": {
+      "type": "number",
+      "minimum": 1.2,
+      "maximum": 2.4,
+      "default": 1.75
+    },
+    "wordWrap": {
+      "type": "boolean",
+      "default": false
+    },
+    "lineNumbers": {
+      "type": "boolean",
+      "default": true
+    },
+    "indentGuides": {
+      "type": "boolean",
+      "default": true
+    },
+    "highlightActiveLine": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

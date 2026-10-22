@@ -1,3 +1,4 @@
+import {editorSyntaxTheme} from "./editor-syntax-theme";
 import {editorJumpExtensions,moveEditorJump,settleEditorJump} from "./editor-jump-history";
 import {navigationBindings} from "./command-registry";
 import {snippetSession,moveSnippetField,endSnippet,discardSnippet,snippetChoiceOpen,moveSnippetChoice,acceptSnippetChoice,settleSnippetForAction} from "./snippet-session";
@@ -38,7 +39,7 @@ const theme = EditorView.theme({
   ".cm-content": { padding: "8px 0", caretColor: "var(--accent)" },
   ".cm-line": { padding: "0 8px" },
   ".cm-gutters": { backgroundColor: "var(--surface-editor)", color: "var(--muted)", border: "none" },
-  ".cm-activeLineGutter, .cm-activeLine": { backgroundColor: "var(--active-line)" },
+  ".cm-activeLineGutter, .cm-activeLine": { backgroundColor: "var(--editor-active-line,var(--active-line))" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": { backgroundColor: "var(--selection)" },
   "&.cm-focused": { outline: "none" },
   ".cm-cursor": { borderLeftColor: "var(--accent)" },
@@ -58,6 +59,7 @@ export type EditorLanguageStatus={owner:string;text:string};
 type Props = {
   statusOwner?:string;
   vimEnabled?:boolean;
+  wordWrap?:boolean;showIndentGuides?:boolean;
   tabSize?:number;
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void; onStatus?: (status: EditorLanguageStatus) => void; reconnectToken?: number; onSettings?: () => void;
@@ -65,7 +67,8 @@ type Props = {
   formatting?: {epoch?:()=>number;ready?:(save:boolean)=>boolean;enabled:boolean;save:(text:string)=>Promise<boolean>;report:(message:string)=>void};
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
-export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, statusOwner, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
+export function CodeEditor({ vimEnabled=false, tabSize=4, wordWrap=false, showIndentGuides=true, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, statusOwner, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
+  const wrapSlot=useRef(new Compartment()),guideSlot=useRef(new Compartment());
   const formatOptions=useRef(formatting);formatOptions.current=formatting;
   const saveCallback=useRef(onSave),saveReady=useRef(onSaveReady);saveCallback.current=onSave;saveReady.current=onSaveReady;
   const host = useRef<HTMLDivElement>(null);
@@ -107,7 +110,7 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language,
     const commandHost=footer?document.createElement("div"):null;
     if(commandHost){commandHost.className="vim-command-host";footer!.appendChild(commandHost);}
     const extensions = [...editorJumpExtensions,editorCommands(commands), ...(debug?.extensions ?? []),vimSlot.current.of(vimEnabled?vimEditing(save):[]),
-      basicSetup, snippetSession, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), ...(language==="markdown"?[]:[indentGuides]),
+      basicSetup, editorSyntaxTheme, snippetSession, syntax(language), theme, ...(commandHost?[panels({bottomContainer:commandHost})]:[]), editorStatus(language,documentKey,commandHost), guideSlot.current.of(language!=="markdown"&&showIndentGuides?indentGuides:[]),
       ...(intelligence&&formatting?formatOnSave({epoch:()=>formatOptions.current?.epoch?.()??0,ready:save=>formatOptions.current?.ready?.(save)??true,enabled:()=>!!formatOptions.current?.enabled,save:text=>formatOptions.current?.save(text)??Promise.resolve(false),request:text=>intelligence.format(text),report:message=>formatOptions.current?.report(message)}):[]),
       tabSizeSlot.current.of(EditorState.tabSize.of(tabSize)),
       indentUnit.of(language === "golang" ? "\t" : language === "markdown" ? "  " : "    "),
@@ -131,7 +134,7 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language,
       EditorView.updateListener.of(update => {
         if (update.docChanged) callback.current(snapshotText(update.state.doc));
       }),
-      ...(language === "markdown" ? [EditorView.lineWrapping] : []),
+      wrapSlot.current.of(language==="markdown"||wordWrap?EditorView.lineWrapping:[]),
     ];
     const cached = sessions.take(documentKey);
     // 外部正文变化时重新建状态，不能将另一个版本的撤销历史套上去。
@@ -157,9 +160,10 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, documentKey, language,
       commandHost?.remove();
     };
   }, [documentKey, language, label, connection, metadata, statusOwner]);
+  useLayoutEffect(()=>{const view=liveView.current;if(view)view.dispatch({effects:[wrapSlot.current.reconfigure(language==="markdown"||wordWrap?EditorView.lineWrapping:[]),guideSlot.current.reconfigure(language!=="markdown"&&showIndentGuides?indentGuides:[])]});},[wordWrap,showIndentGuides,language]);
   // Display-only reconfiguration keeps the view, document, history and LSP owner.
   useLayoutEffect(()=>{const view=liveView.current;if(view&&view.state.tabSize!==tabSize)view.dispatch({effects:tabSizeSlot.current.reconfigure(EditorState.tabSize.of(tabSize))});},[tabSize]);
   useLayoutEffect(()=>{const view=liveView.current;if(view){endSnippet(view);view.dispatch({effects:vimSlot.current.reconfigure(vimEnabled?vimEditing(view=>vimSave.current(view)):[])});}},[vimEnabled]);
   useLayoutEffect(() => { const active = debugView.current; if (active) active.stopped(active.view, pausedPosition); }, [pausedPosition, documentKey, connection, language, label, metadata]);
-  return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} vimEnabled={vimEnabled} tabSize={tabSize} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
+  return <><div className="editor-host" ref={host} />{source && <SourceViewer source={source} vimEnabled={vimEnabled} tabSize={tabSize} wordWrap={wordWrap} showIndentGuides={showIndentGuides} onClose={() => { setSource(null); host.current?.querySelector<HTMLElement>(".cm-content")?.focus(); }} />}</>;
 }

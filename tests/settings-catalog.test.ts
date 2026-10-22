@@ -23,17 +23,17 @@ function directIds(query: string) {
   return searchSettingsCatalog(createSettingsCatalog(actions()), query).rows.filter(result => result.match === "direct").map(result => result.row.id);
 }
 
-test("catalog has only eleven real preferences and supplied App actions", () => {
-  assert.equal(preferenceRows.length, 11);
-  assert.equal(preferenceRows.filter(row => row.owner === "editor-settings").length, 9);
+test("catalog has only implemented real preferences and supplied App actions", () => {
+  assert.equal(preferenceRows.length, 18);
+  assert.equal(preferenceRows.filter(row => row.owner === "editor-settings").length, 16);
   assert.equal(preferenceRows.filter(row => row.owner === "download-settings").length, 2);
   assert.deepEqual(preferenceRows.filter(row => row.kind === "language-format").map(row => row.id), Object.values(languageFormatSettingIds));
   const catalog = createSettingsCatalog(actions());
-  assert.equal(catalog.length, 21);
+  assert.equal(catalog.length, 28);
   assert.equal(new Set(catalog.map(row => row.id)).size, catalog.length);
   assert.equal(catalog.filter(row => row.category === "debug").length, 0);
   assert.deepEqual(settingsCategories.map(category => category.id), ["editor", "environment", "downloads", "files", "notes", "debug"]);
-  assert.equal(createSettingsCatalog([]).length, 11);
+  assert.equal(createSettingsCatalog([]).length, 18);
 });
 
 test("defaults and reset metadata describe the existing owners", () => {
@@ -147,8 +147,8 @@ test("blank, unmatched and category-scoped searches have honest counts", () => {
   const catalog = createSettingsCatalog(actions());
   for (const query of ["", " \n\t "]) {
     const result = searchSettingsCatalog(catalog, query);
-    assert.equal(result.directMatchCount, 21);
-    assert.equal(Object.values(result.categoryCounts).reduce((a, b) => a + b, 0), 21);
+    assert.equal(result.directMatchCount, 28);
+    assert.equal(Object.values(result.categoryCounts).reduce((a, b) => a + b, 0), 28);
   }
   const missing = searchSettingsCatalog(catalog, "not-a-real-setting");
   assert.equal(missing.directMatchCount, 0);

@@ -106,6 +106,7 @@ export async function runTabSizeUI(browser,fixtures,openSettings){
   await width().selectOption("2");
   const reads=await page.evaluate(()=>window.__tabSizeTest.reads);
   await dialog.getByRole("button",{name:"重新读取",exact:true}).click();
+  await dialog.getByRole("alertdialog",{name:"放弃设置草稿并重新读取",exact:true}).getByRole("button",{name:"放弃草稿并读取",exact:true}).click();
   await page.waitForFunction(expected=>window.__tabSizeTest.reads===expected,reads+1);
   await page.waitForFunction(()=>document.querySelector('[aria-label="Tab 显示宽度"]')?.value==="8");
   assert.deepEqual(await page.evaluate(()=>window.__tabSizeTest.tabChanges),{code:1,notes:1},"reload of the same preference does not reconfigure again");
@@ -167,6 +168,7 @@ export async function runTabSizeUI(browser,fixtures,openSettings){
    localStorage.setItem("inkleet-tab-display-fixture",JSON.stringify(s.settings));
   });
   await dialog.getByRole("button",{name:"重新读取",exact:true}).click();
+  await dialog.getByRole("alertdialog",{name:"放弃设置草稿并重新读取",exact:true}).getByRole("button",{name:"放弃草稿并读取",exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('[aria-label="Tab 显示宽度"]')?.value==="4");
   assert.equal(await page.evaluate(()=>window.__tabSizeTest.settings.settings.tabSize),4,"fixture reloads a valid explicit default");
   const explicitFourBefore=await page.evaluate(()=>({writes:window.__tabSizeTest.writes.length,commits:window.__tabSizeTest.commits}));

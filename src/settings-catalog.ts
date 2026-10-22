@@ -1,5 +1,5 @@
 import { languages, type Language } from "./domain.ts";
-import { defaultEditorSettings } from "./format-settings.ts";
+import { defaultEditorSettings,editorOptions,type EditorOptionDefinition,type EditorOptionKey } from "./format-settings.ts";
 
 // This finite catalog describes existing owners. IDs are search/display keys,
 // never JSON paths or commands. It does not render, load, save, or run actions.
@@ -12,7 +12,7 @@ export const settingsCategories = [
   { id: "debug", label: "运行与调试", aliases: ["run", "debug"] },
 ] as const;
 export type SettingsCategory = typeof settingsCategories[number]["id"];
-export type SettingsGroup = "behavior" | "formatting" | "proxy" | "actions";
+export type SettingsGroup = "behavior" | "appearance" | "formatting" | "proxy" | "actions";
 export type ProxyMode = "system" | "direct" | "custom";
 export type DownloadProxyDraft = Readonly<{ mode: ProxyMode; url: string }>;
 export const DEFAULT_TAB_SIZE = 4;
@@ -27,7 +27,7 @@ export const languageFormatSettingIds = {
   java: "editor.formatOnSave.java",
 } as const satisfies Record<Language, string>;
 export type LanguageFormatSettingId = typeof languageFormatSettingIds[Language];
-export type EditorSettingId = "editor.vim" | "editor.tabSize" | "editor.formatOnSave" | LanguageFormatSettingId;
+export type EditorSettingId = `editor.${EditorOptionKey}` | "editor.vim" | "editor.tabSize" | "editor.formatOnSave" | LanguageFormatSettingId;
 export type ProxySettingId = "downloads.proxy.mode" | "downloads.proxy.url";
 
 interface RowBase {
@@ -42,6 +42,7 @@ interface EditorRowBase extends RowBase {
   readonly category: "editor";
 }
 export type EditorSettingRow =
+  | (EditorRowBase & {readonly id:`editor.${EditorOptionKey}`;readonly kind:"editor-option";readonly option:EditorOptionDefinition;readonly defaultValue:string|number|boolean;readonly reset:"remove-option"})
   | (EditorRowBase & { readonly id: "editor.vim"; readonly kind: "boolean"; readonly defaultValue: boolean; readonly reset: "vim-default" })
   | (EditorRowBase & { readonly id: "editor.tabSize"; readonly kind: "integer"; readonly defaultValue: number; readonly min: 1; readonly max: 8; readonly reset: "remove-tab-size" })
   | (EditorRowBase & { readonly id: "editor.formatOnSave"; readonly kind: "boolean"; readonly defaultValue: boolean; readonly reset: "format-default" })
@@ -73,6 +74,7 @@ const languageRows: readonly EditorSettingRow[] = languages.map<EditorSettingRow
   kind: "language-format", language: language.id, defaultValue: "inherit", reset: "remove-language-override",
 }));
 export const preferenceRows: readonly PreferenceRow[] = [
+  ...editorOptions.map<EditorSettingRow>((option,index)=>({id:`editor.${option.key}`,owner:"editor-settings",category:"editor",group:option.group,order:21+index,label:option.label,aliases:[option.key,option.description,"appearance","编辑显示"],kind:"editor-option",option,defaultValue:option.defaultValue,reset:"remove-option"})),
   { id: "editor.vim", owner: "editor-settings", category: "editor", group: "behavior", order: 10,
     label: "Vim", aliases: ["vim", "vim mode", "modal editing", "模式编辑"], kind: "boolean", defaultValue: defaultEditorSettings.vim ?? false, reset: "vim-default" },
   { id: "editor.tabSize", owner: "editor-settings", category: "editor", group: "behavior", order: 20,

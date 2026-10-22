@@ -6,20 +6,51 @@ use crate::storage;
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all="camelCase")]
-pub struct Document { pub version:u32, #[serde(default)] pub vim:bool, #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_tab_size")] pub tab_size:Option<u8>, pub format_on_save:bool, pub overrides:BTreeMap<String,bool> }
-// Deserialize the present value directly as u8: explicit null is invalid.
-// Missing fields use the serde default (None), with effective display width 4.
-fn deserialize_tab_size<'de,D>(deserializer:D)->Result<Option<u8>,D::Error>
-where D:serde::Deserializer<'de>{
-    let value=u8::deserialize(deserializer)?;
-    if !(1..=8).contains(&value){
-        return Err(serde::de::Error::custom("tabSize must be an integer from 1 to 8"));
-    }
-    Ok(Some(value))
+pub struct Document { #[serde(deserialize_with="deserialize_version")] pub version:u32, #[serde(default)] pub vim:bool, #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_tab_size")] pub tab_size:Option<u8>, pub format_on_save:bool, #[serde(deserialize_with="deserialize_overrides")] pub overrides:BTreeMap<String,bool>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub theme:Option<Theme>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_font_size")] pub font_size:Option<u8>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub line_height:Option<f64>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub word_wrap:Option<bool>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub line_numbers:Option<bool>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub indent_guides:Option<bool>,
+ #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub highlight_active_line:Option<bool>,
 }
-impl Default for Document{fn default()->Self{Self{version:1,vim:false,tab_size:None,format_on_save:true,overrides:BTreeMap::new()}}}
+#[derive(Clone,Serialize,Deserialize)]
+#[serde(rename_all="lowercase")]
+pub enum Theme{Light,Dark,System}
+fn deserialize_present<'de,D,T>(deserializer:D)->Result<Option<T>,D::Error> where D:serde::Deserializer<'de>,T:Deserialize<'de>{
+ T::deserialize(deserializer).map(Some)
+}
+fn deserialize_overrides<'de,D>(deserializer:D)->Result<BTreeMap<String,bool>,D::Error> where D:serde::Deserializer<'de>{
+ struct UniqueMap;
+ impl<'de> serde::de::Visitor<'de> for UniqueMap{
+  type Value=BTreeMap<String,bool>;
+  fn expecting(&self,f:&mut std::fmt::Formatter)->std::fmt::Result{write!(f,"unique language override keys")}
+  fn visit_map<A:serde::de::MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+   let mut out=BTreeMap::new();
+   while let Some((key,value))=map.next_entry::<String,bool>()?{
+    if out.insert(key,value).is_some(){return Err(serde::de::Error::custom("duplicate language override"));}
+   }
+   Ok(out)
+  }
+ }
+ deserializer.deserialize_map(UniqueMap)
+}
+// Match JSON integer semantics across the frontend, JSON Schema and disk parser.
+fn deserialize_integer<'de,D>(deserializer:D,min:u32,max:u32)->Result<u32,D::Error>
+where D:serde::Deserializer<'de>{
+ let value=serde_json::Number::deserialize(deserializer)?.as_f64().ok_or_else(||serde::de::Error::custom("expected an integer"))?;
+ if !value.is_finite()||value.fract()!=0.0||value<f64::from(min)||value>f64::from(max){return Err(serde::de::Error::custom("integer outside allowed range"));}
+ Ok(value as u32)
+}
+fn deserialize_version<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<u32,D::Error>{deserialize_integer(deserializer,1,1)}
+fn deserialize_font_size<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<u8>,D::Error>{deserialize_integer(deserializer,10,32).map(|v|Some(v as u8))}
+fn deserialize_tab_size<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<Option<u8>,D::Error>{deserialize_integer(deserializer,1,8).map(|v|Some(v as u8))}
+impl Default for Document{fn default()->Self{Self{version:1,vim:false,tab_size:None,format_on_save:true,overrides:BTreeMap::new(),theme:None,font_size:None,line_height:None,word_wrap:None,line_numbers:None,indent_guides:None,highlight_active_line:None}}}
 impl Document{
     fn validated(&self)->Result<(),String>{
+        if self.font_size.is_some_and(|v|!(10..=32).contains(&v))||self.line_height.is_some_and(|v|!v.is_finite()||!(1.2..=2.4).contains(&v)){return Err("编辑器字号或行高超出允许范围".into());}
+
         if self.tab_size.is_some_and(|value|!(1..=8).contains(&value)){
             return Err("编辑器 Tab 显示宽度必须是 1 到 8 的整数".into());
         }
@@ -180,4 +211,40 @@ mod symlink_regression_tests {
         assert_eq!(store.get().unwrap().revision,saved.revision);
         assert_eq!(std::fs::read_to_string(&target).unwrap(),"original");
     }
+}
+
+#[cfg(test)]mod appearance_tests{
+ use super::*;
+ #[test]fn accepts_options_and_rejects_null_unknown_duplicates(){
+  let text=r#"{"version":1,"formatOnSave":true,"overrides":{"rust":false},"theme":"dark","fontSize":18,"lineHeight":1.6,"wordWrap":true,"lineNumbers":false,"indentGuides":false,"highlightActiveLine":false}"#;
+  let value:Document=serde_json::from_str(text).unwrap();value.validated().unwrap();
+  assert_eq!(value.font_size,Some(18));assert!(!value.vim);
+  for bad in [
+   r#"{"version":1,"formatOnSave":true,"overrides":{"rust":true,"rust":false}}"#,
+   r#"{"version":1,"formatOnSave":true,"overrides":{"rust":true,"\u0072ust":false}}"#,
+   r#"{"version":1,"formatOnSave":true,"overrides":{},"theme":"unknown"}"#,
+   r#"{"version":1,"formatOnSave":true,"overrides":{},"theme":null}"#,
+   r#"{"version":1,"formatOnSave":true,"overrides":{},"wordWrap":null}"#,
+   r#"{"version":1,"formatOnSave":true,"overrides":{},"fontSize":null}"#,
+   r#"{"version":1,"formatOnSave":true,"overrides":{},"lineHeight":null}"#,
+   r#"{"version":1,"formatOnSave":true,"overrides":{},"typo":true}"#
+  ]{assert!(serde_json::from_str::<Document>(bad).is_err(),"{bad}");}
+ }
+ #[test]fn invalid_ranges_keep_disk_and_backup_unchanged(){
+  let dir=tempfile::tempdir().unwrap();let store=EditorSettings::new(dir.path().canonicalize().unwrap());
+  let original=store.save(Document::default(),None).unwrap();
+  let mut bad=Document::default();bad.font_size=Some(9);assert!(store.save(bad,original.revision.clone()).is_err());
+  let mut bad=Document::default();bad.line_height=Some(5.0);assert!(store.save(bad,original.revision.clone()).is_err());
+  assert_eq!(store.get().unwrap().revision,original.revision);
+  assert!(!dir.path().join("editor-settings.previous.json").exists());
+ }
+}
+
+#[cfg(test)]mod integer_token_tests{
+ use super::*;
+ #[test]fn accepts_integral_decimal_and_exponent_tokens(){
+  let parsed:Document=serde_json::from_str(r#"{"version":1e0,"formatOnSave":true,"overrides":{},"fontSize":14.0,"tabSize":4e0}"#).unwrap();
+  assert_eq!(parsed.version,1);assert_eq!(parsed.font_size,Some(14));assert_eq!(parsed.tab_size,Some(4));
+  assert!(parsed.validated().is_ok());
+ }
 }

@@ -1,14 +1,14 @@
 import { languages } from "./domain.ts";
-import { defaultEditorSettings, type EditorSettings } from "./format-settings.ts";
+import { defaultEditorSettings,editorOptions, type EditorSettings } from "./format-settings.ts";
 import { DEFAULT_TAB_SIZE, defaultDownloadProxy, languageFormatSettingIds, type DownloadProxyDraft, type EditorSettingId, type ProxySettingId } from "./settings-catalog.ts";
 
 export type EditorSettingState =
   | Readonly<{ status: "unknown" }>
   | Readonly<{
       status: "known";
-      value: boolean | number | "inherit";
-      effectiveValue: boolean | number;
-      defaultValue: boolean | number | "inherit";
+      value: boolean | number | string;
+      effectiveValue: boolean | number | string;
+      defaultValue: boolean | number | string;
       // Default concerns configuration intent. An explicit language override is
       // nondefault even when its current effective value equals the global one.
       isDefault: boolean;
@@ -40,6 +40,8 @@ export function readEditorSettingState(settings: EditorSettings | null, id: Edit
     return { status: "known", value, effectiveValue: value, defaultValue, isDefault: value === defaultValue,
       hasExplicitValue: true, hasLanguageOverride: false, canReset: value !== defaultValue };
   }
+  const option=editorOptions.find(option=>"editor."+option.key===id);
+  if(option){const explicit=settings[option.key],value=explicit??option.defaultValue;return {status:"known",value,effectiveValue:value,defaultValue:option.defaultValue,isDefault:value===option.defaultValue,hasExplicitValue:explicit!==undefined,hasLanguageOverride:false,canReset:explicit!==undefined};}
   const override = settings.overrides[overrideLanguage(id)];
   return { status: "known", value: override ?? "inherit", effectiveValue: override ?? settings.formatOnSave, defaultValue: "inherit",
     isDefault: override === undefined, hasExplicitValue: override !== undefined, hasLanguageOverride: override !== undefined, canReset: override !== undefined };
@@ -55,6 +57,8 @@ export function resetEditorSetting(settings: EditorSettings, id: EditorSettingId
     return next;
   }
   if (id === "editor.formatOnSave") return { ...settings, formatOnSave: defaultEditorSettings.formatOnSave };
+  const option=editorOptions.find(option=>"editor."+option.key===id);
+  if(option){const next={...settings};delete next[option.key];return next;}
   const overrides = { ...settings.overrides };
   delete overrides[overrideLanguage(id)];
   return { ...settings, overrides };
@@ -72,7 +76,7 @@ export type EditorDraftState =
 export function inspectEditorDraft(saved: EditorSettings | null, draft: EditorSettings | null): EditorDraftState {
   if (!saved || !draft) return { status: "unknown" };
   const dirty = saved.vim !== draft.vim || saved.tabSize !== draft.tabSize || saved.formatOnSave !== draft.formatOnSave
-    || languages.some(language => saved.overrides[language.id] !== draft.overrides[language.id]);
+    || languages.some(language => saved.overrides[language.id] !== draft.overrides[language.id]) || editorOptions.some(option=>saved[option.key]!==draft[option.key]);
   return { status: "known", dirty, needsTabSizeCanonicalization: draft.tabSize === DEFAULT_TAB_SIZE };
 }
 

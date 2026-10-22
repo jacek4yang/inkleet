@@ -1,3 +1,4 @@
+import {useEditorAppearance} from "./editor-appearance";
 import {CopyAIContext} from "./copy-ai-context";
 import {buildAIContext} from "./ai-context";
 import {statementText} from "./ai-context-html";
@@ -56,6 +57,7 @@ function App() {
   const [settings, setSettings] = useState<SettingsSection | null>(null);
   const [manual, setManual] = useState(false);
   const [editorSettings,setEditorSettings]=useState<EditorSettingsSnapshot|null>(null);
+  useEditorAppearance(editorSettings?.settings??null);
   const settingsVersion=useRef(0);
   const [formatConfigError,setFormatConfigError]=useState("");
   const [formatMessage,setFormatMessage]=useState("");
@@ -126,10 +128,11 @@ function App() {
       setFormatConfigError(String(error));throw error;
     }
   }
-  async function saveEditorSettings(settings:EditorSettings){
+  async function saveEditorSettings(settings:EditorSettings,expected:string|null):Promise<EditorSettingsSnapshot|null>{
     const token=++settingsVersion.current;
-    const saved=validateEditorSettings(await invoke("save_editor_settings",{settings,expected:editorSettings?.revision??null}));
-    if(token===settingsVersion.current){setEditorSettings(saved);setFormatConfigError("");}
+    const saved=validateEditorSettings(await invoke("save_editor_settings",{settings,expected}));
+    if(token===settingsVersion.current){setEditorSettings(saved);setFormatConfigError("");return saved;}
+    return null;
   }
   function currentText(target:SaveTarget){return target.kind==="notes"?notes.current.get(target.problem)??"":documents.current.get(target.key)?.code??"";}
   function storageKey(target:SaveTarget){return target.kind==="notes"?target.problem+"/notes":target.key;}
@@ -452,7 +455,7 @@ function App() {
         persisted.current.set(key,isTauri()?text:null);clean.current.set(key,editorText(text));dirty.current.delete(key);codeSignals.current.notify(key);selectSolution(entry.id);
       }} />}{dirty.current.has(activeKey)&&<span className="unsaved-mark" role="img" aria-label="源码未保存" title="未保存" />}</div><div className="actions"><CopyAIContext key={activeKey} disabled={editorLoading} snapshot={copyContextSnapshot}/><IconButton icon="save" label="保存源码" shortcut="Ctrl+S" disabled={editorLoading} onClick={()=>sourceSave.current?.()} /><IconButton icon="terminal" label="本地" disabled={editorLoading || !["python3", "golang", "cpp", "c", "rust", "java"].includes(language) || !isTauri()} aria-expanded={localRunner} onClick={() => {setLocalOpened(true);setLocalRunner(v => !v);}} title="本地运行与调试" /><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} onClick={judge.run} title={judgeDisabledReason||"将当前代码与用例发送到中国站运行"}>运行</button><button disabled={editorLoading || !identity || !problem?.official || judge.busy || judge.blocked} className="primary" onClick={judge.submit} title={judgeDisabledReason||"确认后正式提交到中国站"}>提交</button></div></div>
       {problem && baseTemplate===null && sourceEmpty && <p className="error" role="alert">官方模板不可用</p>}
-      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor vimEnabled={editorSettings?.settings.vim??false} tabSize={editorSettings?.settings.tabSize??4} onSaveReady={save=>{sourceSave.current=save;}} formatting={{epoch:()=>formatEpoch.current,ready:(save)=>!shuttingDown.current&&(!save||(!queue.current.failed(activeKey)&&!conflict&&!recovery)),enabled:formatEnabled(editorSettings?.settings??null,language),save:text=>saveSnapshot("code",text),report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatusSnapshot} statusOwner={languageStatusOwner} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { if(sameBreakpointLines(points.current.get(activeKey)??[],lines))return;points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
+      {!problem ? <div className="workspace-empty" aria-label="尚未打开题目" /> : editorLoading ? <p className="loading">正在读取草稿…</p> : <CodeEditor wordWrap={editorSettings?.settings.wordWrap??false} showIndentGuides={editorSettings?.settings.indentGuides??true} vimEnabled={editorSettings?.settings.vim??false} tabSize={editorSettings?.settings.tabSize??4} onSaveReady={save=>{sourceSave.current=save;}} formatting={{epoch:()=>formatEpoch.current,ready:(save)=>!shuttingDown.current&&(!save||(!queue.current.failed(activeKey)&&!conflict&&!recovery)),enabled:formatEnabled(editorSettings?.settings??null,language),save:text=>saveSnapshot("code",text),report:setFormatMessage}} onSettings={() => setSettings("environment")} onStatus={setLanguageStatusSnapshot} statusOwner={languageStatusOwner} reconnectToken={reconnectToken} key={activeKey + ":" + reload} documentKey={activeKey} language={language} metadata={problem.official?.metaData ?? '{"inkleetFunctionStyle":"free","params":[]}' } label="代码编辑器" breakpoints={points.current.get(activeKey) ?? []} onBreakpoints={lines => { if(sameBreakpointLines(points.current.get(activeKey)??[],lines))return;points.current.set(activeKey, lines); updatePoints(n => n + 1); }} pausedPosition={paused.key === activeKey ? paused.position : null} value={doc.code} onChange={text => edit("code", text)} />}
       {localOpened && problem && <LocalRunner onReveal={()=>setLocalRunner(true)} hidden={!localRunner} onHelp={() => setManual(true)} breakpoints={points.current.get(activeKey) ?? []} onPauseLine={position => setPaused({ key: activeKey, position })} key={activeKey} documentKey={activeKey} codeSource={codeSource} language={language} title={problem.title} metadata={localMetadata(problem.official.metaData ?? "", language, problem.official.codeSnippets?.find(s => s.langSlug === language)?.code)} sampleInput={problem.official.sampleTestCase ?? ""} exampleInputs={problem.official.exampleTestcases??""} onClose={() => {setLocalRunner(false);document.querySelector<HTMLElement>('.code-pane .cm-content')?.focus();}} />}
       {judge.panel}
     </section>

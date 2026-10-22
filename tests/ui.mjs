@@ -6,6 +6,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { runTabSizeUI } from "./tab-size-ui.mjs";
 import { runSettingsWorkbenchUI } from "./settings-workbench-ui.mjs";
+import {runSettingsJSONUI} from "./settings-json-ui.mjs";
 import { runNotesSaveUI } from "./notes-save-ui.mjs";
 import { runCaseInputUI } from "./case-input-ui.mjs";
 import { runNewlineSaveUI } from "./newline-save-ui.mjs";
@@ -1119,7 +1120,7 @@ try {
     assert.equal(await lspPage.locator(".lsp-references").count(),0,boundary+" invalidates the old references request");
     assert.equal(await focused.evaluate(node=>document.activeElement===node),true,boundary+" retains newer focus");
     assert.equal(await lspEditor.innerText(),"items = []\nitems.append(1)");
-    if(boundary==="settings")await lspPage.getByRole("button",{name:"关闭设置",exact:true}).click();
+    if(boundary==="settings"){await lspPage.getByRole("button",{name:"关闭设置",exact:true}).click();}
     if(boundary==="composition"){await lspEditor.evaluate(node=>node.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true})));await lspPage.waitForTimeout(100);}
   }
   await writeFile("evidence/REFERENCES_FOCUS_RESULT.txt","PASS: delayed references cannot steal Notes/settings focus, reappear after blur/refocus, or follow a stale caret; successful reference navigation remains covered. Mocked LSP, not native server acceptance.\n");
@@ -2174,6 +2175,7 @@ try {
         {version:1,vim:false,formatOnSave:true,overrides:{}});
     }
     await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
+    await settingsPage.getByRole("dialog",{name:"未保存的设置",exact:true}).getByRole("button",{name:"放弃修改并继续",exact:true}).click();
     dialog = await openSettings(settingsPage,"编辑器");
     check("closing discards unsaved editor settings", await settingsEditorValues(dialog), {vim:false,tabSize:"4",formatOnSave:true,pythonOverride:"inherit"});
     check("closing never saves the draft", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
@@ -2265,6 +2267,7 @@ try {
     }
     check("first-visit navigation never writes", await settingsWriteCounts(settingsPage), {editor:0,downloads:0});
     await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
+    await settingsPage.getByRole("dialog",{name:"未保存的设置",exact:true}).getByRole("button",{name:"放弃修改并继续",exact:true}).click();
     dialog = await openSettings(settingsPage,"下载");
     await dialog.getByLabel("连接方式",{exact:true}).waitFor();
     await settingsPage.waitForFunction(() => window.__settingsNavigationTest.reads.downloads >= 2);
@@ -2392,6 +2395,7 @@ try {
       await settingsPage.waitForFunction(()=>!document.querySelector('[aria-label="关闭设置"]').disabled);
       check("close recovers after settlement",await dialog.getByRole("button",{name:"关闭设置",exact:true}).isEnabled(),true);
       await dialog.getByRole("button",{name:"关闭设置",exact:true}).click();
+      if(outcome==="failure")await settingsPage.getByRole("dialog",{name:"未保存的设置",exact:true}).getByRole("button",{name:"放弃修改并继续",exact:true}).click();
       await dialog.waitFor({state:"hidden"});
       dialog=await openSettings(settingsPage,kind==="editor"?"编辑器":"下载");
       if(outcome==="success")check("reopen reads committed values",kind==="editor"?await settingsEditorValues(dialog):await settingsProxyValues(dialog),kind==="editor"?settingsEditorDraft:settingsProxyDraft);
@@ -2452,6 +2456,7 @@ try {
 
 
   await runSettingsWorkbenchUI(browser,openSettings);
+  await runSettingsJSONUI(browser,fixtures);
   await runTabSizeUI(browser,fixtures,openSettings);
 
   const solutionsPage=await testPage({viewport:{width:1440,height:900}});
@@ -2677,7 +2682,8 @@ try {
   assert.equal(await formatPage.evaluate(()=>window.__formatTest.settings.formatOnSave),false);
   await formatPage.evaluate(()=>{window.__formatTest.failSettings=false;});
   await formatPage.getByRole("button",{name:"重新读取",exact:true}).click();
-  await formatPage.waitForFunction(()=>!document.querySelector(".format-switch input").checked);
+  await formatPage.getByRole("alertdialog",{name:"放弃设置草稿并重新读取",exact:true}).getByRole("button",{name:"放弃草稿并读取",exact:true}).click();
+  await formatPage.waitForFunction(()=>!document.getElementById("setting-editor.formatOnSave").checked);
   await formatPage.getByRole("checkbox",{name:"保存时格式化",exact:true}).check();
   await formatPage.getByRole("button",{name:"保存设置",exact:true}).click();
   await formatPage.waitForFunction(()=>window.__formatTest.settings.formatOnSave===true);

@@ -1451,27 +1451,27 @@ try:
 
                 if group=="rust":
                     map_node='.debug-tree-node:has(> .debug-variable > button[aria-label="map"])'
-                    click('.debug-variable > button[aria-label="map"]')
+                    reveal_debug_control('.debug-variable > button[aria-label="map"]');click_debug_action('.debug-variable > button[aria-label="map"]')
                     wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashMap exposes two logical pairs")
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"], '+map_node+' button[aria-label="[raw]"]'}),"internal map layout hidden by default"
                     pair_buttons=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-variable > button'})
                     pair_names=[cmd("GET",f"/element/{pair[EID]}/attribute/aria-label") for pair in pair_buttons]
                     for pair_name in pair_names:
                         pair_selector=map_node+' > .debug-tree-children > .debug-tree-node:has(> .debug-variable > button[aria-label="'+pair_name+'"])'
-                        click(pair_selector+' > .debug-variable > button')
+                        reveal_debug_control(pair_selector+' > .debug-variable > button');click_debug_action(pair_selector+' > .debug-variable > button')
                         wait_for(lambda:cmd("GET",f"/element/{element(pair_selector+' > .debug-variable > button')}/attribute/aria-expanded")=="true","pair visibly expanded")
                         wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":pair_selector+' > .debug-tree-children > .debug-tree-node > .debug-variable > code'}))==2,"pair children loaded before next layout-dependent click")
                     def map_values():
                         nodes=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-tree-children > .debug-tree-node > .debug-variable > code'})
                         return sorted(cmd("GET",f"/element/{item[EID]}/property/textContent") for item in nodes)
                     wait_for(lambda:map_values()==["3","30","8","80"],"logical HashMap keys and values regardless of iteration order")
-                    click(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
                     wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
-                    click(map_node+' button[aria-label="[raw]"]')
+                    reveal_debug_control(map_node+' button[aria-label="[raw]"]');click_debug_action(map_node+' button[aria-label="[raw]"]')
                     wait_for(lambda:element(map_node+' button[aria-label="base"]'),"raw map retains implementation fields")
-                    click(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"]'}),"hide raw removes internal layout"
-                    click('.debug-variable > button[aria-label="set"]')
+                    reveal_debug_control('.debug-variable > button[aria-label="set"]');click_debug_action('.debug-variable > button[aria-label="set"]')
                     set_node='.debug-tree-node:has(> .debug-variable > button[aria-label="set"])'
                     wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":set_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashSet logical elements")
                     screenshot("rust-logical-collections-native.png")

@@ -23,7 +23,7 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
   editorSettingsError: string;
   formattingStatus: string;
   onReloadEditorSettings: EditorSettingsReload;
-  onSaveEditorSettings: (settings: EditorSettings) => Promise<void>;
+  onSaveEditorSettings: (settings: EditorSettings,expected:string|null) => Promise<EditorSettingsSnapshot|null>;
 }) {
   const [manual, setManual] = useState(false), [credits, setCredits] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null), search = useRef<HTMLInputElement>(null);
@@ -42,19 +42,22 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
     pendingOperations.current.add(token);setOperationPending(true);
     return ()=>{pendingOperations.current.delete(token);setOperationPending(pendingOperations.current.size>0);};
   },[]);
-  function close(){
+  const editorDirty=useRef<(()=>boolean)|null>(null),pendingExit=useRef<(()=>void)|null>(null);
+  const [confirmExit,setConfirmExit]=useState(false);
+  const registerDirty=useCallback((read:()=>boolean)=>{editorDirty.current=read;return()=>{if(editorDirty.current===read)editorDirty.current=null;};},[]);
+  function requestExit(action:()=>void){
     if(pendingOperations.current.size){setAnnouncement("设置正在保存或读取，请完成后关闭");return;}
-    onClose();
+    if(editorDirty.current?.()||downloadReport?.dirty){pendingExit.current=action;setConfirmExit(true);return;}
+    action();
   }
+  function close(){requestExit(onClose);}
   const lastErrors = useRef({ editor: "", downloads: "" });
-  const currentRevision = useRef(editorSettings?.revision ?? null);
-  currentRevision.current = editorSettings?.revision ?? null;
   const reportEditor = useCallback((report: EditorFormReport) => {
-    if (report.revision === currentRevision.current) setEditorReport(report);
+    setEditorReport(report);
   }, []);
   const reportDownloads = useCallback((report: DownloadFormReport) => setDownloadReport(report), []);
-  const currentEditor = editorReport?.revision === (editorSettings?.revision ?? null) ? editorReport : null;
-  const editorDraft = currentEditor?.draft ?? editorSettings?.settings ?? null;
+  const currentEditor = editorReport;
+  const editorDraft = currentEditor ? currentEditor.draft : editorSettings?.settings ?? null;
   const catalog = useMemo(() => createSettingsCatalog(actions), [actions]);
   const normalized = query.trim();
   const result = searchSettingsCatalog(catalog, query, {
@@ -117,6 +120,7 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
   });
   function onKeyDown(event: React.KeyboardEvent<HTMLDialogElement>) {
     if (manual || credits || event.nativeEvent.isComposing || event.target instanceof Element && event.target.closest("dialog") !== dialog.current) return;
+    if(event.target instanceof Element&&event.target.closest(".settings-json-editor"))return;
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
       event.preventDefault(); event.stopPropagation(); search.current?.focus(); search.current?.select();
     }
@@ -158,13 +162,24 @@ export function SettingsHub({ onClose, actions, initial = "editor", languageStat
         <div className="settings-owner-notices">{hiddenErrors.map(item => <div key={item.owner} className="settings-owner-error"><span title={item.error}>{item.label}</span><button type="button" data-settings-reveal={item.owner} onClick={() => reveal(item.owner)}>查看</button></div>)}</div>
         {result.issue ? <p className="muted settings-empty">{searchMessages[result.issue]}</p> : result.directMatchCount === 0 && result.modifiedState !== "unknown" ? <p className="muted settings-empty">没有匹配项</p> : null}
         {/* Fixed slots preserve the state/guard owners regardless of result order. */}
-        {visited.editor && <div hidden={!showEditor}><FormatSettings key={editorSettings?.revision ?? "unloaded"} snapshot={editorSettings} error={editorSettingsError} formattingStatus={formattingStatus} reload={onReloadEditorSettings} save={onSaveEditorSettings} visibleRows={editorRows} onReport={reportEditor} beginOperation={beginOperation} /></div>}
+        {visited.editor && <div hidden={!showEditor}><FormatSettings registerDirty={registerDirty} snapshot={editorSettings} error={editorSettingsError} formattingStatus={formattingStatus} reload={onReloadEditorSettings} save={onSaveEditorSettings} visibleRows={editorRows} onReport={reportEditor} beginOperation={beginOperation} /></div>}
         {visited.downloads && <div hidden={!showDownloads}><DownloadSettings visibleRows={downloadRows} addressMatch={addressMatch} onReport={reportDownloads} beginOperation={beginOperation} /></div>}
-        {visibleActions.length > 0 && <div className="settings-actions">{visibleActions.map(row => <button key={row.id} type="button" disabled={operationPending||row.action.disabled} data-action={row.action.dataAction} data-setting-action={row.action.id} data-setting-id={row.id} onClick={()=>{if(!pendingOperations.current.size)row.action.run();}}><Icon name={row.action.icon} /><span>{row.action.label}</span></button>)}</div>}
+        {visibleActions.length > 0 && <div className="settings-actions">{visibleActions.map(row => <button key={row.id} type="button" disabled={operationPending||row.action.disabled} data-action={row.action.dataAction} data-setting-action={row.action.id} data-setting-id={row.id} onClick={()=>requestExit(row.action.run)}><Icon name={row.action.icon} /><span>{row.action.label}</span></button>)}</div>}
         {!normalized && section === "environment" && <p className="settings-service" role="status">{languageStatus || "语言服务未启动"}</p>}
       </section>
     </div>
+    {confirmExit&&<DiscardSettingsDialog onKeep={()=>{pendingExit.current=null;setConfirmExit(false);}} onDiscard={()=>{const action=pendingExit.current;pendingExit.current=null;setConfirmExit(false);action?.();}}/>}
     {credits && <IconCredits onClose={() => setCredits(false)} />}
     {manual && <UserManual onClose={() => setManual(false)} />}
   </dialog>;
+}
+
+function DiscardSettingsDialog({onKeep,onDiscard}:{onKeep:()=>void;onDiscard:()=>void}){
+ const dialog=useRef<HTMLDialogElement>(null);
+ useEffect(()=>{dialog.current?.showModal();},[]);
+ return <dialog ref={dialog} className="settings-discard-dialog" aria-label="未保存的设置" onCancel={event=>{event.preventDefault();onKeep();}}>
+  <p>设置草稿尚未保存，关闭会丢弃这些修改。</p>
+  <button type="button" autoFocus onClick={onKeep}>继续编辑</button>
+  <button type="button" onClick={onDiscard}>放弃修改并继续</button>
+ </dialog>;
 }

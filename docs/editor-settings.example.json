@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "vim": false,
+  "tabSize": 4,
+  "formatOnSave": true,
+  "overrides": {},
+  "theme": "light",
+  "fontSize": 14,
+  "lineHeight": 1.75,
+  "wordWrap": false,
+  "lineNumbers": true,
+  "indentGuides": true,
+  "highlightActiveLine": true
+}

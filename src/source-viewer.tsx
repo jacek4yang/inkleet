@@ -1,3 +1,4 @@
+import {editorSyntaxTheme} from "./editor-syntax-theme";
 import React,{useLayoutEffect,useRef,useState} from "react";
 import {Compartment,EditorSelection,EditorState,Prec} from "@codemirror/state";
 import {EditorView,keymap} from "@codemirror/view";
@@ -17,8 +18,8 @@ function Icon({kind}:{kind:"back"|"forward"|"close"|"return"}){
  const d={back:"M10 3 5 8l5 5M5 8h9",forward:"m6 3 5 5-5 5M2 8h9",close:"m4 4 8 8M12 4l-8 8",return:"M6 3 2 7l4 4M2 7h8a4 4 0 0 1 4 4v2"}[kind];
  return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d}/></svg>;
 }
-export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4}:{source:Source;onClose:()=>void;vimEnabled?:boolean;tabSize?:number}){
- const dialog=useRef<HTMLDialogElement>(null),host=useRef<HTMLDivElement>(null),actions=useRef<{move:(direction:-1|1)=>void;close:()=>void;configure:(enabled:boolean)=>void;configureTabSize:(size:number)=>void}|null>(null);
+export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4,wordWrap=false,showIndentGuides=true}:{source:Source;onClose:()=>void;vimEnabled?:boolean;tabSize?:number;wordWrap?:boolean;showIndentGuides?:boolean}){
+ const dialog=useRef<HTMLDialogElement>(null),host=useRef<HTMLDivElement>(null),actions=useRef<{move:(direction:-1|1)=>void;close:()=>void;configure:(enabled:boolean)=>void;configureTabSize:(size:number)=>void;configureDisplay:(wrap:boolean,guides:boolean)=>void}|null>(null);
  const [info,setInfo]=useState({name:source.name,uri:source.uri,path:sourceDisplayPath(source.uri),declaration:source.declaration,back:true,forward:false,message:""});
  const closeCallback=useRef(onClose);closeCallback.current=onClose;
  useLayoutEffect(()=>{
@@ -30,8 +31,8 @@ export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4}:{source
   history.push({source,selection:{ranges:[initialSelection],mainIndex:0},scroll:{top:0,left:0}});
   let destroyed=false,generation=0,abort:AbortController|null=null,swapping=false,view:EditorView;
   let pendingRestore:{top:number;left:number}|null=null;
-  const vimSlot=new Compartment(),tabSizeSlot=new Compartment();
-  let displayTabSize=tabSize;
+  const vimSlot=new Compartment(),tabSizeSlot=new Compartment(),wrapSlot=new Compartment(),guideSlot=new Compartment();
+  let displayTabSize=tabSize,displayWrap=wordWrap,displayGuides=showIndentGuides;
   const vimExtensions=(enabled:boolean)=>enabled?[Prec.high(vim({status:false})),steadyVimCursor()]:[];
   let enabled=vimEnabled;
   const selection=()=>({ranges:view.state.selection.ranges.map(({anchor,head})=>({anchor,head})),mainIndex:view.state.selection.mainIndex});
@@ -80,7 +81,7 @@ export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4}:{source
   };
   function state(text:string,language:string,selected:EditorSelection){
    return EditorState.create({doc:text,selection:selected,extensions:[
-    basicSetup,indentGuides,tabSizeSlot.of(EditorState.tabSize.of(displayTabSize)),language==="java"?java():language==="golang"?go():language==="rust"?rust():language==="cpp"||language==="c"?cpp():python(),
+    basicSetup,editorSyntaxTheme,guideSlot.of(displayGuides?indentGuides:[]),wrapSlot.of(displayWrap?EditorView.lineWrapping:[]),tabSizeSlot.of(EditorState.tabSize.of(displayTabSize)),language==="java"?java():language==="golang"?go():language==="rust"?rust():language==="cpp"||language==="c"?cpp():python(),
     vimSlot.of(vimExtensions(enabled)),
     vimNavigation({definition:target=>{void follow(target.state.selection.main.head);return true;}}),
     Prec.highest(EditorView.domEventHandlers({keydown(event,target){
@@ -98,7 +99,7 @@ export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4}:{source
     ])),
     EditorState.readOnly.of(true),EditorView.editable.of(false),
     EditorView.contentAttributes.of({"aria-label":"只读标准库源码",tabindex:"0",spellcheck:"false"}),
-    EditorView.theme({"&":{height:"100%",fontSize:"13px",backgroundColor:"var(--surface-editor)",color:"var(--ink)",textShadow:"none"},".cm-scroller":{fontFamily:"var(--font-mono)",overflow:"auto",lineHeight:"1.65"},".cm-content":{padding:"4px 0"},".cm-gutters":{backgroundColor:"var(--surface-editor)",border:"none"},".cm-line":{padding:"0 6px"},".cm-activeLine, .cm-activeLineGutter":{backgroundColor:"var(--active-line)"},"&.cm-focused .cm-selectionBackground, .cm-selectionBackground":{backgroundColor:"var(--selection)"}}),
+    EditorView.theme({"&":{height:"100%",fontSize:"13px",backgroundColor:"var(--surface-editor)",color:"var(--ink)",textShadow:"none"},".cm-scroller":{fontFamily:"var(--font-mono)",overflow:"auto",lineHeight:"1.65"},".cm-content":{padding:"4px 0"},".cm-gutters":{backgroundColor:"var(--surface-editor)",border:"none"},".cm-line":{padding:"0 6px"},".cm-activeLine, .cm-activeLineGutter":{backgroundColor:"var(--editor-active-line,var(--active-line))"},"&.cm-focused .cm-selectionBackground, .cm-selectionBackground":{backgroundColor:"var(--selection)"}}),
     EditorView.domEventHandlers({
      mousedown(event,target){if(!(event.ctrlKey||event.metaKey)||event.button!==0)return false;const pos=target.posAtCoords({x:event.clientX,y:event.clientY});if(pos===null)return false;event.preventDefault();void follow(pos);return true;},
      scroll(){if(!swapping&&!destroyed)capture();return false;}
@@ -114,12 +115,13 @@ export function SourceViewer({source,onClose,vimEnabled=false,tabSize=4}:{source
    // edits using filter:false; trusted navigation alone may replace the state.
    dispatchTransactions(transactions,target){if(transactions.some(t=>t.docChanged))return;target.update(transactions);}
   });
-  actions.current={move,close,configure(value){enabled=value;view.dispatch({effects:vimSlot.reconfigure(vimExtensions(value))});},configureTabSize(size){displayTabSize=size;if(view.state.tabSize!==size)view.dispatch({effects:tabSizeSlot.reconfigure(EditorState.tabSize.of(size))});}};
+  actions.current={move,close,configureDisplay(wrap,guides){displayWrap=wrap;displayGuides=guides;view.dispatch({effects:[wrapSlot.reconfigure(wrap?EditorView.lineWrapping:[]),guideSlot.reconfigure(guides?indentGuides:[])]});},configure(value){enabled=value;view.dispatch({effects:vimSlot.reconfigure(vimExtensions(value))});},configureTabSize(size){displayTabSize=size;if(view.state.tabSize!==size)view.dispatch({effects:tabSizeSlot.reconfigure(EditorState.tabSize.of(size))});}};
   update();view.focus();view.dispatch({effects:EditorView.scrollIntoView(first.anchor,{y:"center"})});
   return()=>{destroyed=true;cancel();actions.current=null;element.close();view.destroy();history.clear();};
  },[source]);
  useLayoutEffect(()=>{actions.current?.configure(vimEnabled);},[vimEnabled]);
  useLayoutEffect(()=>{actions.current?.configureTabSize(tabSize);},[tabSize]);
+ useLayoutEffect(()=>{actions.current?.configureDisplay(wordWrap,showIndentGuides);},[wordWrap,showIndentGuides]);
  return <dialog className="source-viewer" ref={dialog} aria-label="源码查看" aria-labelledby="source-title" onCancel={event=>{event.preventDefault();actions.current?.close();}}>
   <header>
    <nav aria-label="源码导航"><button aria-label="后退" title="后退 · Alt+← / Ctrl+O" disabled={!info.back} onClick={()=>actions.current?.move(-1)}><Icon kind="back"/></button><button aria-label="前进" title="前进 · Alt+→ / Ctrl+I" disabled={!info.forward} onClick={()=>actions.current?.move(1)}><Icon kind="forward"/></button></nav>

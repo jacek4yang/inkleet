@@ -216,6 +216,7 @@ export async function runSettingsWorkbenchUI(browser,openSettings){
    await configure(page,kind,"write","fail");await owner.locator(".settings-form-actions button").first().click();
    await owner.getByRole("alert").filter({hasText:"fixture "+kind+" save failed"}).waitFor();
    await configure(page,kind,"read","hold");await owner.getByRole("button",{name:"重新读取",exact:true}).click();
+   if(kind==="editor")await owner.getByRole("alertdialog",{name:"放弃设置草稿并重新读取",exact:true}).getByRole("button",{name:"放弃草稿并读取",exact:true}).click();
    await page.waitForFunction(kind=>window.__settingsWorkbenchTest.pendingReads.some(item=>item.kind===kind),kind);
    equal(await readDraft(dialog,kind),draft,"pending Reload keeps the draft visible");
    equal((await owner.getByRole("alert").allTextContents()).some(text=>text.includes("fixture "+kind+" save failed")),true,"pending Reload does not clear the prior failure early");
@@ -228,6 +229,7 @@ export async function runSettingsWorkbenchUI(browser,openSettings){
    await owner.getByRole("alert").filter({hasText:"fixture "+kind+" read failed"}).waitFor();
    equal(await readDraft(dialog,kind),draft,"failed Reload preserves the draft");
    await owner.getByRole("button",{name:"重新读取",exact:true}).click();
+   if(kind==="editor")await owner.getByRole("alertdialog",{name:"放弃设置草稿并重新读取",exact:true}).getByRole("button",{name:"放弃草稿并读取",exact:true}).click();
    await page.waitForFunction(kind=>window.__settingsWorkbenchTest.pendingReads.some(item=>item.kind===kind),kind);
    equal((await owner.getByRole("alert").allTextContents()).some(text=>text.includes("fixture "+kind+" read failed")),true,"retry retains error until confirmed success");
    await settle(page,kind,"read");
