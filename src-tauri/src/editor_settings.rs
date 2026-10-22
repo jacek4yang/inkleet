@@ -17,26 +17,75 @@ pub struct Document {
  #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub highlight_active_line:Option<bool>,
 }
 
-#[derive(Clone,Serialize,Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone,Serialize,Default)]
 pub struct ColorOverrides{
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub light:Option<ColorPalette>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub dark:Option<ColorPalette>,
+ #[serde(skip_serializing_if="Option::is_none")] pub light:Option<ColorPalette>,
+ #[serde(skip_serializing_if="Option::is_none")] pub dark:Option<ColorPalette>,
 }
-#[derive(Clone,Serialize,Deserialize)]
-#[serde(deny_unknown_fields)]
+impl<'de> Deserialize<'de> for ColorOverrides{
+ fn deserialize<D:serde::Deserializer<'de>>(deserializer:D)->Result<Self,D::Error>{
+  struct ObjectOnly;
+  impl<'de> serde::de::Visitor<'de> for ObjectOnly{
+   type Value=ColorOverrides;
+   fn expecting(&self,f:&mut std::fmt::Formatter)->std::fmt::Result{write!(f,"a color settings object")}
+   fn visit_map<A:serde::de::MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+    let mut value=ColorOverrides::default();
+    while let Some(key)=map.next_key::<String>()?{
+     match key.as_str(){
+      "light"=>{if value.light.is_some(){return Err(serde::de::Error::duplicate_field("light"));}value.light=Some(map.next_value::<ColorPalette>()?);}
+      "dark"=>{if value.dark.is_some(){return Err(serde::de::Error::duplicate_field("dark"));}value.dark=Some(map.next_value::<ColorPalette>()?);}
+      _=>return Err(serde::de::Error::unknown_field(&key,&["light","dark"])),
+     }
+    }
+    Ok(value)
+   }
+  }
+  deserializer.deserialize_map(ObjectOnly)
+ }
+}
+#[derive(Clone,Serialize,Default)]
 pub struct ColorPalette{
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub surface:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub editor:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub side:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub ink:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub muted:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub line:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub hover:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub accent:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub selection:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub active:Option<String>,
- #[serde(default,skip_serializing_if="Option::is_none",deserialize_with="deserialize_present")] pub cursor:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub surface:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub editor:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub side:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub ink:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub muted:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub line:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub hover:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub accent:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub selection:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub active:Option<String>,
+ #[serde(skip_serializing_if="Option::is_none")] pub cursor:Option<String>,
+}
+impl<'de> Deserialize<'de> for ColorPalette{
+ fn deserialize<D:serde::Deserializer<'de>>(deserializer:D)->Result<Self,D::Error>{
+  struct ObjectOnly;
+  impl<'de> serde::de::Visitor<'de> for ObjectOnly{
+   type Value=ColorPalette;
+   fn expecting(&self,f:&mut std::fmt::Formatter)->std::fmt::Result{write!(f,"a color settings object")}
+   fn visit_map<A:serde::de::MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+    let mut value=ColorPalette::default();
+    while let Some(key)=map.next_key::<String>()?{
+     match key.as_str(){
+      "surface"=>{if value.surface.is_some(){return Err(serde::de::Error::duplicate_field("surface"));}value.surface=Some(map.next_value::<String>()?);}
+      "editor"=>{if value.editor.is_some(){return Err(serde::de::Error::duplicate_field("editor"));}value.editor=Some(map.next_value::<String>()?);}
+      "side"=>{if value.side.is_some(){return Err(serde::de::Error::duplicate_field("side"));}value.side=Some(map.next_value::<String>()?);}
+      "ink"=>{if value.ink.is_some(){return Err(serde::de::Error::duplicate_field("ink"));}value.ink=Some(map.next_value::<String>()?);}
+      "muted"=>{if value.muted.is_some(){return Err(serde::de::Error::duplicate_field("muted"));}value.muted=Some(map.next_value::<String>()?);}
+      "line"=>{if value.line.is_some(){return Err(serde::de::Error::duplicate_field("line"));}value.line=Some(map.next_value::<String>()?);}
+      "hover"=>{if value.hover.is_some(){return Err(serde::de::Error::duplicate_field("hover"));}value.hover=Some(map.next_value::<String>()?);}
+      "accent"=>{if value.accent.is_some(){return Err(serde::de::Error::duplicate_field("accent"));}value.accent=Some(map.next_value::<String>()?);}
+      "selection"=>{if value.selection.is_some(){return Err(serde::de::Error::duplicate_field("selection"));}value.selection=Some(map.next_value::<String>()?);}
+      "active"=>{if value.active.is_some(){return Err(serde::de::Error::duplicate_field("active"));}value.active=Some(map.next_value::<String>()?);}
+      "cursor"=>{if value.cursor.is_some(){return Err(serde::de::Error::duplicate_field("cursor"));}value.cursor=Some(map.next_value::<String>()?);}
+      _=>return Err(serde::de::Error::unknown_field(&key,&["surface","editor","side","ink","muted","line","hover","accent","selection","active","cursor"])),
+     }
+    }
+    Ok(value)
+   }
+  }
+  deserializer.deserialize_map(ObjectOnly)
+ }
 }
 impl ColorOverrides{
  fn validated(&self)->Result<(),String>{
