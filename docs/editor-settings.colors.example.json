@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "vim": false,
+  "formatOnSave": true,
+  "overrides": {},
+  "theme": "system",
+  "colorOverrides": {
+    "light": {
+      "accent": "#795548"
+    },
+    "dark": {
+      "accent": "#E3AA7B",
+      "editor": "#202328"
+    }
+  }
+}

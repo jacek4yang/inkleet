@@ -1,0 +1,350 @@
+name: Preview desktop installers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-installers-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Preview artifacts only. No release, tag, deployment, signing credentials, or
+# debug/native-snippet feature is used by any distributable build.
+jobs:
+  frontend:
+    name: Packaging Frontend Regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Verify release version metadata
+        run: python3 scripts/verify-release-version.py
+      - name: Install locked frontend dependencies
+        run: npm ci --ignore-scripts
+      - name: Check native test helpers
+        run: |
+          python3 -m py_compile tests/native_smoke.py tests/native_wait.py tests/test_native_wait.py
+          python3 -m unittest discover -s tests -p 'test_native_wait.py' -v
+      - name: Typecheck, domain tests, and build
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Full browser regression suite
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:ui
+      - name: Record frontend identity
+        if: always()
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/BUILD_COMMIT.txt
+          printf '%s\n' 'Linux Chromium browser suite; native validation is separate.' > evidence/VERIFICATION_SCOPE.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: preview-frontend-evidence-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-x64:
+    name: Packaging Windows x64
+    needs: frontend
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+          key: windows-x64-preview-release
+      - name: Check Windows packaging prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence/windows-x64 | Out-Null
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'Expected an x64 Windows runner' }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw 'Microsoft C++ x64 build tools are missing' }
+          $vs | Set-Content evidence/windows-x64/visual-studio.txt
+          $probe = Join-Path $env:RUNNER_TEMP 'inkleet-vbscript-check.vbs'
+          'WScript.Echo "VBScript available"' | Set-Content -Encoding ascii $probe
+          & "$env:WINDIR/System32/cscript.exe" //Nologo $probe | Tee-Object evidence/windows-x64/vbscript.txt
+          if ($LASTEXITCODE -ne 0) { throw 'VBScript is required by the WiX MSI build; no security setting was changed' }
+          rustup target add x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install the explicit Rust target' }
+          rustc --version --verbose | Set-Content evidence/windows-x64/rustc.txt
+      - name: Prepare frontend and platform icons
+        shell: bash
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+      - name: Test native default-feature code
+        shell: bash
+        run: |
+          cargo test --locked --manifest-path crates/managed-env/Cargo.toml
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+      - name: Build unsigned x64 NSIS and MSI installers
+        shell: bash
+        run: npm run tauri -- build --ci --no-sign --target x86_64-pc-windows-msvc --bundles nsis,msi -- --locked
+      - name: Inspect package architecture and prepare checksummed delivery
+        shell: pwsh
+        run: |
+          git diff --exit-code -- package-lock.json src-tauri/Cargo.lock crates/managed-env/Cargo.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency lockfiles changed during the build' }
+          ./scripts/verify-windows-packages.ps1 -TestOnly
+          if ($LASTEXITCODE -ne 0) { throw 'MSI reader self-test failed' }
+          ./scripts/verify-windows-packages.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: inkleet-windows-x64-installers-${{ github.sha }}
+          path: delivery/windows-x64/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: preview-windows-x64-evidence-${{ github.sha }}
+          path: |
+            evidence/windows-x64/
+            src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 14
+
+  linux-x86_64:
+    name: Packaging Linux x86_64
+    needs: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+          key: ubuntu-24.04-x86_64-preview-release
+      - name: Install native build and GUI test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+          rustup target add x86_64-unknown-linux-gnu
+          mkdir -p evidence/linux-x86_64
+          test "$(uname -m)" = x86_64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          rustc --version --verbose > evidence/linux-x86_64/rustc.txt
+          cat /etc/os-release > evidence/linux-x86_64/os-release.txt
+      - name: Prepare frontend and icons
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+      - name: Test native default-feature code
+        run: |
+          cargo test --locked --manifest-path crates/managed-env/Cargo.toml
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu
+      - name: Build release DEB staging package
+        run: |
+          npm run tauri -- build --ci --no-sign --target x86_64-unknown-linux-gnu --bundles deb -- --locked
+          git diff --exit-code -- package-lock.json src-tauri/Cargo.lock crates/managed-env/Cargo.lock
+      - name: Install staging package and test the installed release app
+        run: |
+          mapfile -d '' packages < <(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          package="$(realpath "${packages[0]}")"
+          test "$(dpkg-deb -f "$package" Architecture)" = amd64
+          dpkg-deb --info "$package" > evidence/linux-x86_64/deb-info.txt
+          dpkg-deb -f "$package" Depends > evidence/linux-x86_64/DEPENDENCIES.txt
+          sudo apt-get install -y "$package" > evidence/linux-x86_64/deb-install.txt 2>&1
+          test -x /usr/bin/inkleet
+          file /usr/bin/inkleet | tee evidence/linux-x86_64/elf.txt
+          grep -q 'ELF 64-bit.*x86-64' evidence/linux-x86_64/elf.txt
+          ldd /usr/bin/inkleet > evidence/linux-x86_64/linked-libraries.txt
+          ! grep -q 'not found' evidence/linux-x86_64/linked-libraries.txt
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY=/usr/bin/inkleet
+          export INKLEET_EVIDENCE_DIR=evidence/linux-x86_64/installed-native
+          test ! -e "$INKLEET_EVIDENCE_DIR"
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - name: Build tar and test its launcher from a directory with spaces
+        run: |
+          mapfile -d '' packages < <(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          bash scripts/package-linux-portable.sh "${packages[0]}" "$GITHUB_SHA" delivery/linux-x86_64
+          unpacked="$RUNNER_TEMP/InkLeet tar verification"
+          mkdir -p "$unpacked"
+          mapfile -d '' archives < <(find delivery/linux-x86_64 -maxdepth 1 -name '*.tar.gz' -print0)
+          test "${#archives[@]}" -eq 1
+          tar -tzf "${archives[0]}" > evidence/linux-x86_64/tar-contents.txt
+          tar -xzf "${archives[0]}" -C "$unpacked"
+          mapfile -d '' launchers < <(find "$unpacked" -type f -name start.sh -print0)
+          test "${#launchers[@]}" -eq 1
+          root="$(dirname "${launchers[0]}")"
+          test -x "$root/start.sh"
+          cmp /usr/bin/inkleet "$root/inkleet"
+          test "$(cat "$root/SOURCE_COMMIT.txt")" = "$GITHUB_SHA"
+          ldd "$root/inkleet" > evidence/linux-x86_64/tar-linked-libraries.txt
+          ! grep -q 'not found' evidence/linux-x86_64/tar-linked-libraries.txt
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          export INKLEET_TEST_BINARY="$root/start.sh"
+          export INKLEET_EVIDENCE_DIR=evidence/linux-x86_64/tar-native
+          test ! -e "$INKLEET_EVIDENCE_DIR"
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+          (cd delivery/linux-x86_64 && sha256sum --check ./*.sha256)
+      - name: Record exact Linux verification scope
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          out = pathlib.Path('delivery/linux-x86_64')
+          info = {
+              'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'target': 'x86_64-unknown-linux-gnu',
+              'runner': 'ubuntu-24.04',
+              'build_profile': 'release; default features; diagnostic snippet features disabled',
+              'workflow_run': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              'verified': ['ELF x86_64', 'installed DEB native smoke', 'tar executable equals installed executable', 'tar start.sh native smoke from directory with spaces', 'SHA-256'],
+              'not_verified': ['all Linux distributions', 'older glibc systems', 'real account login and online submission', 'full managed language-toolchain and diagnostic snippet qualification in this release build'],
+          }
+          (out / 'BUILD_INFO.json').write_text(json.dumps(info, indent=2) + '\n')
+          (out / 'SOURCE_COMMIT.txt').write_text(info['commit'] + '\n')
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: inkleet-linux-x86_64-tar-${{ github.sha }}
+          path: delivery/linux-x86_64/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: preview-linux-x86_64-evidence-${{ github.sha }}
+          path: |
+            evidence/linux-x86_64/
+            evidence/native/
+            src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 14
+  macos-intel:
+    name: Packaging macOS Intel
+    needs: frontend
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Verify Intel runner and record source identity
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -p evidence/macos-intel
+          git rev-parse HEAD > evidence/macos-intel/BUILD_COMMIT.txt
+          {
+            sw_vers
+            uname -m
+            xcodebuild -version
+            node --version
+            npm --version
+            rustc --version --verbose
+            cargo --version
+          } > evidence/macos-intel/TOOLCHAIN.txt
+          rustup target add x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+          key: macos-15-intel-x86_64-preview
+      - name: Install locked frontend dependencies and prepare icon
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run tauri -- --version >> evidence/macos-intel/TOOLCHAIN.txt
+      - name: Test Rust code on Intel macOS
+        run: |
+          cargo test --locked --manifest-path crates/managed-env/Cargo.toml --target x86_64-apple-darwin
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-apple-darwin
+      - name: Build unsigned Intel test DMG
+        run: npm run tauri -- build --ci --no-sign --target x86_64-apple-darwin --bundles dmg -- --locked
+      - name: Verify the application inside the DMG
+        run: |
+          git diff --exit-code -- package-lock.json src-tauri/Cargo.lock crates/managed-env/Cargo.lock
+          python3 scripts/verify-macos-dmg.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: inkleet-macos-intel-dmg-${{ github.sha }}
+          path: delivery/macos-intel/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: inkleet-macos-intel-evidence-${{ github.sha }}
+          path: |
+            evidence/macos-intel/
+            package-lock.json
+            src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 30
+
+  packaging-required:
+    name: Packaging Required
+    needs: [frontend, windows-x64, linux-x86_64, macos-intel]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every package verification to pass
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['JOB_RESULTS'])
+          expected = {'frontend', 'windows-x64', 'linux-x86_64', 'macos-intel'}
+          assert set(results) == expected, 'Missing packaging dependency'
+          failed = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          assert not failed, f'Packaging verification did not pass: {failed}'
+          PY

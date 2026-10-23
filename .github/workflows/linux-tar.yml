@@ -1,0 +1,43 @@
+name: Linux tar developer package
+on:
+  push:
+    branches: [feat/first-workbench, feat/language-adapter-contract]
+    paths: ['.github/workflows/linux-tar.yml', 'scripts/package-linux-portable.sh']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package-verified-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Download exact verified Linux package artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p verified-linux
+          gh api repos/jacek4yang/inkleet/actions/artifacts/11870487564/zip > verified-linux.zip
+          echo 'c6a633f0f28d77a10e322f13a52b2ce399dd19f3c72d849e3fcf5531c0ce81b6  verified-linux.zip' | sha256sum --check
+          unzip -q verified-linux.zip -d verified-linux
+      - name: Package the already tested executable without rebuilding
+        run: |
+          mapfile -d '' packages < <(find verified-linux -name '*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+          bash scripts/package-linux-portable.sh "${packages[0]}" ec3bd376ef979f942db613b0b428c5dbb6e6573c portable
+      - name: Verify tar executable equals installed-test executable
+        run: |
+          mkdir checked
+          tar -xzf portable/*.tar.gz -C checked
+          cmp verified-linux/src-tauri/target/release/bundle/deb/InkLeet_0.0.1_amd64/data/usr/bin/inkleet checked/*/inkleet
+          cp -R verified-linux/evidence/tar portable/native-verification
+          printf '%s\n' 'https://github.com/jacek4yang/inkleet/actions/runs/38511819107' > portable/SOURCE_BUILD.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: inkleet-linux-x86_64-tar
+          path: portable/
+          if-no-files-found: error
+          retention-days: 30

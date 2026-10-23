@@ -1,0 +1,35 @@
+name: Prepare formatter diff lock
+on:
+  push:
+    branches: [feat/format-on-save]
+    paths: ['.github/workflows/formatter-lock.yml']
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Resolve pinned public CodeMirror diff API
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const p=JSON.parse(fs.readFileSync("package.json"));p.dependencies["@codemirror/merge"]="6.12.2";fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");'
+          npm install --package-lock-only --ignore-scripts
+          npm ci --ignore-scripts
+          npm ls @codemirror/state @codemirror/view @codemirror/merge
+          node --input-type=module -e 'import fs from "node:fs";import assert from "node:assert/strict";import {diff} from "@codemirror/merge";const p=JSON.parse(fs.readFileSync("node_modules/@codemirror/merge/package.json"));assert.equal(p.version,"6.12.2");assert.equal(p.license,"MIT");assert.ok(diff("x=1","x = 1",{scanLimit:500,timeout:20}).length);'
+          npm run typecheck
+          npm test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: formatter-diff-lock
+          path: |
+            package.json
+            package-lock.json
+            node_modules/@codemirror/merge/LICENSE
+          retention-days: 7

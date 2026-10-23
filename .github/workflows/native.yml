@@ -1,0 +1,101 @@
+name: Native Linux
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      snippets:
+        description: Enable debug-only native snippet validation traces
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: native-linux-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  native-smoke:
+    name: Native Linux Full Validation
+    env:
+      INKLEET_NATIVE_SNIPPETS: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || inputs.snippets == true }}
+      INKLEET_NATIVE_SNIPPET_FEATURE: native-java-snippet-validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify release version metadata
+        run: python3 scripts/verify-release-version.py
+      - name: Verify native wait and transport budgets
+        run: python3 -m unittest discover -s tests -p 'test_native_wait.py' -v
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri
+      - name: Install native testing prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11 at-spi2-core scrot xclip xdotool fonts-noto-cjk
+          cargo install tauri-driver --version 2.1.0 --locked
+      - name: Build native test application
+        run: |
+          npm ci --ignore-scripts
+          npm run tauri -- icon icon.svg
+          npm run typecheck
+          npm run build
+          cargo test --locked --manifest-path crates/managed-env/Cargo.toml
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          mkdir -p evidence/native
+          git rev-parse HEAD > evidence/native/BUILD_COMMIT.txt
+          printf 'debug-linux-no-bundle; snippet-validation=%s; feature=%s\n' "$INKLEET_NATIVE_SNIPPETS" "$INKLEET_NATIVE_SNIPPET_FEATURE" > evidence/native/BUILD_PROFILE.txt
+          if [ "$INKLEET_NATIVE_SNIPPETS" = "true" ]; then
+            cargo test --locked --manifest-path src-tauri/Cargo.toml --features "$INKLEET_NATIVE_SNIPPET_FEATURE"
+            npm run tauri -- build --debug --no-bundle --features "$INKLEET_NATIVE_SNIPPET_FEATURE"
+          else
+            npm run tauri -- build --debug --no-bundle
+          fi
+      - name: Probe public Chinese site separately
+        if: env.INKLEET_NATIVE_SNIPPETS != 'true'
+        id: public-probe
+        continue-on-error: true
+        run: |
+          mkdir -p evidence/protocol
+          set +e
+          cargo test --locked --manifest-path src-tauri/Cargo.toml public_cn_probe -- --ignored > evidence/protocol/public-cn.log 2>&1
+          result=$?
+          printf '%s\n' "$result" > evidence/protocol/exit-code.txt
+          exit "$result"
+      - name: Verify native storage through the actual GUI
+        env:
+          INKLEET_MANAGED_ENV: "1"
+          INKLEET_JAVA_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPETS == 'true' && env.INKLEET_NATIVE_SNIPPET_FEATURE == 'native-java-snippet-validation' && '1' || '0' }}
+          INKLEET_CLANG_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPETS == 'true' && (env.INKLEET_NATIVE_SNIPPET_FEATURE == 'native-clang-snippet-validation' || env.INKLEET_NATIVE_SNIPPET_FEATURE == 'native-java-snippet-validation') && '1' || '0' }}
+          INKLEET_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPETS == 'true' && '1' || '0' }}
+          INKLEET_LIVE_CN: ${{ steps.public-probe.outcome == 'success' && '1' || '0' }}
+        run: |
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$(mktemp -d)"
+          export XDG_CACHE_HOME="$(mktemp -d)"
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1
+          xvfb-run -a dbus-run-session -- python3 tests/native_smoke.py
+      - name: Capture native crash diagnostics
+        if: failure()
+        run: |
+          mkdir -p evidence/native
+          { sudo dmesg --ctime 2>/dev/null || true; } | grep -Ei 'segfault|out of memory|killed process|inkleet|webkit' | tail -80 > evidence/native/kernel-errors.txt || true
+          free -m > evidence/native/memory.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-linux-verification
+          path: |
+            evidence/native/
+            evidence/protocol/
+            src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 7
+

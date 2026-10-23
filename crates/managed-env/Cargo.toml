@@ -1,0 +1,18 @@
+[package]
+name = "inkleet-managed-env"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["arbitrary_precision"] }
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "system-proxy"] }
+sha2 = "=0.10.9"
+flate2 = "=1.1.10"
+tar = "=0.4.46"
+tempfile = "3"
+tokio = { version = "=1.53.2", features = ["rt-multi-thread", "macros", "time", "process", "io-util"] }
+process-wrap = { version = "=10.0.1", features = ["std"] }
+lzma-rust2 = { version = "=0.22.0", default-features = false, features = ["std", "xz"] }
+zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2"] }

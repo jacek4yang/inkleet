@@ -1,0 +1,17 @@
+import React from "react";
+import {createRoot} from "react-dom/client";
+import {CodeEditor} from "../src/editor";
+export {EditorView} from "@codemirror/view";
+export {snippetInsertion,snippetSessionState} from "../src/snippet-session";
+export {prepareSnippet} from "../src/snippet-prepare";
+export {getCM,vimNormal} from "../src/vim";
+export function mountSnippetEditor(parent:HTMLElement,state:{value:string;edits:string[];statuses?:string[];saves?:string[];errors?:string[];save?:(()=>boolean)|null},vim=false){
+ const root=createRoot(parent);
+ let enabled=vim,tabSize=4;
+ const render=()=>root.render(<CodeEditor documentKey="snippet-session-fixture" language="python3" value={state.value} label="代码编辑器" onSaveReady={save=>{state.save=save;}} onStatus={status=>state.statuses?.push(status.text)} vimEnabled={enabled} tabSize={tabSize} formatting={{enabled:true,save:async text=>{state.saves?.push(text);return true;},report:message=>state.errors?.push(message)}} onChange={text=>{state.value=text;state.edits.push(text);}}/>);
+ render();return {setVim:(value:boolean)=>{enabled=value;render();},setTabSize:(value:number)=>{tabSize=value;render();},destroy:()=>root.unmount()};
+}
+export {completionStatus,currentCompletions} from "@codemirror/autocomplete";
+export {SnippetPreparationService} from "../src/snippet-service";
+
+export {undoDepth} from "@codemirror/commands";

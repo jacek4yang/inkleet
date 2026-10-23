@@ -1,0 +1,1912 @@
+"""Linux WebKitGTK smoke test against the built native application, not a browser mock."""
+import base64, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.error, http.client
+from native_wait import JsonlDiagnostics, Polling, operation_label, read_only_command
+from native_window_close import check_clean_close
+BASE = "http://127.0.0.1:4444"
+EID = "element-6066-11e4-a52e-4f735466cecf"
+session = None
+evidence = pathlib.Path(os.environ.get("INKLEET_EVIDENCE_DIR", "evidence/native"))
+evidence.mkdir(parents=True, exist_ok=True)
+polling = Polling(emit=JsonlDiagnostics(evidence / "native-timing.jsonl"))
+data = pathlib.Path(os.environ["XDG_DATA_HOME"])
+class PublicServiceUnavailable(Exception): pass
+(evidence/"LIVE_CN_RESULT.txt").write_text("NOT RUN: live public CN validation has not completed.\n")
+def request(method, path, payload=None, *, retry_read_only=False):
+    raw = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(BASE + path, data=raw, method=method, headers={"Content-Type":"application/json"})
+    def send(timeout):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                result = json.load(response)
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(error.read().decode()) from error
+        value = result.get("value")
+        if isinstance(value, dict) and value.get("error"):
+            raise RuntimeError(str(value))
+        return value
+    return polling.driver_call(send, operation=operation_label(method, path),
+                               retry_read_only=retry_read_only)
+def wait_for(fn, label, seconds=25):
+    # A bounded caller-line chain includes helper and scenario locations.
+    # No labels, locals, source text, or filesystem paths enter the timing log.
+    frame = sys._getframe()
+    source, lines = frame.f_code.co_filename, []
+    for _ in range(6):
+        frame = frame.f_back
+        if frame is None: break
+        if frame.f_code.co_filename == source:
+            lines.append(str(frame.f_lineno))
+    del frame
+    phase = "native_smoke.py:" + ">".join(lines)
+    return polling.wait_for(fn, label, seconds, phase=phase)
+def native_keys(payload):
+    # Real X11 events, prospectively selected instead of the flaky WebKit action
+    # transport. No mutation is retried; all source/selection assertions remain.
+    sources=payload.get("actions",[])
+    assert len(sources)==1 and sources[0].get("type")=="key", "unsupported native action source"
+    mapping={"\ue010":"End","\ue007":"Return","\ue008":"Shift_L","\ue004":"Tab","\ue003":"BackSpace","\ue009":"Control_L","\ue03c":"F12","\ue012":"Left","\ue011":"Home","\ue014":"Right","\ue032":"F2","\ue015":"Down","\ue039":"F9","\ue035":"F5","\ue00c":"Escape","\ue03a":"F10","z":"z"," ":"space"}
+    command=["xdotool"];held=set();used=set()
+    for action in sources[0].get("actions",[]):
+        kind=action.get("type");key=mapping.get(action.get("value"))
+        assert kind in ("keyDown","keyUp") and key is not None, "unsupported native key"
+        if kind=="keyDown":
+            assert key not in held, "duplicate keyDown"
+            held.add(key)
+        else:
+            assert key in held, "unpaired keyUp"
+            held.remove(key)
+        used.add(key);command.extend(["keydown" if kind=="keyDown" else "keyup",key])
+    assert len(command)>1 and not held, "native key sequence must be balanced"
+    try: subprocess.run(command,check=True)
+    except Exception:
+        subprocess.run(["xdotool","keyup",*sorted(used)],check=False)
+        raise
+
+def cmd(method, path, payload=None):
+    if method=="POST" and path=="/actions":
+        return native_keys(payload)
+    if method=="DELETE" and path=="/actions":
+        subprocess.run(["xdotool","keyup","Control_L","Shift_L","Alt_L","Super_L"],check=True)
+        return
+    return request(method, f"/session/{session}" + path, payload,
+                   retry_read_only=read_only_command(method, path))
+def element(css): return cmd("POST","/element",{"using":"css selector","value":css})[EID]
+def text(css):
+    suffix = "/attribute/data-status" if css == ".lsp-status" else "/attribute/data-storage-state" if css == '.statusbar[role="status"]' else "/text"
+    return cmd("GET",f"/element/{element(css)}" + suffix)
+def settings_action(category, css):
+    click('[data-action="open-settings"]')
+    node=cmd("POST","/element",{"using":"xpath","value":f"//nav[@aria-label='设置分类']/button[@aria-label='{category}']"})[EID]
+    click_native_node(node)
+    click_debug_action(css)
+def source_text(css):
+    # WebDriver rendered text may normalize leading whitespace. Read textContent
+    # of the visible CodeMirror lines, then independently check the saved file.
+    lines=cmd("POST",f"/element/{element(css)}/elements",{"using":"css selector","value":".cm-line"})
+    return "\n".join(cmd("GET",f"/element/{line[EID]}/property/textContent") for line in lines)
+
+
+def reveal_debug_control(css, fallback="down", panel_css=".debug-body", top_inset=4):
+    # Native WebKit does not reliably auto-scroll controls in nested inspectors.
+    # Use the real pointer wheel over the outer padding, never execute JS clicks.
+    for _ in range(12):
+        panel=cmd("GET",f"/element/{element(panel_css)}/rect")
+        try: target=cmd("GET",f"/element/{element(css)}/rect")
+        except RuntimeError as error:
+            if "element not interactable" not in str(error): raise
+            target=None
+        top=panel["y"]+top_inset; bottom=panel["y"]+panel["height"]-4
+        if target and target["height"]>0 and target["y"]>=top and target["y"]+target["height"]<=bottom:
+            return
+        window=cmd("GET","/window/rect")
+        x=int(window["x"]+panel["x"]+4)
+        y=int(window["y"]+panel["y"]+panel["height"]/2)
+        direction=("4" if fallback=="up" else "5") if target is None else ("5" if target["y"]+target["height"]>bottom else "4")
+        subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","--repeat","2","--delay","80",direction],check=True)
+        time.sleep(.15)
+    raise AssertionError("Control remains unreachable through real wheel in "+panel_css+": "+css)
+
+def click_debug_action(css):
+    # Choose one real pointer click before sending any mutation. Presence and
+    # enabled polling are read-only; an uncertain click is never replayed.
+    wait_for(lambda:cmd("GET",f"/element/{element(css)}/enabled"),"native action becomes enabled: "+css)
+    click_native_node(element(css))
+
+def click_native_node(node):
+    wait_for(lambda:cmd("GET",f"/element/{node}/enabled"),"native control enabled")
+    rect=cmd("GET",f"/element/{node}/rect")
+    window=cmd("GET","/window/rect")
+    assert rect["width"]>0 and rect["height"]>0, "debug action has no visible bounds"
+    assert rect["x"]>=0 and rect["y"]>=0 and rect["x"]+rect["width"]<=window["width"] and rect["y"]+rect["height"]<=window["height"], "debug action is outside the window"
+    x=int(window["x"]+rect["x"]+rect["width"]/2)
+    y=int(window["y"]+rect["y"]+rect["height"]/2)
+    # X11 --sync only acknowledges pointer movement, not WebKit hit processing.
+    # Observe the target before sending exactly one click; never replay a mutation.
+    subprocess.run(["xdotool","mousemove","--sync",str(x),str(y)],check=True)
+    previous=None
+    def pointer_ready():
+        nonlocal previous
+        state=cmd("POST","/execute/sync",{"script":"""
+          const t=arguments[0],r=t.getBoundingClientRect(),h=document.elementFromPoint(arguments[1],arguments[2]);
+          return {bounds:r.toJSON(),hover:t.matches(':hover'),hit:t===h||t.contains(h),focused:document.hasFocus(),label:t.getAttribute('aria-label'),dpr:devicePixelRatio};
+        ""","args":[{EID:node},rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2]})
+        (evidence/"native-pointer-last-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+        stable=previous==state["bounds"]
+        previous=state["bounds"]
+        return state if stable and state["hover"] and state["hit"] else None
+    state=wait_for(pointer_ready,"native pointer settles on its intended control")
+    for label,command in [("pointer",["xdotool","getmouselocation","--shell"]),("window",["xdotool","getwindowfocus","getwindowname"])]:
+        result=subprocess.run(command,capture_output=True,text=True,check=False)
+        state[label]={"exit":result.returncode,"stdout":result.stdout,"stderr":result.stderr}
+    with (evidence/"native-pointer-observations.jsonl").open("a") as log:log.write(json.dumps(state,ensure_ascii=False)+"\n")
+    location=dict(line.split("=",1) for line in state["pointer"]["stdout"].splitlines() if "=" in line)
+    assert state["pointer"]["exit"]==0 and location.get("X")==str(x) and location.get("Y")==str(y),"native pointer coordinate differs from intended target"
+    subprocess.run(["xdotool","click","1"],check=True)
+
+
+def focus_code_editor():
+    # Prospectively choose one real OS focus click. Never replay a failed action.
+    rect=cmd("GET",f"/element/{element('.code-pane > .editor-host')}/rect")
+    window=cmd("GET","/window/rect")
+    assert rect["width"]>40 and rect["height"]>40,"code viewport is not visible"
+    x=int(window["x"]+rect["x"]+rect["width"]/2)
+    y=int(window["y"]+rect["y"]+min(32,rect["height"]/2))
+    subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click","1"],check=True)
+    def focused():
+        active=cmd("GET","/element/active")[EID]
+        return cmd("GET",f"/element/{active}/attribute/aria-label")=="代码编辑器"
+    wait_for(focused,"actual code editor keyboard focus")
+
+def native_pointer_ready(css):
+    # Read-only hit testing chooses an OS pointer action before any mutation.
+    # Off-screen/occluded targets retain WebDriver auto-scroll, never a blind click.
+    return bool(cmd("POST","/execute/sync",{"script":"""
+      const t=document.querySelector(arguments[0]);if(!t)return false;
+      if(!["BUTTON","INPUT","TEXTAREA","SUMMARY"].includes(t.tagName)&&!t.isContentEditable)return false;
+      const r=t.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;
+      if(r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)return false;
+      const h=document.elementFromPoint(x,y);return t===h||t.contains(h);
+    ""","args":[css]}))
+
+def click(css):
+    # Visible hit-tested buttons/fields/summaries use one prospective OS click.
+    # Keep native option semantics and WebDriver auto-scroll for other targets.
+    if css == '[aria-label="关闭设置"]':
+        click_debug_action(css)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":css}),"settings closed")
+        return
+    if native_pointer_ready(css):
+        with (evidence/"native-pointer-actions.txt").open("a") as log:log.write(css+"\n")
+        return click_debug_action(css)
+    try: return cmd("POST",f"/element/{element(css)}/click",{})
+    except http.client.RemoteDisconnected:
+        closing=css in (".source-viewer header button[aria-label=\'返回代码\']",".environments header button","dialog.environments header button",".local-runner [aria-label='收起']")
+        selection=(" option[value=" in css) or css in ('[data-local-tab="run"]','[data-local-tab="debug"]')
+        if not (closing or selection): raise
+        with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
+            log.write(f"Checking idempotent test UI operation after WebKit connection reset: {css}\n")
+        time.sleep(.3)
+        if css==".local-runner [aria-label='收起']" and cmd("POST","/elements",{"using":"css selector","value":".local-runner[hidden]"}): return
+        if closing and not cmd("POST","/elements",{"using":"css selector","value":css}): return
+        try: return cmd("POST",f"/element/{element(css)}/click",{})
+        except http.client.RemoteDisconnected:
+            if css!=".source-viewer header button[aria-label=\'返回代码\']": raise
+            if not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}): return
+            # Exercise the real dialog Escape handler, never inject JavaScript
+            # or remove the viewer from the DOM to manufacture a passing test.
+            # WebKit may also reject release-actions during this transport bug.
+            # Send Escape through the real X11 keyboard, then require the real
+            # application's close handler to remove the viewer.
+            subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+            wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),"source viewer closes through actual OS Escape")
+            return
+
+def fill(css, value):
+    # Only authored test-field replacement is replayable. Never replay a judge,
+    # login, submission, or arbitrary click after an uncertain transport result.
+    for attempt in range(2):
+        try: return fill_once(css, value)
+        except http.client.RemoteDisconnected:
+            with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
+                log.write(f"sendKeys connection reset while replacing authored fixture: {css}; attempt={attempt+1}\n")
+            if attempt: raise
+            cmd("DELETE","/actions")  # release any modifier whose key-up was uncertain
+            time.sleep(.3)
+
+def source_navigation_case(query, target_name, label, symbol=None):
+    origin=text(".source-viewer h2").strip()
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+    search=".source-viewer .cm-search input[name='search']"
+    wait_for(lambda: element(search),label+" source search keyboard route")
+    fill(search,query)
+    # Right collapses the match to its end; Left enters its final identifier.
+    subprocess.run(["xdotool","key","--clearmodifiers","Return","Escape","Right","Left"],check=True)
+    symbol=symbol or query.split()[-1].split(".")[-1]
+    previous_position=None
+    def selected_identifier():
+        nonlocal previous_position
+        current=cmd("POST","/execute/sync",{"script":"""
+          const s=getSelection(),v=document.querySelector('.source-viewer .cm-scroller');
+          if(!s||!s.isCollapsed||document.activeElement?.getAttribute('aria-label')!=='只读标准库源码')return null;
+          const value=s.anchorNode?.textContent||'';
+          const start=value.indexOf(arguments[0]);
+          if(start<0||s.anchorOffset<=start||s.anchorOffset>=start+arguments[0].length)return null;
+          return {top:v.scrollTop,left:v.scrollLeft,anchor:value,offset:s.anchorOffset};
+        ""","args":[symbol]})
+        stable=current is not None and current==previous_position
+        previous_position=current
+        return current if stable else None
+    origin_position=wait_for(selected_identifier,label+" source caret inside selected identifier")
+    subprocess.run(["xdotool","key","--clearmodifiers","F12"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name or cmd("POST","/elements",{"using":"css selector","value":".source-target-picker button"}),label+" definition response or target choice",seconds=60)
+    choices=cmd("POST","/elements",{"using":"css selector","value":".source-target-picker button"})
+    if choices:
+        labels=[cmd("GET",f"/element/{choice[EID]}/text") for choice in choices]
+        matches=[index for index,value in enumerate(labels) if value.splitlines()[0].startswith(target_name+":")]
+        assert len(matches)==1,label+" has one unambiguous requested definition target: "+repr(labels)
+        (evidence/(label+"-source-targets.json")).write_text(json.dumps(labels,ensure_ascii=False,indent=2))
+        screenshot(label+"-source-targets-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Home"]+["Down"]*matches[0]+["Return"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".source-target-picker"}),label+" target picker closes after keyboard selection")
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name,label+" recursive definition",seconds=60)
+    if label=="cpp":
+        # The title updates before CodeMirror's incremental parser necessarily
+        # reaches the viewport. Qualify real keyword colors, not a timed sleep.
+        highlighting=None
+        def source_keywords_highlighted():
+            nonlocal highlighting
+            highlighting=cmd("POST","/execute/sync",{"script":"""
+              const root=document.querySelector('.source-viewer .cm-content');
+              const panel=document.querySelector('.source-viewer .cm-scroller');
+              if(!root||!panel)return null;
+              const bounds=panel.getBoundingClientRect(),base=getComputedStyle(root).color;
+              const excluded='.cm-searchMatch,.cm-selectionMatch,.cm-fat-cursor,.cm-specialChar,.cm-matchingBracket,.cm-nonmatchingBracket';
+              const visible=node=>{const b=node.getBoundingClientRect();return b.bottom>bounds.top&&b.top<bounds.bottom&&b.right>bounds.left&&b.left<bounds.right;};
+              const tokens=[...root.querySelectorAll('.cm-line span')].filter(node=>visible(node)&&!node.closest(excluded)&&/^(template|class|struct|using|typename)$/.test(node.textContent.trim())).map(node=>({text:node.textContent.trim(),className:node.className,color:getComputedStyle(node).color}));
+              return {title:document.querySelector('.source-viewer h2')?.textContent,base,tokens,lines:[...root.querySelectorAll('.cm-line')].filter(visible).map(node=>node.textContent)};
+            ""","args":[]})
+            if not highlighting:return False
+            colored={token["text"] for token in highlighting["tokens"] if token["color"]!=highlighting["base"]}
+            return "template" in colored and "struct" in colored
+        try:
+            wait_for(source_keywords_highlighted,label+" visible C++ syntax highlighting",seconds=15)
+        finally:
+            (evidence/(label+"-source-highlighting.json")).write_text(json.dumps(highlighting,ensure_ascii=False,indent=2))
+            screenshot(label+"-source-highlighting-native.png")
+    screenshot(label+"-recursive-source-native.png")
+    subprocess.run(["xdotool","key","--clearmodifiers","alt+Left"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==origin,label+" source history back")
+    wait_for(lambda:cmd("POST","/execute/sync",{"script":"""
+      const v=document.querySelector('.source-viewer .cm-scroller');
+      return !!v&&Math.abs(v.scrollTop-arguments[0])<2&&Math.abs(v.scrollLeft-arguments[1])<2;
+    ""","args":[origin_position["top"],origin_position["left"]]}),label+" exact source scroll restoration")
+    subprocess.run(["xdotool","key","--clearmodifiers","alt+Right"],check=True)
+    wait_for(lambda:text(".source-viewer h2").strip()==target_name,label+" source history forward")
+    (evidence/(label.upper()+"_SOURCE_NAVIGATION_NATIVE_RESULT.txt")).write_text(
+        "PASS: actual source search and F12 to "+target_name+", Alt-Left/Right history and exact scroll restoration.\n"+json.dumps(origin_position,ensure_ascii=False)+"\n")
+
+def save_editor(css):
+    node=element(css)
+    if cmd("GET","/element/active").get(EID)!=node: click(css)
+    assert cmd("GET","/element/active").get(EID)==node,"explicit save target owns focus"
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+s"],check=True)
+
+def focus_case_control(css):
+    # Reach a field through real pointer scrolling, never DOM-injected focus.
+    for _ in range(16):
+        bounds=cmd("POST","/execute/sync",{"script":"""
+          const t=document.querySelector(arguments[0]),p=t?.closest('.case-editor');
+          if(!t||!p)return null;
+          return {target:t.getBoundingClientRect().toJSON(),panel:p.getBoundingClientRect().toJSON()};
+        ""","args":[css]})
+        assert bounds,"case input belongs to visible case editor"
+        t,p=bounds["target"],bounds["panel"]
+        assert p["width"]>20 and p["height"]>20 and t["width"]>0 and t["height"]>0,"case input has visible bounds"
+        window=cmd("GET","/window/rect")
+        fits=t["height"]<=p["height"]-8
+        if fits and (t["y"]<p["y"]+4 or t["y"]+t["height"]>p["y"]+p["height"]-4):
+            direction="4" if t["y"]<p["y"]+4 else "5"
+            x=int(window["x"]+p["x"]+6);y=int(window["y"]+p["y"]+p["height"]/2)
+            subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"click",direction],check=True)
+            with (evidence/"case-scroll-events.txt").open("a") as log:log.write(css+" "+direction+"\n")
+            continue
+        left=max(t["x"],p["x"]+2);right=min(t["x"]+t["width"],p["x"]+p["width"]-2)
+        top=max(t["y"],p["y"]+2);bottom=min(t["y"]+t["height"],p["y"]+p["height"]-2)
+        if right-left>8 and bottom-top>8:
+            x=(left+right)/2;y=(top+bottom)/2
+            hit=cmd("POST","/execute/sync",{"script":"const t=document.querySelector(arguments[0]),h=document.elementFromPoint(arguments[1],arguments[2]);return !!t&&(t===h||t.contains(h));","args":[css,x,y]})
+            assert hit,"visible case input is not covered by another control"
+            subprocess.run(["xdotool","mousemove","--sync",str(int(window["x"]+x)),str(int(window["y"]+y)),"click","1"],check=True)
+            node=element(css)
+            wait_for(lambda:cmd("GET","/element/active").get(EID)==node,"native case field owns focus")
+            return node
+        direction="4" if t["y"]<p["y"] else "5"
+        subprocess.run(["xdotool","mousemove","--sync",str(int(window["x"]+p["x"]+6)),str(int(window["y"]+p["y"]+p["height"]/2)),"click",direction],check=True)
+    raise AssertionError("Case input remains unreachable by real scrolling: "+css)
+
+def fill_once(css, value):
+    node=wait_for(lambda:element(css),"input target available after document switch")
+    if css == '[aria-label="代码编辑器"]':
+        # Choose the existing viewport-bounded OS focus path before any click.
+        focus_code_editor()
+        node=element(css)
+    elif css in ('[aria-label="预期结果"]','[aria-label="本地测试输入"]'):
+        node=focus_case_control(css)
+    elif native_pointer_ready(css):
+        click_native_node(node)
+    else:
+        try:
+            cmd("POST",f"/element/{node}/click",{})
+        except http.client.RemoteDisconnected:
+            # Only proceed after uncertain focus if the field really owns it.
+            if cmd("GET","/element/active").get(EID)!=node:raise
+    wait_for(lambda:cmd("GET","/element/active").get(EID)==node,"fixture field owns native keyboard focus")
+    # Exercise actual X11 input, avoiding WebKit's intermittent POST/actions reset.
+    # This path only replaces authored fixture text; it never replays debug/judge actions.
+    if value: subprocess.run(["xclip","-selection","clipboard"],input=value.encode("utf-8"),check=True)
+    is_editor=bool(cmd("POST",f"/element/{node}/elements",{"using":"css selector","value":".cm-line"}))
+    if is_editor: subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+a"],check=True)
+    subprocess.run(["xdotool","key","--clearmodifiers","ctrl+v" if value else "BackSpace"],check=True)
+    def editor_text():
+        current=element(css)  # Read-only reacquisition after a controlled React update.
+        lines=cmd("POST",f"/element/{current}/elements",{"using":"css selector","value":".cm-line"})
+        return "\n".join(cmd("GET",f"/element/{line[EID]}/text") for line in lines) if lines else cmd("GET",f"/element/{current}/property/value")
+    wait_for(lambda: editor_text()==value,"GUI paste exactly preserves source")
+
+def snippet_trace():
+    path=data/"top.jacek.inkleet/language-workspaces/native-snippet-validation.json"
+    return json.loads(path.read_text()) if path.exists() else []
+
+def snippet_selection():
+    return cmd("POST","/execute/sync",{"script":r"""
+      const content=document.querySelector('.code-pane .cm-content'),selection=window.getSelection();
+      const lines=content?[...content.children].filter(node=>node.matches('.cm-line')):[];
+      const texts=lines.map(line=>line.textContent??"");
+      function endpoint(node,at){
+        if(!node||!content?.contains(node))return null;
+        const element=node.nodeType===Node.ELEMENT_NODE?node:node.parentElement;
+        const line=element?.closest('.cm-line'),index=lines.indexOf(line);
+        if(index<0)return null;
+        const range=document.createRange();range.selectNodeContents(line);range.setEnd(node,at);
+        return texts.slice(0,index).reduce((sum,text)=>sum+text.length+1,0)+range.toString().length;
+      }
+      const anchor=selection?endpoint(selection.anchorNode,selection.anchorOffset):null;
+      const focus=selection?endpoint(selection.focusNode,selection.focusOffset):null;
+      return {text:String(selection??""),offset:focus,anchor,head:focus,from:anchor===null||focus===null?null:Math.min(anchor,focus),to:anchor===null||focus===null?null:Math.max(anchor,focus),collapsed:selection?.isCollapsed??false,source:texts.join("\n"),lineCount:texts.length,focus:document.activeElement?.getAttribute("aria-label"),activeFields:document.querySelectorAll(".code-pane .cm-snippet-field-active").length};
+    ""","args":[]})
+
+def native_snippet_case(group,code):
+    tail=2
+    mode=1
+    selections=None
+    accepted_expected=None
+    if group=="rust":
+        source="fn example() { let mut values = Vec::<i32>::new(); values.pu }"
+        member="push";replacements=["7"]
+        expected="fn example() { let mut values = Vec::<i32>::new(); values.push(7); }"
+    elif group=="golang":
+        source='import "strings"; func example() { var builder strings.Builder; builder.Wri }'
+        member="WriteString";replacements=['"inkleet"']
+        expected='import "strings"; func example() { var builder strings.Builder; builder.WriteString("inkleet") }'
+    elif group in ("c","cpp"):
+        if group=="c":
+            prefix="int inkleet_add(int left, int right); void example(void) { "
+        else:
+            prefix="struct Counter { int inkleet_add(int left, int right); }; void example() { Counter counter; counter."
+        source=prefix+"inkleet_a; }"
+        member="inkleet_add";replacements=["7","9"];selections=["int left","int right"];tail=3
+        accepted_expected=prefix+"inkleet_add(int left, int right); }"
+        expected=prefix+"inkleet_add(7, 9); }"
+    elif group=="java":
+        source="class Solution {\n    static void inkleet_test(String name, int i) {}\n    void run() {\n        inkleet_te\n    }\n}"
+        member="inkleet_test";replacements=['"ok"',"7"];selections=["name","i"];tail=8;mode=2
+        accepted_expected=source.replace("inkleet_te\n","inkleet_test(name, i);\n")
+        expected=source.replace("inkleet_te\n",'inkleet_test("ok", 7);\n')
+    else: raise AssertionError("unsupported native snippet fixture")
+    argument_sources=[expected]
+    if group in ("c","cpp"): argument_sources=[prefix+"inkleet_add(7, int right); }",expected]
+    elif group=="java": argument_sources=[source.replace("inkleet_te\n",'inkleet_test("ok", i);\n'),expected]
+    observations=[]
+    def persist_observations():
+        (evidence/(group.upper()+"_SNIPPET_NATIVE_EVIDENCE.json")).write_text(json.dumps(observations,ensure_ascii=False,indent=2))
+    for phase in ("history","navigation"):
+        prior=max(((r["id"],r["version"],r["sequence"]) for r in snippet_trace() if r.get("kind")=="completion" and r.get("language")==group),default=(0,0,0))
+        fill(code,source)
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End",*(["Left"]*tail),"ctrl+space"],check=True)
+        wait_for(lambda:member in text(".cm-tooltip-autocomplete"),group+" snippet candidates",seconds=90)
+        def matching_options():
+            rows=cmd("POST","/elements",{"using":"css selector","value":".cm-tooltip-autocomplete li"})
+            matches=[]
+            for row in rows:
+                labels=cmd("POST",f"/element/{row[EID]}/elements",{"using":"css selector","value":".cm-completionLabel"})
+                if not labels: continue
+                label=cmd("GET",f"/element/{labels[0][EID]}/property/textContent").lstrip()
+                if label==member or label.startswith(member+"("):
+                    matches.append({"node":row[EID],"label":label})
+            return matches
+        matches=wait_for(matching_options,group+" exact snippet option")
+        assert len(matches)==1,group+" snippet option is unambiguous"
+        choice=matches[0]
+        records=snippet_trace()
+        responses=[r for r in records if r.get("kind")=="completion" and r.get("language")==group and any(i["label"]==choice["label"] for i in r.get("items",[]))]
+        responses.sort(key=lambda r:(r["id"],r["version"],r["sequence"]),reverse=True)
+        response=responses[0] if responses else None
+        wire={"session":{"id":response["id"],"snippets":response["snippets"]},"response":response,"item":[i for i in response["items"] if i["label"]==choice["label"]]} if response else None
+        assert wire and wire["session"]["snippets"] is True,group+" launched binary negotiated snippet support"
+        assert (response["id"],response["version"],response["sequence"])>prior,group+" candidate trace belongs to this fresh acceptance phase"
+        assert len(wire["item"])==1 and wire["item"][0]["format"]==2,group+" actual server item is format2"
+        assert wire["item"][0]["effectiveMode"]==mode,group+" actual server item has expected insertion mode"
+        if group in ("c","cpp"):
+            assert wire["item"][0]["source"]=="inkleet_add(${1:int left}, ${2:int right})",group+" pinned clangd two-argument snippet"
+            assert response["request"]["character"]==len(source)-tail,group+" exact editable completion cursor"
+        assert response["defaultMode"]==1,group+" negotiated session default remains asIs"
+        if group=="java":
+            assert wire["item"][0]["mode"]==2,group+" server explicitly overrides asIs with mode2"
+            assert wire["item"][0]["source"]=="inkleet_test(${1:name}, ${2:i});",group+" pinned JDTLS two-argument snippet"
+            assert response["request"]["line"]==3 and response["request"]["character"]==18,group+" exact editable completion cursor"
+            assert wire["item"][0]["modePresent"] is True and wire["item"][0]["range"]=={"start":{"line":3,"character":8},"end":{"line":3,"character":18}},group+" explicit mode2 edit range is unchanged"
+            assert wire["item"][0]["additional"]==0,group+" local method needs no import edits"
+        time.sleep(.15)
+        cmd("POST",f"/element/{choice['node']}/click",{})
+        wait_for(lambda:snippet_selection()["activeFields"]>0,group+" real active argument field",seconds=20)
+        selected=snippet_selection()
+        accepted=source_text(code)
+        observation={"phase":phase,"freshAfter":prior,"wire":wire,"accepted":accepted,"selection":selected,"expectedAfterArgument":expected}
+        observations.append(observation)
+        persist_observations()
+        assert selected["focus"]=="代码编辑器" and selected["text"],group+" argument selection owns keyboard focus"
+        if accepted_expected is not None:
+            assert accepted==accepted_expected,group+" exact two-argument rendered snippet"
+            assert selected["text"]==selections[0],group+" exact first placeholder selection"
+            assert response["request"]["line"]==(3 if group=="java" else 0),group+" editable source position excludes virtual scaffold"
+            assert selected["source"]==accepted_expected,group+" native selection covers complete visible source"
+            assert selected["lineCount"]==accepted_expected.count("\n")+1,group+" all fixture lines visible"
+            if group=="java":
+                line_start=sum(len(line)+1 for line in accepted_expected.split("\n")[:3])
+                assert (selected["from"],selected["to"])==(line_start+21,line_start+25),group+" exact first argument range"
+        assert "$1" not in accepted and "${" not in accepted,group+" source contains rendered code, not snippet syntax"
+        def record_navigation(label):
+            selection=snippet_selection()
+            observation.setdefault("navigation",[]).append({"label":label,"source":source_text(code),"selection":selection})
+            persist_observations()
+            if group=="java":
+                bounds=(21,25) if label=="previous" else (27,28)
+                assert (selection["from"],selection["to"])==(line_start+bounds[0],line_start+bounds[1]),group+" exact argument navigation range"
+        if phase=="history":
+            subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+            wait_for(lambda:source_text(code)==source,group+" one undo removes the entire accepted snippet")
+            subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
+            wait_for(lambda:source_text(code)==accepted,group+" redo restores exact accepted snippet")
+        else:
+            # No pointer refocus here: it would invalidate the active parameter.
+            subprocess.run(["xdotool","key","--clearmodifiers","shift+Tab"],check=True)
+            assert source_text(code)==accepted and snippet_selection()["text"]==selected["text"],group+" first-field Shift+Tab retains parameter selection"
+            for index,replacement in enumerate(replacements):
+                if index:
+                    subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
+                    wait_for(lambda:snippet_selection()["text"]==selections[index],group+" next argument selection")
+                    record_navigation("next")
+                    subprocess.run(["xdotool","key","--clearmodifiers","shift+Tab"],check=True)
+                    wait_for(lambda:snippet_selection()["text"]==replacements[index-1],group+" previous edited argument selection")
+                    record_navigation("previous")
+                    subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
+                    wait_for(lambda:snippet_selection()["text"]==selections[index],group+" restored next argument selection")
+                    record_navigation("next-restored")
+                subprocess.run(["xdotool","type","--clearmodifiers","--delay","25",replacement],check=True)
+                def argument_step_matches():
+                    step={"index":index,"source":source_text(code),"selection":snippet_selection()}
+                    steps=observation.setdefault("argumentSteps",[])
+                    if len(steps)==index: steps.append(step)
+                    else: steps[index]=step
+                    persist_observations()
+                    return step["source"]==argument_sources[index]
+                wait_for(argument_step_matches,group+" exact argument step source")
+            def argument_matches():
+                observation["afterArgument"]=source_text(code)
+                observation["afterArgumentSelection"]=snippet_selection()
+                persist_observations()
+                return observation["afterArgument"]==expected
+            wait_for(argument_matches,group+" selected argument replacement")
+            subprocess.run(["xdotool","key","--clearmodifiers","Tab"],check=True)
+            wait_for(lambda:snippet_selection()["activeFields"]==0,group+" final snippet stop")
+            final=snippet_selection()
+            assert final["focus"]=="代码编辑器" and final["text"]=="" and final["collapsed"] and final["anchor"]==final["offset"]==len(expected)-tail and final["source"]==expected,group+" final caret follows completed call"
+            observation["final"]=final
+            screenshot(group+"-snippet-native.png")
+        persist_observations()
+    scope="debug-only "+group+" capability experiment" if group in ("c","cpp","java") else "Linux x86_64 default capability with debug-only evidence tracing"
+    (evidence/(group.upper()+"_SNIPPET_NATIVE_RESULT.txt")).write_text("PASS: real Linux WebView and application-owned language server format2 item, worker application, selected argument replacement, Tab final caret, isolated undo/redo. "+scope+"; not release-binary or cross-platform qualification.\n")
+
+
+def screenshot(name):
+    try:
+        (evidence / name).write_bytes(base64.b64decode(cmd("GET","/screenshot")))
+    except http.client.RemoteDisconnected:
+        # Read-only evidence capture can use the actual X11 desktop if WebKit's
+        # screenshot transport resets. Functional assertions remain mandatory.
+        with (evidence/"webdriver-transport-recovery.txt").open("a") as log:
+            log.write(f"WebKit screenshot reset; captured real X11 desktop instead: {name}\n")
+        subprocess.run(["scrot", str(evidence/name)], check=True)
+def start(empty=False):
+    global session
+    result = request("POST","/session",{"capabilities":{"alwaysMatch":{"browserName":"wry","tauri:options":{"application":str(pathlib.Path(os.environ.get("INKLEET_TEST_BINARY", "src-tauri/target/debug/inkleet")).resolve())}}}})
+    session = result["sessionId"]
+    wait_for(lambda: ("选择题目" if empty else "已读取本机文件") in text('.statusbar[role="status"]'), "native IPC initial load")
+def stop():
+    global session
+    if session:
+        cmd("DELETE","")
+        session = None
+# Legacy interaction fixtures intentionally opt out; dedicated native formatter
+# cases below enable the real default-on setting through the Settings UI.
+editor_config=pathlib.Path(os.environ["XDG_CONFIG_HOME"])/"top.jacek.inkleet/editor-settings.json"
+editor_config.parent.mkdir(parents=True,exist_ok=True)
+editor_config.write_text(json.dumps({"version":1,"formatOnSave":False,"overrides":{}}))
+driver = subprocess.Popen(["tauri-driver"], stdout=open(evidence/"driver.log","w"), stderr=subprocess.STDOUT)
+try:
+    wait_for(lambda: request("GET","/status"), "driver ready")
+    start(empty=True)
+    assert not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="代码编辑器"]'}), "fresh installation must not create a sample document"
+    assert "整数数组求和" not in text("body") and "寻找最大值" not in text("body")
+    screenshot("empty-real-workspace-native.png")
+    wait_for(lambda:cmd("GET",f"/element/{element('main.workbench')}/attribute/data-close-protection")=="ready","native close guard registered")
+    check_clean_close(evidence, wait_for)
+    # The close result was established before WebDriver session cleanup.
+    try:
+        stop()
+    except RuntimeError as error:
+        if not any(message in str(error).lower() for message in ("invalid session", "no such window", "disconnected")):
+            raise
+        session = None
+    start(empty=True)
+    if os.environ.get("INKLEET_LIVE_CN") == "1":
+        # Verify the new real sidebar before the slower six-language fixture loop.
+        outcome=wait_for(lambda: ("ready" if cmd("POST","/elements",{"using":"css selector","value":'.question-sidebar button[data-slug="two-sum"]'}) else "error" if cmd("POST","/elements",{"using":"css selector","value":'.question-sidebar [role="alert"]'}) else None),"real native sidebar response",seconds=30)
+        if outcome=="ready":
+            screenshot("real-question-sidebar-native.png")
+            click('.question-sidebar button[data-slug="two-sum"]')
+            wait_for(lambda:"两数之和" in text("article h1"),"sidebar opens real public question",seconds=30)
+            wait_for(lambda:"impl Solution" in text('[aria-label="代码编辑器"]'),"sidebar loads official template",seconds=30)
+            screenshot("real-sidebar-question-native.png")
+        else:
+            message=text('.question-sidebar [role="alert"]')
+            if "中国站拒绝访问" not in message: raise AssertionError(message)
+            (evidence/"SIDEBAR_LIVE_RESULT.txt").write_text("UNVERIFIED: upstream access denial; no mock fallback.\n")
+    stop()
+    # Isolated authored regression fixture enters only via the real cache format.
+    cache_path=pathlib.Path(os.environ["XDG_CACHE_HOME"])/"top.jacek.inkleet/public-questions.json"
+    cache_path.parent.mkdir(parents=True,exist_ok=True)
+    cache_path.write_text(pathlib.Path("tests/fixtures/public-questions.json").read_text())
+    start()
+    # Persist a download-only endpoint through the real Settings UI, never use it
+    # for login or configure the runner's system network.
+    click('[data-action="open-settings"]')
+    wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":"nav[aria-label='设置分类']"}),"settings categories mounted")
+    downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='下载']"})[EID]
+    cmd("POST",f"/element/{downloads_tab}/click",{})
+    wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-mode')}/enabled"),"download settings read")
+    click('#download-proxy-mode option[value="custom"]')
+    fill("#download-proxy-url","http://127.0.0.1:7890")
+    save_proxy=cmd("POST","/element",{"using":"xpath","value":"//button[text()='保存下载设置']"})[EID]
+    click_native_node(save_proxy)  # One prospective OS click; never replay an uncertain WebDriver write.
+    wait_for(lambda:"已保存，下次下载生效" in text(".download-settings"),"native proxy setting saved")
+    config=pathlib.Path(os.environ["XDG_CONFIG_HOME"])/"top.jacek.inkleet/download-settings.json"
+    wait_for(lambda:config.exists() and json.loads(config.read_text())["proxy"]["mode"]=="custom","download proxy persisted only in app config")
+    screenshot("download-proxy-native.png")
+    click('[aria-label="关闭设置"]')
+    stop();start()
+    click('[data-action="open-settings"]')
+    downloads_tab=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='下载']"})[EID]
+    cmd("POST",f"/element/{downloads_tab}/click",{})
+    wait_for(lambda:cmd("GET",f"/element/{element('#download-proxy-url')}/property/value")=="http://127.0.0.1:7890/","restart restores validated proxy")
+    click('#download-proxy-mode option[value="system"]')
+    save_proxy=cmd("POST","/element",{"using":"xpath","value":"//button[text()='保存下载设置']"})[EID]
+    click_native_node(save_proxy)  # One prospective OS click; never replay an uncertain WebDriver write.
+    wait_for(lambda:json.loads(config.read_text())["proxy"]["mode"]=="system","restore original download route before real installs")
+    click('[aria-label="关闭设置"]')
+    (evidence/"DOWNLOAD_SETTINGS_GUI_RESULT.txt").write_text("PASS: native Settings save, app-only config persistence, restart restore, explicit reset before real downloads; no system proxy change. Proxy CONNECT routing covered by isolated Rust test.\n")
+    code = '[aria-label="代码编辑器"]'
+    fill(code,"// first gutter row\n// second gutter row\n// third gutter row")
+    lane_rect=cmd("GET",f"/element/{element('.cm-debug-gutter')}/rect")
+    row_rect=cmd("GET",f"/element/{element('[aria-label=\"代码编辑器\"] .cm-line:nth-child(2)')}/rect")
+    window_rect=cmd("GET","/window/rect")
+    glyph_x=int(window_rect["x"]+lane_rect["x"]+lane_rect["width"]/2)
+    glyph_y=int(window_rect["y"]+row_rect["y"]+row_rect["height"]/2)
+    subprocess.run(["xdotool","mousemove","--sync",str(glyph_x),str(glyph_y),"click","1"],check=True)
+    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".cm-breakpoint-line"}))==1,"native pointer sets exact second-row breakpoint")
+    assert cmd("GET",f"/element/{element('.cm-breakpoint-line')}/property/textContent")=="// second gutter row"
+    assert element(".cm-execution-gutter")
+    pointer_rect=cmd("GET",f"/element/{element('.cm-execution-gutter')}/rect")
+    assert lane_rect["x"]+lane_rect["width"]<=pointer_rect["x"],"breakpoint and arrow lanes do not overlap"
+    screenshot("compact-breakpoint-native.png")
+    subprocess.run(["xdotool","click","1"],check=True)
+    wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".cm-breakpoint-line"}),"native second click removes breakpoint")
+    marker = "// native restart persistence"
+    fill(code, marker)
+    save_editor(code)
+    source = data / "top.jacek.inkleet/notebook/lc-900000001/solution.rs"
+    wait_for(lambda: source.exists() and source.read_text() == marker, "plain source persisted")
+    wait_for(lambda: "已保存到本机文件" in text('.statusbar[role="status"]'), "save acknowledgement")
+    screenshot("desktop-code-native.png")
+    recovery_file=source.parent/".inkleet-drafts"/"solution.rs.json"
+    unsaved="// unsaved recovery only"
+    fill(code,unsaved)
+    wait_for(lambda:recovery_file.exists() and json.loads(recovery_file.read_text())["text"]==unsaved,"recovery snapshot persisted separately")
+    time.sleep(1.5)
+    assert source.read_text()==marker,"idle draft overwrote canonical"
+    assert element('[aria-label="源码未保存"]')
+    stop();start()
+    wait_for(lambda:source_text(code)==unsaved,"restart restores unsaved draft")
+    assert source.read_text()==marker
+    assert element('[aria-label="源码未保存"]')
+    fill(code,marker);save_editor(code)
+    wait_for(lambda:json.loads(recovery_file.read_text())["text"]==marker and json.loads(recovery_file.read_text())["baseline"]==marker,"saved recovery record becomes clean")
+    stop()
+    source.write_text("// external after clean save")
+    start()
+    wait_for(lambda:source_text(code)=="// external after clean save","clean sidecar does not resurrect old source")
+    assert not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="源码未保存"]'})
+    fill(code,marker);save_editor(code)
+    wait_for(lambda:source.read_text()==marker,"restore baseline through explicit save")
+    (evidence/"EXPLICIT_SAVE_RECOVERY_NATIVE_RESULT.txt").write_text("PASS: idle source unchanged, separate recovery file, restart restores unsaved buffer and dirty marker, clean sidecar does not replace later external canonical update.\\n")
+
+
+    def named_action(action,name):
+        click(".solution-menu>summary")
+        button=cmd("POST","/element",{"using":"xpath","value":f"//details[contains(@class,'solution-menu')]/div/button[text()='{action}']"})
+        cmd("POST",f"/element/{button[EID]}/click",{})
+        fill('[aria-label="解答名称"]',name)
+        click('.solution-name-dialog button[type="submit"]')
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".solution-name-dialog"}),"named operation committed")
+    named_action("复制解答","双指针")
+    first_id=cmd("GET",f"/element/{element('select[aria-label=\"解答\"]')}/property/value")
+    assert len(first_id)==32
+    named_source=source.parent/".solutions"/"rust"/first_id/"solution.rs"
+    wait_for(lambda:named_source.exists() and named_source.read_text()==marker,"native duplicate preserves current source")
+    fill(code,"// named solution")
+    save_editor(code)
+    wait_for(lambda:named_source.read_text()=="// named solution","named source saves independently")
+    assert source.read_text()==marker
+    named_action("重命名","优化版")
+    assert json.loads(named_source.with_name("name.json").read_text())["name"]=="优化版"
+    assert cmd("GET",f"/element/{element('select[aria-label=\"解答\"]')}/property/value")==first_id
+    screenshot("named-solutions-native.png")
+    click('select[aria-label="解答"] option[value="default"]')
+    wait_for(lambda:source_text(code)==marker,"default solution unchanged")
+    stop();start()
+    wait_for(lambda:element(f'select[aria-label="解答"] option[value="{first_id}"]'),"named solution listed after restart")
+    click(f'select[aria-label="解答"] option[value="{first_id}"]')
+    wait_for(lambda:source_text(code)=="// named solution","named source restored after native restart")
+    assert json.loads(named_source.with_name("name.json").read_text())["name"]=="优化版"
+    click('select[aria-label="解答"] option[value="default"]')
+    wait_for(lambda:source_text(code)==marker,"legacy default remains intact after restart")
+    (evidence/"NAMED_SOLUTIONS_NATIVE_RESULT.txt").write_text("PASS: real UI duplicate and rename, immutable ID, independent plain-text persistence, restart restoration, unchanged legacy default. No simulated IPC.\n")
+
+    click('nav[aria-label="工作区"] button:last-child')
+    note = '[aria-label="Markdown 笔记"]'
+    fill(note, "# Native note")
+    save_editor(note)
+    notes = source.with_name("notes.md")
+    wait_for(lambda: notes.exists() and notes.read_text() == "# Native note", "notes persisted")
+    screenshot("desktop-notes-native.png")
+    click('button[aria-label="预览笔记"]')
+    wait_for(lambda: text(".notes-rendered h1") == "Native note", "bundled native Worker Markdown preview")
+    screenshot("notes-preview-native.png")
+    click('button[aria-label="返回编辑"]')
+    wait_for(lambda: text(note) == "# Native note", "return from preview preserves original Markdown")
+
+    notes.write_text("# Real external note update")
+    settings_action("笔记", '[data-setting-action="refresh-notes"]')
+    wait_for(lambda:text(note)=="# Real external note update","manual refresh adopts actual external notes file")
+    assert source.read_text()==marker,"refreshing notes changed source"
+    notes.write_text("# Native note")
+    settings_action("笔记", '[data-setting-action="refresh-notes"]')
+    wait_for(lambda:text(note)=="# Native note","second external refresh keeps fresh persisted baseline")
+    (evidence/"EXTERNAL_NOTES_RESULT.txt").write_text("PASS: actual native notes file changed outside the editor, explicit refresh adopts it without modifying source; subsequent refresh and restart retain the correct baseline. Actual Typora process launching is not verified.\n")
+
+    stop()
+    start()
+    wait_for(lambda: text(code) == marker, "restart restored Rust source")
+    click('nav[aria-label="工作区"] button:last-child')
+    wait_for(lambda: text(note) == "# Native note", "restart restored Markdown")
+    notes.write_text("# External editor")
+    fill(note, "# Pending local edit")
+    save_editor(note)
+    wait_for(lambda: "保存失败" in text('.statusbar[role="status"]'), "external conflict visible")
+    assert notes.read_text() == "# External editor", "external content overwritten"
+    assert text(note) == "# Pending local edit", "pending draft lost"
+    screenshot("conflict-native.png")
+    click('[data-action="review-notes-conflict"]')
+    wait_for(lambda: element(".file-conflict"),"native conflict review")
+    def conflict_value(label):
+        node=element(f'textarea[aria-label="{label}"]')
+        return cmd("GET",f"/element/{node}/property/value")
+    assert conflict_value("冲突编辑器版本")=="# Pending local edit"
+    assert conflict_value("冲突文件版本")=="# External editor"
+    screenshot("conflict-review-native.png")
+    notes.write_text("# Changed externally again")
+    click('[data-conflict="external"]')
+    wait_for(lambda: "外部文件再次变化" in text(".file-conflict [role=alert]"),"stale conflict choice is refused")
+    assert notes.read_text()=="# Changed externally again"
+    click('[data-conflict="refresh"]')
+    wait_for(lambda: conflict_value("冲突文件版本")=="# Changed externally again","fresh external comparison")
+    click('[data-conflict="external"]')
+    wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".file-conflict"}),"native conflict resolved")
+    wait_for(lambda: text(note)=="# Changed externally again","notes editor reloads chosen file without stale undo state")
+    backups=list(notes.parent.joinpath(".inkleet-recovery").glob("conflict-*.json"))
+    assert len(backups)==1
+    backup=json.loads(backups[0].read_text())
+    assert backup["local"]=="# Pending local edit" and backup["external"]=="# Changed externally again"
+    fill(note,"# Resolved note")
+    save_editor(note)
+    wait_for(lambda: notes.read_text()=="# Resolved note","blocked save queue resumes on reviewed baseline")
+    (evidence/"CONFLICT_GUI_RESULT.txt").write_text("PASS: actual native comparison, concurrent external-change refusal, explicit file-version choice, two-version recovery snapshot, editor reload and subsequent atomic save.\n")
+
+    settings_action("笔记", '[data-action="notes-recovery"]')
+    wait_for(lambda:element(".file-recovery"),"native recovery history")
+    wait_for(lambda:element(".recovery-list button:first-child"),"native recovery records loaded")
+    click(".recovery-list button:first-child")
+    wait_for(lambda:element('textarea[aria-label="恢复编辑器副本"]'),"recovery record preview")
+    preview_node=element('textarea[aria-label="恢复编辑器副本"]')
+    preview=cmd("GET",f"/element/{preview_node}/property/value")
+    assert preview=="# Pending local edit"
+    click('[data-recovery="local"]')
+    wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".file-recovery"}),"explicit recovery completed")
+    wait_for(lambda:text(note)=="# Pending local edit","recovered note visible")
+    assert notes.read_text()=="# Pending local edit"
+    all_backups=[json.loads(p.read_text()) for p in notes.parent.joinpath(".inkleet-recovery").glob("conflict-*.json")]
+    assert any(b["local"]=="# Resolved note" and b["external"]=="# Resolved note" for b in all_backups),"pre-restore versions not preserved"
+    (evidence/"RECOVERY_GUI_RESULT.txt").write_text("PASS: native recovery list and two-version preview, explicit restore updates real notes.md and editor while preserving both pre-restore versions in a new backup.\n")
+
+    (evidence/"RESULT.txt").write_text("PASS: real Linux Tauri/WebKitGTK launch, native IPC, plain source and notes save, process restart restore, external conflict preserving both texts. No LeetCode verification.\n")
+    if os.environ.get("INKLEET_MANAGED_ENV") == "1":
+        settings_action("语言与环境", '[data-action="open-environments"]')
+        wait_for(lambda: element(".environment-summary button"), "environment manager opened")
+        click(".environment-summary button")
+        wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["python","node","pyright","debugpy"]), "three verified private tools installed", seconds=300)
+        screenshot("managed-environment-native.png")
+        click(".environments header button")
+        click('select[aria-label="编程语言"] option[value="python3"]')
+        wait_for(lambda: "Pyright 已连接" in text(".lsp-status"), "real private language server connected", seconds=45)
+        fill(code, "def solve(values):")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-indent","actions":[
+            {"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},
+            {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"}
+        ]}]})
+        typed="return len(values)"
+        # Send once through the OS keyboard; WebKit element/value may reset its transport.
+        # Never replay an uncertain mutation. Enter and exact source assertions remain below.
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","5",typed],check=True)
+        (evidence/"indent-input-observation.json").write_text(json.dumps({"rendered":text(code),"lines":source_text(code)},ensure_ascii=False))
+        wait_for(lambda:source_text(code)=="def solve(values):\n    return len(values)","native Python Enter produces four-space indentation")
+        save_editor(code)
+        python_saved=source.with_name("solution.py")
+        wait_for(lambda:python_saved.exists() and python_saved.read_text()=="def solve(values):\n    return len(values)","native auto-indented source saved byte-for-byte")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-dedent","actions":[
+            {"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue004"},{"type":"keyUp","value":"\ue004"},{"type":"keyUp","value":"\ue008"}
+        ]}]})
+        wait_for(lambda:source_text(code)=="def solve(values):\nreturn len(values)","native Shift+Tab dedents")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-tab","actions":[{"type":"keyDown","value":"\ue004"},{"type":"keyUp","value":"\ue004"}]}]})
+        wait_for(lambda:source_text(code)=="def solve(values):\n    return len(values)","native Tab indents")
+        fill(code,"def solve(values):")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-backspace","actions":[
+            {"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},
+            {"type":"keyDown","value":"\ue007"},{"type":"keyUp","value":"\ue007"},
+            {"type":"keyDown","value":"\ue003"},{"type":"keyUp","value":"\ue003"}
+        ]}]})
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","5","pass"],check=True)
+        wait_for(lambda:source_text(code)=="def solve(values):\npass","native Backspace removes the whole indentation unit")
+        (evidence/"EDITOR_KEYS_RESULT.txt").write_text("PASS: actual native WebKitGTK keyboard input; Python Enter uses four spaces, Shift+Tab dedents, Tab restores indentation and Backspace removes the full indentation unit. Completion popup click tested separately.\n")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+p"],check=True)
+        wait_for(lambda:element(".editor-command-palette"),"native editor command palette")
+        fill('[aria-label="搜索编辑器命令"]',"参数提示")
+        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".editor-command-list [role=option]"}))==1,"native palette searches actual connected action")
+        screenshot("editor-command-palette-native.png")
+        subprocess.run(["xdotool","key","Escape"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".editor-command-palette"}),"native palette Escape closes")
+        assert source_text(code)=="def solve(values):\npass","palette preserves source"
+        (evidence/"COMMAND_NATIVE_RESULT.txt").write_text("PASS: native CtrlShiftP command discovery, actual LSP action search, Escape and unchanged source.\n")
+        fill(code, "from collections import deque\nitems = deque([1, 2])\nitems.pop")
+        save_editor(code)
+        python_source=source.with_name("solution.py")
+        wait_for(lambda: python_source.exists() and python_source.read_text() == "from collections import deque\nitems = deque([1, 2])\nitems.pop", "multiline Python source persisted exactly")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
+            {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue009"}
+        ]}]})
+        completion_observations=[]
+        def observe_python_completion():
+            started=time.monotonic()
+            sample={"utc":time.time()}
+            try:
+                sample["dom"]=cmd("POST","/execute/sync",{"script":"""
+                  const t=document.querySelector('.cm-tooltip-autocomplete');
+                  if(!t)return {present:false,focus:document.activeElement?.getAttribute('aria-label')};
+                  const r=t.getBoundingClientRect(),s=getComputedStyle(t);
+                  return {present:true,text:t.textContent,innerText:t.innerText,bounds:r.toJSON(),visibility:s.visibility,display:s.display,focus:document.activeElement?.getAttribute('aria-label'),
+                    labels:Array.from(t.querySelectorAll('.cm-completionLabel')).map(n=>({text:n.textContent,bounds:n.getBoundingClientRect().toJSON()}))};
+                ""","args":[]})
+                sample["webdriverText"]=text(".cm-tooltip-autocomplete")
+                return "popleft" in sample["webdriverText"]
+            except Exception as error:
+                sample["error"]=str(error)
+                raise
+            finally:
+                sample["elapsed"]=time.monotonic()-started
+                completion_observations.append(sample)
+                (evidence/"python-completion-observations.json").write_text(json.dumps(completion_observations[-160:],ensure_ascii=False,indent=2))
+        wait_for(observe_python_completion, "real stdlib member completion", seconds=30)
+        screenshot("python-completion-native.png")
+        time.sleep(.3)  # Completion widgets intentionally ignore accidental clicks immediately after opening.
+        def choose_completion():
+            option=cmd("POST","/element",{"using":"xpath","value":"//li[@role='option'][contains(.,'popleft')]"})[EID]
+            try: cmd("POST",f"/element/{option}/click",{})
+            except RuntimeError as error:
+                if "stale element reference" in str(error): return False
+                raise
+            return True
+        wait_for(choose_completion, "apply freshly located completion")
+        wait_for(lambda: "items.popleft" in text(code), "completion applied to document")
+        focus_code_editor()
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"lsp-keyboard","actions":[
+            {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
+            {"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}
+        ]}]})
+        wait_for(lambda: element(".source-viewer"), "F12 opened a real stdlib declaration", seconds=30)
+        wait_for(lambda: "只读" in text(".source-viewer header"), "source viewer is explicitly read-only")
+        screenshot("python-stdlib-native.png")
+        source_navigation_case("def __getitem__(self, key: SupportsIndex","typing.pyi","python")
+        click(".source-viewer header button[aria-label=\'返回代码\']")
+        fill(code, "sum([1, 2])")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"signature-keyboard","actions":[
+            {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
+            {"type":"keyDown","value":"\ue012"},{"type":"keyUp","value":"\ue012"},
+            {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue008"},{"type":"keyUp","value":"\ue009"}
+        ]}]})
+        wait_for(lambda: "iterable" in text(".lsp-signature"), "real Pyright signature parameter help", seconds=30)
+        screenshot("python-signature-native.png")
+        fill(code, 'bad: int = "wrong"')
+        wait_for(lambda: element(".cm-lintRange-error"), "real Pyright type diagnostic", seconds=30)
+        screenshot("python-diagnostics-native.png")
+        fill(code, "def solve(values): return sum(values)")
+        focus_code_editor()
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
+        keys += [{"type":"keyDown","value":"\ue032"},{"type":"keyUp","value":"\ue032"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-rename","actions":keys}]})
+        rename_input=wait_for(lambda: element('.lsp-rename input:not([readonly])'),"native F2 rename input")
+        assert element('.lsp-rename[data-prepared="server"]'),"private Pyright prepareRename validated source symbol"
+        assert text(code)=="def solve(values): return sum(values)","prepareRename must not modify source"
+        (evidence/"PREPARE_RENAME_NATIVE_RESULT.txt").write_text("PASS: real pinned Pyright prepareRename response accepted before name input becomes editable; source unchanged.\\n")
+        cmd("POST",f"/element/{rename_input}/clear",{})
+        cmd("POST",f"/element/{rename_input}/value",{"text":"numbers","value":list("numbers")})
+        click('.lsp-rename button[type="submit"]')
+        wait_for(lambda: text(code)=="def solve(numbers): return sum(numbers)","real Pyright semantic rename updates declaration and reference")
+        screenshot("python-rename-native.png")
+        focus_code_editor()
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"rename-undo","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"z"},{"type":"keyUp","value":"z"},{"type":"keyUp","value":"\ue009"}]}]})
+        wait_for(lambda: text(code)=="def solve(values): return sum(values)","single undo restores complete pre-rename source")
+        (evidence/"RENAME_GUI_RESULT.txt").write_text("PASS: actual Linux GUI F2, real private Pyright rename, declaration/reference updates in original source and a single undo restores both.\n")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home"],check=True)
+        subprocess.run(["xdotool","key","--repeat","11","--repeat-delay","10","Right"],check=True)
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+p"],check=True)
+        wait_for(lambda:element(".editor-command-palette"),"rename palette opens at source selection")
+        fill('[aria-label="搜索编辑器命令"]',"重命名符号")
+        subprocess.run(["xdotool","key","Return"],check=True)
+        rename_input=wait_for(lambda:element(".lsp-rename input:not([readonly])"),"palette invokes same rename controller")
+        assert not cmd("POST","/elements",{"using":"css selector","value":".editor-command-palette"}),"executed palette closes"
+        cmd("POST",f"/element/{rename_input}/clear",{})
+        cmd("POST",f"/element/{rename_input}/value",{"text":"items","value":list("items")})
+        click('.lsp-rename button[type="submit"]')
+        wait_for(lambda:text(code)=="def solve(items): return sum(items)","palette invokes real semantic rename")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+        wait_for(lambda:text(code)=="def solve(values): return sum(values)","palette rename remains one undo transaction")
+        (evidence/"COMMAND_RENAME_NATIVE_RESULT.txt").write_text("PASS: real palette invokes Pyright rename at preserved source selection, edits declaration/reference, and single undo restores both.\n")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home"],check=True)
+        subprocess.run(["xdotool","key","--repeat","11","--repeat-delay","10","Right"],check=True)
+        subprocess.run(["xdotool","key","F2"],check=True)
+        wait_for(lambda:element(".lsp-rename input:not([readonly])"),"preview rename input")
+        fill(".lsp-rename input","previewed")
+        subprocess.run(["xdotool","key","--clearmodifiers","shift+Return"],check=True)
+        wait_for(lambda:element(".lsp-rename-preview:not([hidden])"),"real Pyright rename preview")
+        assert text(code)=="def solve(values): return sum(values)","preview must leave original source unchanged"
+        assert len(cmd("POST","/elements",{"using":"css selector","value":".lsp-rename-change"}))==2,"both semantic occurrences are previewed"
+        screenshot("python-rename-preview-native.png")
+        apply_selector='[data-action="rename-apply"]'
+        last_rect=None
+        stable_samples=0
+        def stable_rename_apply():
+            global last_rect, stable_samples
+            target=element(apply_selector)
+            if not cmd("GET",f"/element/{target}/displayed"): return False
+            rect=cmd("GET",f"/element/{target}/rect")
+            stable_samples=stable_samples+1 if rect==last_rect else 0
+            last_rect=rect
+            return stable_samples>=2
+        wait_for(stable_rename_apply,"rename Apply has stable visible geometry")
+        click(apply_selector)
+        wait_for(lambda:text(code)=="def solve(previewed): return sum(previewed)","reviewed rename applied")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+        wait_for(lambda:text(code)=="def solve(values): return sum(values)","preview application is one undo transaction")
+        (evidence/"RENAME_PREVIEW_NATIVE_RESULT.txt").write_text("PASS: actual F2 + ShiftEnter obtains private Pyright edits, preview does not mutate source, Apply changes both occurrences and one undo restores original.\\n")
+
+
+        focus_code_editor()
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(11): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
+        keys += [{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"},{"type":"keyUp","value":"\ue008"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"python-references","actions":keys}]})
+        wait_for(lambda: "本题 2 处引用" in text(".lsp-references"),"real Pyright declaration and reference positions")
+        assert len(cmd("POST","/elements",{"using":"css selector","value":".lsp-reference-list button"}))==2
+        screenshot("python-references-native.png")
+        click(".lsp-reference-list button:last-child")
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-references"}),"reference navigation closes panel")
+        assert text(code)=="def solve(values): return sum(values)"
+        (evidence/"REFERENCES_GUI_RESULT.txt").write_text("PASS: actual native Shift+F12 real private Pyright declaration/reference lookup, two original source locations and navigation without modifying the draft.\n")
+        fill(code, "def solve(values):\n    return sum(values)")
+        def font_probe():
+            node=element(code)
+            return {key:cmd("GET",f"/element/{node}/css/{key}") for key in ["font-family","font-size","font-weight","font-style","letter-spacing","text-shadow","transform"]}
+        focus_code_editor()
+        font_before=font_probe()
+        screenshot("editor-font-dock-closed-native.png")
+        click('.pane-heading .actions button[aria-label="本地"]')
+        focus_code_editor()
+        font_open=font_probe()
+        screenshot("editor-font-dock-open-native.png")
+        assert font_open==font_before,"opening dock changed native computed font"
+        click(".local-runner [aria-label='收起']")
+        focus_code_editor()
+        font_closed=font_probe()
+        screenshot("editor-font-dock-reclosed-native.png")
+        assert font_closed==font_before,"closing dock changed native computed font"
+        (evidence/"editor-font-dock.json").write_text(json.dumps({"before":font_before,"open":font_open,"closed":font_closed}))
+        click('.pane-heading .actions button[aria-label="本地"]')
+        wait_for(lambda: element('[aria-label="本地测试输入"]'), "local runner opened")
+        click('[data-action="local-execute"]')
+        wait_for(lambda: text(".local-result").strip()=="10", "real private Python harness result", seconds=30)
+        assert "不代表通过力扣判题" in cmd("GET",f"/element/{element('.case-result')}/attribute/title")
+        click('[aria-label="运行与调试帮助"]')
+        assert not cmd("POST","/elements",{"using":"css selector","value":'.settings-hub'}),"runner Help opens the manual directly"
+        wait_for(lambda:"本地输出不代表力扣判题结论" in cmd("GET",f"/element/{element('.user-manual')}/property/textContent"),"local judge distinction is available in the manual")
+        click('[aria-label="关闭使用手册"]')
+        wait_for(lambda:cmd("GET",f"/element/{cmd('GET','/element/active')[EID]}/attribute/aria-label")=="运行与调试帮助","runner Help restores keyboard focus to its opener")
+        screenshot("python-local-run-native.png")
+        (evidence/"LOCAL_RUN_RESULT.txt").write_text("PASS: actual native GUI starts a private Python function harness and displays computed result 10. No online verdict.\n")
+        click('[data-local-tab="debug"]')
+        focus_code_editor()
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
+        wait_for(lambda: "断点：2。" in text(".debug-panel"), "F9 breakpoint on function body, not module definition")
+        click_debug_action('.debug-panel [aria-label="开始调试"]')
+        wait_for(lambda: "已暂停" in text(".debug-panel"), "real debugger breakpoint", seconds=45)
+        wait_for(lambda: element(".debug-inspector > div:first-child > button"), "real call stack loaded")
+        click(".debug-inspector > div:first-child > button")
+        wait_for(lambda: element(".debug-variable"), "real variable values loaded")
+        wait_for(lambda: element(".cm-debug-stopped"), "paused source line highlighted")
+        paused_node=element(".cm-debug-stopped")
+        paused_color=cmd("GET",f"/element/{paused_node}/css/background-color")
+        paused_text=cmd("GET",f"/element/{paused_node}/property/textContent")
+        paused_rect=cmd("GET",f"/element/{paused_node}/rect")
+        native_window=cmd("GET","/window/rect")
+        subprocess.run(["xdotool","mousemove","--sync",str(int(native_window["x"]+paused_rect["x"]+min(60,paused_rect["width"]/2))),str(int(native_window["y"]+paused_rect["y"]+paused_rect["height"]/2)),"click","1"],check=True)
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/css/background-color")==paused_color,"click must preserve paused row background"
+        subprocess.run(["xdotool","key","--clearmodifiers","shift+Right"],check=True)
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/css/background-color")==paused_color,"selection must preserve paused row background"
+        assert cmd("GET",f"/element/{element('.cm-debug-stopped')}/property/textContent")==paused_text
+        screenshot("paused-selection-native.png")
+
+        wait_for(lambda:element(".cm-execution-pointer svg"),"native SVG execution arrow")
+        expression_input=element('[aria-label="调试表达式输入"]')
+        cmd("POST",f"/element/{expression_input}/value",{"text":"len(values)","value":list("len(values)")})
+        wait_for(lambda:cmd("GET",f"/element/{element('.debug-evaluate button[type=\"submit\"]')}/enabled"),"expression button enabled after native text input")
+        screenshot("python-before-evaluate-native.png")
+        click('.debug-evaluate button[type="submit"]')
+        def evaluation_result():
+            errors=cmd("POST","/elements",{"using":"css selector","value":".debug-panel [role=alert]"})
+            if errors:
+                message=cmd("GET",f"/element/{errors[0][EID]}/text")
+                (evidence/"evaluation-error.txt").write_text(message)
+            results=cmd("POST","/elements",{"using":"css selector","value":".debug-evaluation-result pre"})
+            return bool(results) and cmd("GET",f"/element/{results[0][EID]}/text")=="3"
+        wait_for(evaluation_result,"real debugpy evaluates current frame expression once")
+        (evidence/"EVALUATE_GUI_RESULT.txt").write_text("PASS: actual native Python paused-frame expression len(values) evaluated through private debugpy and displayed exact result 3. Other language expression adapters are not covered by this assertion.\n")
+        screenshot("python-debug-native.png")
+        (evidence/"DEBUG_GUI_RESULT.txt").write_text("PASS: real Linux GUI private debugpy, F9 breakpoint and paused call stack inspector. Stepping verified separately by protocol probe.\n")
+        focus_code_editor()
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-update-keys","actions":[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"},{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"},{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]}]})
+        apply_points=cmd("POST","/element",{"using":"xpath","value":"//button[@aria-label='应用断点']"})[EID]
+        cmd("POST",f"/element/{apply_points}/click",{})
+        wait_for(lambda: "断点已更新" in text(".debug-panel"), "live debugger accepts cleared breakpoints")
+        wait_for(lambda: "断点：未设置。" in text(".debug-panel"), "cleared breakpoint list is reflected in actual UI")
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"debug-stop-keys","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
+        wait_for(lambda: "调试结束" in text(".debug-panel"), "debugger stopped")
+        nested_source="def inner(values):\n    inner_total = sum(values)\n    return inner_total\ndef solve(values):\n    total = inner(values)\n    return total"
+        fill(code,nested_source)
+        focus_code_editor()
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+        keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"nested-breakpoint","actions":keys}]})
+        wait_for(lambda: "断点：5。" in text(".debug-panel"),"nested call breakpoint")
+        click('[aria-label="开始调试"]')
+        wait_for(lambda: "已暂停" in text(".debug-panel"),"pause before nested function",seconds=45)
+        def stack_names():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-frames > button"})
+            return "\n".join(cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes)
+        (evidence/"nested-stack-observation.json").write_text(json.dumps({"webdriverText":text(".debug-frames"),"buttonText":stack_names()},ensure_ascii=False))
+        wait_for(lambda: "solve" in stack_names(),"caller stack initially selected")
+        click('[aria-label="单步进入"]')
+        wait_for(lambda: "inner" in stack_names(),"real stepIn enters inner function")
+        click('[aria-label="单步跳过"]')
+        def inner_total():
+            node=element('.debug-variable > button[aria-label="inner_total"] + code')
+            return cmd("GET",f"/element/{node}/property/textContent")
+        wait_for(lambda:inner_total()=="10","stepOver computes inner-frame local")
+        click('.debug-variable button[aria-label="values"]')
+        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":".debug-tree-children .debug-variable"}))>=3,"real nested array tree children")
+        assert cmd("POST","/elements",{"using":"css selector","value":".debug-variable button[aria-label='values']"}),"parent lost while expanding"
+        def child_values():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-tree-children .debug-variable > code"})
+            return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
+        wait_for(lambda:all(value in child_values() for value in ["3","-1","8"]),"expanded array children preserve exact values")
+
+        reveal_debug_control('[aria-label="调试表达式输入"]')
+        fill('[aria-label="调试表达式输入"]',"inner_total")
+        reveal_debug_control('[aria-label="添加监视表达式"]')
+        click('[aria-label="添加监视表达式"]')
+        reveal_debug_control('[aria-label="刷新监视 inner_total"]')
+        click('[aria-label="刷新监视 inner_total"]')
+        def watch_result():
+            return cmd("GET",f"/element/{element('.debug-watch > span')}/property/textContent")
+        wait_for(lambda:watch_result()=="10","real current-frame watch")
+        screenshot("python-nested-debugger-native.png")
+        # Real X11 drag/collapse: visibility changes must retain the exact paused session.
+        dock=cmd("GET",f"/element/{element('.local-runner')}/rect")
+        separator=cmd("GET",f"/element/{element('[aria-label=\"调整本地面板高度\"]')}/rect")
+        window=cmd("GET","/window/rect")
+        x=int(window["x"]+separator["x"]+separator["width"]/2)
+        y=int(window["y"]+separator["y"]+separator["height"]/2)
+        subprocess.run(["xdotool","mousemove","--sync",str(x),str(y),"mousedown","1","mousemove","--sync",str(x),str(y-50),"mouseup","1"],check=True)
+        wait_for(lambda:cmd("GET",f"/element/{element('.local-runner')}/rect")["height"]>dock["height"]+35,"native vertical dock drag")
+        saved_height=cmd("GET",f"/element/{element('.local-runner')}/rect")["height"]
+        click(".local-runner [aria-label='收起']")
+        wait_for(lambda:element(".local-runner[hidden]"),"dock hidden without unmount")
+        wait_for(lambda:element(".cm-debug-stopped"),"hidden paused session retains source position")
+        click('[aria-label="本地"]')
+        wait_for(lambda:abs(cmd("GET",f"/element/{element('.local-runner')}/rect")["height"]-saved_height)<2,"native dock height restored")
+        reveal_debug_control('[aria-label="刷新监视 inner_total"]')
+        wait_for(lambda:watch_result()=="10","collapse preserves existing watch result")
+        screenshot("resized-debugger-native.png")
+        (evidence/"DOCK_NATIVE_RESULT.txt").write_text("PASS: actual X11 drag, hidden retained panel, restored height and paused source/watch state.\\n")
+
+
+        reveal_debug_control('.debug-frames>button[title^="solve ·"]', fallback="up")
+        caller=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'solve')]"})[EID]
+        cmd("POST",f"/element/{caller}/click",{})
+        wait_for(lambda:watch_result()=="—","watch result invalidated on caller selection")
+        reveal_debug_control('.debug-frames>button[title^="inner ·"]', fallback="up")
+        inner=cmd("POST","/element",{"using":"xpath","value":"//div[contains(@class,'debug-frames')]/button[contains(.,'inner')]"})[EID]
+        cmd("POST",f"/element/{inner}/click",{})
+        wait_for(lambda:inner_total()=="10","selecting inner frame restores its own variables")
+        click('[aria-label="单步跳出"]')
+        wait_for(lambda:"inner" not in stack_names() and "solve" in stack_names(),"real stepOut returns to caller")
+        wait_for(lambda:watch_result()=="—","watch result invalidated on new pause")
+        click('[aria-label="停止调试"]')
+        wait_for(lambda:"调试结束" in text(".debug-panel"),"nested debugger stopped")
+        # A second real session preserves the ordinary step-in/out assertions above
+        # and independently validates capability-gated targeted step-in.
+        click_debug_action('[aria-label="开始调试"]')
+        wait_for(lambda:"已暂停" in text(".debug-panel"),"targeted step-in source breakpoint",seconds=45)
+        click_debug_action('[aria-label="选择函数步入"]')
+        def inner_target():
+            nodes=cmd("POST","/elements",{"using":"css selector","value":".debug-targets>button"})
+            for node in nodes:
+                label=cmd("GET",f"/element/{node[EID]}/property/textContent")
+                if "inner" in label:return node[EID]
+            return None
+        target=wait_for(inner_target,"real debugpy inner function target")
+        reveal_debug_control(".debug-targets>button")
+        target=inner_target()
+        cmd("POST",f"/element/{target}/click",{})
+        wait_for(lambda:"inner" in stack_names(),"selected adapter target enters inner function")
+        wait_for(lambda:element(".cm-execution-pointer svg"),"targeted step-in moves execution arrow")
+        screenshot("python-smart-step-native.png")
+        click_debug_action('[aria-label="停止调试"]')
+        wait_for(lambda:"调试结束" in text(".debug-panel"),"targeted debugger stopped")
+        (evidence/"SMART_STEP_NATIVE_RESULT.txt").write_text("PASS: real private debugpy target discovery, original target selection, entry into inner function and execution arrow. Other adapters require independent capability validation.\\n")
+
+        focus_code_editor()
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(4): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+        keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"clear-nested-breakpoint","actions":keys}]})
+        wait_for(lambda:"断点：未设置。" in text(".debug-panel"),"nested test breakpoint cleaned")
+        (evidence/"NESTED_DEBUGGER_RESULT.txt").write_text("PASS: real private debugpy step-in to nested function, step-over local value, hierarchical array expansion, explicit Watch, caller frame switching, step-out and old-frame/epoch Watch invalidation. Other adapters not covered by nested-function assertion.\n")
+        click(".local-runner [aria-label='收起']")
+        settings_action("语言与环境", '[data-action="open-environments"]')
+        wait_for(lambda: element('select[aria-label="开发环境语言"]'), "language-specific tool groups")
+        click('select[aria-label="开发环境语言"] option[value="java"]')
+        click(".environment-summary button")
+        wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["jdk","jdtls","java-debug"]), "verified private JDK and JDTLS installed", seconds=300)
+        screenshot("java-environment-native.png")
+        click(".environments header button")
+        click('select[aria-label="编程语言"] option[value="java"]')
+        wait_for(lambda: "JDT LS 已连接" in text(".lsp-status"), "real private Java language server connected", seconds=100)
+        java_doc="class Solution { void test() { java.util.ArrayList<String> values = new java.util.ArrayList<>(); values. } }"
+        fill(code,java_doc)
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(4): keys += [{"type":"keyDown","value":"\ue012"},{"type":"keyUp","value":"\ue012"}]
+        keys += [{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue009"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"java-completion","actions":keys}]})
+        wait_for(lambda: "add(" in text(".cm-tooltip-autocomplete"), "real Java ArrayList member completion", seconds=45)
+        screenshot("java-completion-native.png")
+        wait_for(lambda:element(".cm-completionInfo .lsp-document-expand"),"real Java completion has expandable details",seconds=30)
+        expected_detail=cmd("GET",f"/element/{element('.cm-completionInfo .lsp-completion-summary')}/property/textContent")
+        assert "add" in expected_detail,"expanded reader targets the selected real Java completion"
+        subprocess.run(["xdotool","key","--clearmodifiers","alt+Return"],check=True)
+        wait_for(lambda:element(".lsp-document-reader[open]"),"native AltEnter expands actual server details")
+        wait_for(lambda:expected_detail in cmd("GET",f"/element/{element('.lsp-reader-body')}/property/textContent"),"native reader retains selected signature details")
+        assert source_text(code)==java_doc,"reading details never mutates Java source"
+        screenshot("java-expanded-documentation-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+        wait_for(lambda:element(".lsp-reader-find input"),"native reader search control")
+        fill(".lsp-reader-find input","add")
+        wait_for(lambda:"add" in text(".lsp-reader-search-match").lower(),"native search highlights actual JDT detail")
+        assert source_text(code)==java_doc,"reader search never mutates Java source"
+        screenshot("java-documentation-search-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-find')}/property/hidden")==True,"first native Escape hides search")
+        assert element(".lsp-document-reader[open]"),"first Escape retains documentation reader"
+
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-document-reader"}),"native Escape closes documentation")
+        wait_for(lambda:cmd("GET",f"/element/{cmd('GET','/element/active')[EID]}/attribute/aria-label")=="代码编辑器","native documentation returns keyboard focus to code")
+        (evidence/"EXPANDED_DOCUMENTATION_NATIVE_RESULT.txt").write_text("PASS: genuine JDTLS selected completion detail, actual AltEnter reader activation, exact accepted detail retained, unchanged source, native Escape and focus restoration. Long-document limits and worker-race cases are browser-qualified separately.\\n")
+
+        keys=[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(java_doc.index("ArrayList")+3): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
+        keys += [{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"java-source","actions":keys}]})
+        wait_for(lambda: element(".source-viewer"), "Java standard library source viewer", seconds=45)
+        wait_for(lambda: "ArrayList.java" in text(".source-viewer header"), "real ArrayList source name")
+        screenshot("java-stdlib-native.png")
+        source_navigation_case("extends AbstractList","AbstractList.java","java")
+        assert text(code)==java_doc,"library navigation preserves editable Java solution"
+        click(".source-viewer header button[aria-label=\'返回代码\']")
+        if os.environ.get("INKLEET_JAVA_SNIPPET_VALIDATION") == "1":
+            native_snippet_case("java",code)
+        java_solution="class Solution {\n public int solve(int[] values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n }\n}"
+        fill(code,java_solution)
+        save_editor(code)
+        click('.pane-heading .actions button[aria-label="本地"]')
+        click('[data-local-tab="run"]')
+        fill('[aria-label="本地测试输入"]',"[3,-1,8]")
+        click('[data-action="local-execute"]')
+        wait_for(lambda: text(".local-result").strip()=="10","Java private compilation and exact typed result",seconds=150)
+        screenshot("java-local-run-native.png")
+        java_saved=data/"top.jacek.inkleet/notebook/lc-900000001/solution.java"
+        wait_for(lambda: java_saved.exists() and java_saved.read_text()==java_solution,"Java run preserves original saved source")
+        (evidence/"JAVA_LOCAL_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK compiles the typed Java Solution harness, computes exact value 10 and preserves original draft. No debugger or online verdict.\n")
+        click('[data-local-tab="debug"]')
+        focus_code_editor()
+        keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+        for _ in range(3): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+        keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-breakpoint","actions":keys}]})
+        wait_for(lambda: "断点：4。" in text(".debug-panel"),"Java original source breakpoint")
+        click_debug_action('.debug-panel [aria-label="开始调试"]')
+        wait_for(lambda: "已暂停" in text(".debug-panel"),"Java real private debugger breakpoint",seconds=180)
+        wait_for(lambda: element(".cm-debug-stopped"),"Java original source pause highlight")
+        wait_for(lambda:element(".cm-execution-pointer svg"),"Java SVG execution arrow")
+        def java_total():
+            node=element('.debug-variable > button[aria-label="total"] + code')
+            return cmd("GET",f"/element/{node}/property/textContent")
+        wait_for(lambda: java_total()=="0","Java initial total")
+        wait_for(lambda: "部分断点尚未验证" not in text(".debug-panel"),"Java asynchronous breakpoint verification reaches the UI")
+        screenshot("java-debug-native.png")
+        for _ in range(3):
+            focus_code_editor()
+            cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-step","actions":[{"type":"keyDown","value":"\ue03a"},{"type":"keyUp","value":"\ue03a"}]}]})
+            time.sleep(.7)
+            if java_total()!="0": break
+        assert java_total()!="0","Java variables did not change after stepping"
+        cmd("POST","/actions",{"actions":[{"type":"key","id":"java-debug-stop","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
+        wait_for(lambda: "调试结束" in text(".debug-panel"),"Java debug stop")
+        (evidence/"JAVA_DEBUG_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private Java debug core over stdio, original line 4 breakpoint, paused source highlight, total=0, real F10 variable update and Shift+F5 termination.\n")
+        click(".local-runner [aria-label='收起']")
+        (evidence/"JAVA_GUI_RESULT.txt").write_text("PASS: actual Linux GUI private JDK/JDTLS install, ArrayList member completion and F12 read-only standard library source. Separate three-platform protocol checks compare returned source byte-for-byte with private JDK src.zip.\n")
+        click('select[aria-label="编程语言"] option[value="rust"]')
+        wait_for(lambda: text(code) == marker, "switching away preserves Rust draft and stops Python session")
+
+        # Real application-owned Go and Rust language services, not mocked IPC.
+        for group,language,server,code_text,member,definition_word,source_name in [
+            ("golang","golang","gopls",'import "strings"; func example() { var builder strings.Builder; builder. }',"WriteString","Builder","builder.go"),
+            ("rust","rust","rust-analyzer","fn example() { let mut values = Vec::<i32>::new(); values.pu }","push","Vec","mod.rs"),
+            ("cpp","cpp","clangd","void example() { vector<int> values; values.pu }","push_back","vector","vector.h"),
+            ("c","c","clangd",'void example(void) { printf(""); struct { int value; } pair; pair.va }',"value","printf","stdio.h"),
+        ]:
+            settings_action("语言与环境", '[data-action="open-environments"]')
+            wait_for(lambda: element("dialog.environments"), "environment dialog")
+            environment_group="cpp" if group=="c" else group
+            click(f'select[aria-label="开发环境语言"] option[value="{environment_group}"]')
+            required_tools={"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview","zig","codelldb"],"cpp":["zig","clangd","codelldb"],"c":["zig","clangd","codelldb"]}[group]
+            # Shared C/C++ tools can already be installed; preserve every readiness assertion.
+            if not all("已安装" in text(f'[data-tool="{tool}"]') for tool in required_tools):
+                click(".environment-summary button")
+            if group=="golang":
+                # Closing before Go finishes must not discard the queued gopls build.
+                click("dialog.environments header button")
+                time.sleep(1)
+                settings_action("语言与环境", '[data-action="open-environments"]')
+                wait_for(lambda: element("dialog.environments"),"reopen ongoing Go installation")
+                click('select[aria-label="开发环境语言"] option[value="golang"]')
+            wait_for(lambda: all("已安装" in text(f'[data-tool="{tool}"]') for tool in (
+                {"golang":["go","gopls","delve"],"rust":["rustc","cargo","rust-std","rust-src","rust-analyzer-preview","zig","codelldb"],"cpp":["zig","clangd","codelldb"],"c":["zig","clangd","codelldb"]}[group]
+            )),f"{group} managed installation",seconds=720)
+            click("dialog.environments header button")
+            click(f'select[aria-label="编程语言"] option[value="{language}"]')
+            wait_for(lambda: server+" 已连接" in text(".lsp-status"),f"{group} connected",seconds=90)
+            fill(code,code_text)
+            keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"}]
+            for _ in range(2): keys += [{"type":"keyDown","value":"\ue012"},{"type":"keyUp","value":"\ue012"}]
+            keys += [{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":" "},{"type":"keyUp","value":" "},{"type":"keyUp","value":"\ue009"}]
+            cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-completion","actions":keys}]})
+            wait_for(lambda: member in text(".cm-tooltip-autocomplete"),f"real {group} member completion",seconds=90)
+            screenshot(group+"-completion-native.png")
+            # Insert immediately after screenshot(group+"-completion-native.png").
+            # Real rust-analyzer output and native keyboard only; DOM probes are passive.
+            if group=="rust":
+                wait_for(lambda:element(".cm-completionInfo .lsp-document-expand"),"real Rust completion documentation resolved",seconds=30)
+                preview_nodes=cmd("POST","/elements",{"using":"css selector","value":".cm-completionInfo pre code"})
+                preview_codes=[cmd("GET",f"/element/{node[EID]}/property/textContent") for node in preview_nodes]
+                expected_rust_example=next((value for value in preview_codes if "let mut vec = vec![1, 2];" in value and "vec.push(3);" in value),None)
+                assert expected_rust_example,"genuine Vec::push preview contains its known Rust example"
+                subprocess.run(["xdotool","key","--clearmodifiers","alt+Return"],check=True)
+                wait_for(lambda:element(".lsp-document-reader[open]"),"genuine Rust documentation reader")
+                wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-body')}/attribute/aria-busy")=="false","Rust reader finished optional syntax work")
+                trace=cmd("POST","/execute/sync",{"script":r"""
+                  return [...document.querySelectorAll('.lsp-reader-body pre code')].map(code=>({
+                    text:code.textContent,
+                    keywords:[...code.querySelectorAll('.lsp-code-keyword')].map(node=>({text:node.textContent,color:getComputedStyle(node).color,plainColor:getComputedStyle(code).color,display:getComputedStyle(node).display,visibility:getComputedStyle(node).visibility})),
+                    classes:[...code.querySelectorAll('span')].map(node=>node.className)
+                  }));
+                ""","args":[]})
+                (evidence/"RUST_DOCUMENT_CODE_NATIVE_TRACE.json").write_text(json.dumps(trace,ensure_ascii=False,indent=2))
+                assert trace,"genuine Vec::push reader must retain its code blocks"
+                assert any(block["text"]==expected_rust_example and block["keywords"] for block in trace),"genuine Vec::push reader must preserve exact server example with highlighted Rust keywords"
+                result=cmd("POST","/execute/sync",{"script":r"""
+                  const blocks=[...document.querySelectorAll('.lsp-reader-body pre code')];
+                  const code=blocks.find(node=>node.textContent===arguments[0]&&node.querySelector('.lsp-code-keyword'));
+                  if(!code)return null;
+                  // Pick a line that truly spans a keyword and another original
+                  // text node; do not count duplicate single-node matches as proof.
+                  const walker=document.createTreeWalker(code,NodeFilter.SHOW_TEXT),segments=[];let node,offset=0;
+                  while(node=walker.nextNode()){segments.push({node,from:offset,to:offset+node.length});offset+=node.length;}
+                  let query=null;
+                  for(const token of code.querySelectorAll('.lsp-code-keyword')){
+                    const segment=segments.find(part=>token.contains(part.node));if(!segment)continue;
+                    const from=segment.from,to=Math.min(code.textContent.indexOf('\n',from)<0?code.textContent.length:code.textContent.indexOf('\n',from),from+100);
+                    if(to>segment.to&&segments.some(part=>part.from>=segment.to&&part.from<to)){
+                      query=code.textContent.slice(from,to);break;
+                    }
+                  }
+                  const allWalker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];
+                  while(node=allWalker.nextNode())nodes.push(node);
+                  window.__nativeHighlightCode=code;window.__nativeHighlightNodes=nodes;
+                  window.__nativeHighlightBlocks=blocks;window.__nativeHighlightTexts=blocks.map(node=>node.textContent);
+                  window.__nativeMatchGeometry=()=>{
+                    const root=window.__nativeHighlightCode,origin=root.getBoundingClientRect(),walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),rects=[];let node;
+                    while(node=walker.nextNode())for(let i=0;i<node.length;i++){
+                      const range=document.createRange();range.setStart(node,i);range.setEnd(node,i+1);
+                      const r=range.getBoundingClientRect();rects.push([r.left-origin.left,r.top-origin.top,r.width,r.height]);
+                    }
+                    return {text:root.textContent,rects};
+                  };
+                  window.__nativeBeforeMatchGeometry=window.__nativeMatchGeometry();
+                  const token=code.querySelector('.lsp-code-keyword'),style=getComputedStyle(token);
+                  return {query,painted:style.color!==getComputedStyle(code).color&&style.display!=='none'&&style.visibility==='visible'};
+                ""","args":[expected_rust_example]})
+                assert result and result["painted"],"genuine Rust code must have visible keyword color"
+                assert result["query"],"genuine Rust example must provide a cross-token search query"
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+f"],check=True)
+                fill(".lsp-reader-find input",result["query"])
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":r"""
+                  const code=window.__nativeHighlightCode;
+                  return code.querySelectorAll('.lsp-reader-search-match').length>1&&
+                    window.__nativeHighlightBlocks.every((block,i)=>block.textContent===window.__nativeHighlightTexts[i]);
+                ""","args":[]}),"native query crosses real syntax-token boundaries and preserves all code text")
+                assert source_text(code)==code_text,"native syntax search preserves solution"
+                match_style=cmd("POST","/execute/sync",{"script":r"""
+                  const marks=[...window.__nativeHighlightCode.querySelectorAll('.lsp-reader-search-match')];
+                  return marks.map(mark=>{
+                    const s=getComputedStyle(mark),p=getComputedStyle(mark.parentElement),r=mark.getBoundingClientRect();
+                    return {background:s.backgroundColor,color:s.color,parentColor:p.color,left:r.left,right:r.right,top:r.top,
+                      flat:s.outlineStyle==='none'&&s.boxShadow==='none'&&['Top','Right','Bottom','Left'].every(side=>parseFloat(s['border'+side+'Width'])===0&&parseFloat(s['padding'+side])===0&&parseFloat(s['margin'+side])===0)&&['TopLeft','TopRight','BottomLeft','BottomRight'].every(corner=>parseFloat(s['border'+corner+'Radius'])===0),
+                      font:['fontFamily','fontSize','fontStyle','fontWeight','lineHeight','letterSpacing'].every(key=>s[key]===p[key])};
+                  });
+                ""","args":[]})
+                assert len(match_style)>1,"native style evidence covers several real token fragments"
+                assert len({mark["background"] for mark in match_style})==1,"native match fragments share one fill"
+                assert all(mark["flat"] and mark["font"] and mark["color"]==mark["parentColor"] and mark["background"].startswith("rgb(") for mark in match_style),"native marks preserve syntax foregrounds without edges or spacing"
+                assert all(abs(right["left"]-left["right"])<0.75 for left,right in zip(match_style,match_style[1:])),"native single-line match fragments touch continuously"
+                (evidence/"RUST_DOCUMENT_MATCH_STYLE_NATIVE.json").write_text(json.dumps(match_style,ensure_ascii=False,indent=2))
+                screenshot("rust-document-search-flat-fill-native.png")
+                assert cmd("POST","/execute/sync",{"script":r"""
+                  const before=window.__nativeBeforeMatchGeometry,after=window.__nativeMatchGeometry();
+                  return after.text===before.text&&after.rects.length===before.rects.length&&
+                    after.rects.every((r,i)=>r.every((v,j)=>Math.abs(v-before.rects[i][j])<0.15));
+                ""","args":[]}),"native search preserves every character's layout relative to its code block"
+                screenshot("rust-document-code-highlight-native.png")
+                subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+                wait_for(lambda:cmd("GET",f"/element/{element('.lsp-reader-find')}/property/hidden")==True,"native Escape hides syntax search")
+                assert cmd("POST","/execute/sync",{"script":r"""
+                  const code=window.__nativeHighlightCode,walker=document.createTreeWalker(code,NodeFilter.SHOW_ALL),nodes=[];let node;
+                  while(node=walker.nextNode())nodes.push(node);
+                  const blocks=[...document.querySelectorAll('.lsp-reader-body pre code')];
+                  return code.isConnected&&blocks.length===window.__nativeHighlightBlocks.length&&
+                    blocks.every((block,i)=>block===window.__nativeHighlightBlocks[i]&&block.textContent===window.__nativeHighlightTexts[i])&&
+                    nodes.length===window.__nativeHighlightNodes.length&&nodes.every((node,i)=>node===window.__nativeHighlightNodes[i]);
+                ""","args":[]}),"native Escape restores syntax/text-node identity and every complete code block"
+                (evidence/"RUST_DOCUMENT_CODE_NATIVE_RESULT.txt").write_text("PASS: genuine rust-analyzer Vec::push documentation code, visible keyword color, native cross-token search, full code text and original node restoration after Escape, unchanged solution. No language-server or worker responses substituted.\n")
+                subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+                wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".lsp-document-reader"}),"native syntax reader closes")
+                assert source_text(code)==code_text,"native syntax reader preserves source on close"
+
+            keys=[{"type":"keyDown","value":"\ue00c"},{"type":"keyUp","value":"\ue00c"},{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+            for _ in range(code_text.index(definition_word)+1): keys += [{"type":"keyDown","value":"\ue014"},{"type":"keyUp","value":"\ue014"}]
+            keys += [{"type":"keyDown","value":"\ue03c"},{"type":"keyUp","value":"\ue03c"}]
+            cmd("POST","/actions",{"actions":[{"type":"key","id":group+"-source","actions":keys}]})
+            wait_for(lambda: element(".source-viewer"),f"{group} source viewer",seconds=90)
+            screenshot(group+"-stdlib-native.png")
+            if group=="golang":
+                source_navigation_case("utf8.AppendRune","utf8.go","golang")
+                assert text(".source-viewer .source-path").strip()=="go/src/unicode/utf8/utf8.go","Go source path omits private cache noise"
+            if group=="rust": source_navigation_case("A: Allocator = Global","alloc.rs","rust")
+            if group=="cpp": source_navigation_case("= allocator_traits","allocator_traits.h","cpp")
+            if group=="c": source_navigation_case("extern int fprintf (FILE","FILE.h","c","FILE")
+            click(".source-viewer header button[aria-label=\'返回代码\']")
+            wait_for(lambda: not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),f"{group} source viewer closed")
+            assert text(code)==code_text, "Language scaffolding must not change the draft"
+            (evidence/(group.upper()+"_GUI_RESULT.txt")).write_text(f"PASS: real Linux client installs private {group} tools, member completion, F12 stdlib source and unchanged draft. No local execution or debugger assertion.\n")
+            if group=="golang":
+                implementation_source="type Runner interface { Run() int }\ntype Worker struct{}\nfunc (Worker) Run() int { return 7 }\nfunc solve(values []int) int { var r Runner = Worker{}; return r.Run() }"
+                fill(code,implementation_source)
+                wait_for(lambda:any("solve" in cmd("GET",f"/element/{node[EID]}/text") for node in cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function"})),"gopls analyzed implementation fixture",seconds=45)
+                focus_code_editor()
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home","Right","Right","Right","Right","Right","Right","ctrl+F12"],check=True)
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":"return String(window.getSelection())","args":[]})=="Worker","real gopls implementation maps virtual package lines to source",seconds=30)
+                assert source_text(code)==implementation_source,"implementation navigation preserves editable code"
+                screenshot("golang-implementation-native.png")
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+alt+minus"],check=True)
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":"const s=window.getSelection();const n=s?.anchorNode;const e=n?.nodeType===1?n:n?.parentElement;return s?.isCollapsed&&e?.closest('.cm-line')?.textContent==='type Runner interface { Run() int }';","args":[]}),"native code history returns to original interface caret")
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+minus"],check=True)
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":"return String(window.getSelection())","args":[]})=="Worker","native code history advances to implementation")
+                assert source_text(code)==implementation_source,"native history never edits source"
+                (evidence/"EDITOR_JUMP_HISTORY_NATIVE_RESULT.txt").write_text("PASS: real Linux keyboard CtrlAltMinus/ControlShiftMinus navigates from gopls implementation back to original interface caret and forward, source unchanged.\\n")
+
+                (evidence/"IMPLEMENTATION_NATIVE_RESULT.txt").write_text("PASS: actual private gopls textDocument/implementation, Ctrl+F12 from Runner interface to Worker, virtual package offset mapped, original source unchanged. Other language providers remain separately qualified.\\n")
+                fill(code,code_text)
+            if (os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1" and group in ("golang","rust")) or (os.environ.get("INKLEET_CLANG_SNIPPET_VALIDATION") == "1" and group in ("c","cpp")):
+                native_snippet_case(group,code)
+            if group=="rust":
+                hash_source="fn example() {\n    let _map = \n}\n"
+                fill(code,hash_source)
+                focus_code_editor()
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home","Down","End"],check=True)
+                subprocess.run(["xdotool","type","--clearmodifiers","--delay","80","HashM"],check=True)
+                wait_for(lambda:"HashMap" in text(".cm-tooltip-autocomplete"),"automatic unimported HashMap completion",seconds=45)
+                screenshot("rust-hashmap-candidates-native.png")
+                original_hash=text(code)
+                choices=cmd("POST","/elements",{"using":"css selector","value":".cm-tooltip-autocomplete li"})
+                choice=next(item[EID] for item in choices if cmd("GET",f"/element/{item[EID]}/text").lstrip().startswith("HashMap"))
+                cmd("POST",f"/element/{choice}/click",{})
+                wait_for(lambda:"use std::collections::HashMap;" in text(code) and "let _map = HashMap" in text(code),"resolved HashMap inserts type and import atomically",seconds=15)
+                accepted_hash=text(code)
+                assert accepted_hash.count("use std::collections::HashMap;")==1,"one import only"
+                screenshot("rust-hashmap-autoimport-native.png")
+                focus_code_editor()
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+                wait_for(lambda:text(code)==original_hash,"one undo removes completion and import")
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
+                wait_for(lambda:text(code)==accepted_hash,"redo restores exact completion and import")
+                (evidence/"RUST_AUTOIMPORT_NATIVE_RESULT.txt").write_text("PASS: actual typing HashM triggers private rust-analyzer candidate, resolve inserts HashMap with one std import, one undo removes both and redo restores both.\n")
+            if group in ("golang","cpp","c","rust"):
+                local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
+                if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"
+                if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
+                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let map=std::collections::HashMap::from([(3,30),(8,80)]); let empty:std::collections::HashMap<i32,i32>=std::collections::HashMap::new(); let set=std::collections::HashSet::from([3,8]); let mut total=0;\n for value in values {total+=value;}\n total\n}"
+                fill(code,local_solution)
+                save_editor(code)
+                if group=="golang":
+                    wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function"}),"real gopls semantic function classification",seconds=45)
+                    assert "solve" in text(".code-pane .cm-semantic-function"),"gopls resolves source function"
+                    semantic_node=element(".code-pane .cm-semantic-function")
+                    leaves=cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-semantic-function span:last-child"})
+                    painted=leaves[-1][EID] if leaves else semantic_node
+                    semantic_color=cmd("GET",f"/element/{painted}/css/color")
+                    (evidence/"semantic-paint.json").write_text(json.dumps({"color":semantic_color,"outerHTML":cmd("GET",f"/element/{semantic_node}/property/outerHTML")},ensure_ascii=False))
+                    assert semantic_color in ("rgb(76, 114, 140)","rgba(76, 114, 140, 1)"),"semantic color must win over lexical paint: "+str(semantic_color)
+                    screenshot("golang-semantic-native.png")
+                    (evidence/"SEMANTIC_NATIVE_RESULT.txt").write_text("PASS: real private gopls semantic function highlighting in native CodeMirror. Other language semantic capabilities unverified.\\n")
+                if not cmd("POST","/elements",{"using":"css selector","value":".local-runner:not([hidden])"}):
+                    click('.pane-heading .actions button[aria-label="本地"]')
+                click('[data-local-tab="run"]')
+                fill('[aria-label="本地测试输入"]',"[3,-1,8]")
+                click('[data-action="local-execute"]')
+                wait_for(lambda: text(".local-result").strip()=="10",f"{group} private compilation and typed local result",seconds=280)
+                screenshot(group+"-local-run-native.png")
+                saved_solution=data/("top.jacek.inkleet/notebook/lc-900000001/solution."+({"golang":"go","cpp":"cpp","c":"c","rust":"rs"}[group]))
+                wait_for(lambda: saved_solution.exists() and saved_solution.read_text()==local_solution,f"{group} local run preserves exact saved source")
+                (evidence/(group.upper()+"_LOCAL_GUI_RESULT.txt")).write_text(f"PASS: actual Linux GUI compiles a {group} solution using its private downloaded toolchain, executes the bounded typed harness and returns exact value 10. No online judge verdict.\n")
+                click('[data-local-tab="debug"]')
+                focus_code_editor()
+                keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue011"},{"type":"keyUp","value":"\ue011"},{"type":"keyUp","value":"\ue009"}]
+                for _ in range(2): keys += [{"type":"keyDown","value":"\ue015"},{"type":"keyUp","value":"\ue015"}]
+                keys += [{"type":"keyDown","value":"\ue039"},{"type":"keyUp","value":"\ue039"}]
+                cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-breakpoint","actions":keys}]})
+                wait_for(lambda: "断点：3。" in text(".debug-panel"),f"{group} breakpoint uses original source line")
+                click_debug_action('.debug-panel [aria-label="开始调试"]')
+                wait_for(lambda: "已暂停" in text(".debug-panel"),f"{group} debug compiler and real breakpoint",seconds=280)
+                wait_for(lambda: element(".cm-debug-stopped"),f"{group} original source pause highlight")
+                wait_for(lambda:element(".cm-execution-pointer svg"),f"{group} SVG execution arrow")
+                def local_total():
+                    node=element('.debug-variable > button[aria-label="total"] + code')
+                    return cmd("GET",f"/element/{node}/property/textContent")
+                wait_for(lambda: local_total()=="0",f"{group} initial local variable value")
+
+                if group=="rust":
+                    map_node='.debug-tree-node:has(> .debug-variable > button[aria-label="map"])'
+                    reveal_debug_control('.debug-variable > button[aria-label="map"]');click_debug_action('.debug-variable > button[aria-label="map"]')
+                    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashMap exposes two logical pairs")
+                    assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"], '+map_node+' button[aria-label="[raw]"]'}),"internal map layout hidden by default"
+                    pair_buttons=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-variable > button'})
+                    pair_names=[cmd("GET",f"/element/{pair[EID]}/attribute/aria-label") for pair in pair_buttons]
+                    for pair_name in pair_names:
+                        pair_selector=map_node+' > .debug-tree-children > .debug-tree-node:has(> .debug-variable > button[aria-label="'+pair_name+'"])'
+                        reveal_debug_control(pair_selector+' > .debug-variable > button');click_debug_action(pair_selector+' > .debug-variable > button')
+                        wait_for(lambda:cmd("GET",f"/element/{element(pair_selector+' > .debug-variable > button')}/attribute/aria-expanded")=="true","pair visibly expanded")
+                        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":pair_selector+' > .debug-tree-children > .debug-tree-node > .debug-variable > code'}))==2,"pair children loaded before next layout-dependent click")
+                    def map_values():
+                        nodes=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-tree-children > .debug-tree-node > .debug-variable > code'})
+                        return sorted(cmd("GET",f"/element/{item[EID]}/property/textContent") for item in nodes)
+                    wait_for(lambda:map_values()==["3","30","8","80"],"logical HashMap keys and values regardless of iteration order")
+                    reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
+                    reveal_debug_control(map_node+' button[aria-label="[raw]"]');click_debug_action(map_node+' button[aria-label="[raw]"]')
+                    wait_for(lambda:element(map_node+' button[aria-label="base"]'),"raw map retains implementation fields")
+                    reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"]'}),"hide raw removes internal layout"
+                    reveal_debug_control('.debug-variable > button[aria-label="set"]');click_debug_action('.debug-variable > button[aria-label="set"]')
+                    set_node='.debug-tree-node:has(> .debug-variable > button[aria-label="set"])'
+                    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":set_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashSet logical elements")
+                    screenshot("rust-logical-collections-native.png")
+                    (evidence/"RUST_COLLECTIONS_NATIVE_RESULT.txt").write_text("PASS: private Rust compiler visualizers expose two HashMap pairs with exact keys/values, two HashSet elements, default-hidden raw layout and explicit reversible raw view. Large-map retrieval and other platforms unverified.\\n")
+
+                screenshot(group+"-debug-native.png")
+                for _ in range(3):
+                    focus_code_editor()
+                    cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-step","actions":[{"type":"keyDown","value":"\ue03a"},{"type":"keyUp","value":"\ue03a"}]}]})
+                    time.sleep(.7)
+                    if local_total()!="0": break
+                assert local_total()!="0",f"{group} variables did not update after stepping"
+                cmd("POST","/actions",{"actions":[{"type":"key","id":"go-debug-stop","actions":[{"type":"keyDown","value":"\ue008"},{"type":"keyDown","value":"\ue035"},{"type":"keyUp","value":"\ue035"},{"type":"keyUp","value":"\ue008"}]}]})
+                wait_for(lambda: "调试结束" in text(".debug-panel"),f"{group} debugger stop")
+                (evidence/(group.upper()+"_DEBUG_GUI_RESULT.txt")).write_text(f"PASS: actual private {group} debugger GUI launch, original source breakpoint line 3, paused source highlight, local total=0, real F10 variable update and Shift+F5 termination.\n")
+                click(".local-runner [aria-label='收起']")
+                fill(code,code_text)
+
+        click('select[aria-label="编程语言"] option[value="rust"]')
+        fill(code,marker)
+        save_editor(code)
+
+
+        # Display-only preference through the native Settings UI. Reuse the saved
+        # marker above; this acceptance check must not author any source edits.
+        tab_editor_node=element(".code-pane .cm-editor")
+        tab_content_node=element(code)
+        tab_source_before=source_text(code)
+        tab_source_file=data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs"
+        wait_for(lambda:tab_source_file.exists() and tab_source_file.read_text()==tab_source_before,"native tab display prior source save settled")
+        tab_saved_before=tab_source_file.read_text()
+        def native_tab_display_size():
+            return cmd("POST","/execute/sync",{
+                "script":"return getComputedStyle(arguments[0]).getPropertyValue('tab-size');",
+                "args":[{EID:element(code)}],
+            })
+        def set_tab_display_width(size):
+            click('[data-action="open-settings"]')
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='编辑器']"})[EID]
+            click_native_node(category)
+            selector='select[aria-label="Tab 显示宽度"]'
+            click(f'{selector} option[value="{size}"]')
+            wait_for(lambda:cmd("GET",f"/element/{element(selector)}/property/value")==str(size),"native tab display selection")
+            # Scroll the actual Settings viewport before exactly one Save click.
+            # WebKit refuses element rects for offscreen nested-scroll controls.
+            reveal_debug_control('[data-settings-focus="editor.save"]',panel_css=".settings-content",top_inset=80)
+            click_debug_action('[data-settings-focus="editor.save"]')
+            def persisted_width():
+                settings=json.loads(editor_config.read_text())
+                return "tabSize" not in settings if size==4 else settings.get("tabSize")==size
+            wait_for(persisted_width,"native tab display setting persisted")
+            wait_for(lambda:native_tab_display_size()==str(size),"native CodeMirror tab display style")
+            if size==8: screenshot("tab-display-width-settings-native.png")
+            click('[aria-label="关闭设置"]')
+            assert element(".code-pane .cm-editor")==tab_editor_node,"tab display preference preserves the native editor DOM"
+            assert element(code)==tab_content_node,"tab display preference preserves the native content DOM"
+            assert source_text(code)==tab_source_before,"tab display preference preserves visible source"
+            assert tab_source_file.read_text()==tab_saved_before,"tab display preference never rewrites saved source"
+        set_tab_display_width(8)
+        set_tab_display_width(4)
+        assert "tabSize" not in json.loads(editor_config.read_text()),"native default tab width omits the optional setting"
+        assert native_tab_display_size()=="4","native tab width default restored before formatter and Vim cases"
+        (evidence/"TAB_DISPLAY_NATIVE_RESULT.txt").write_text("PASS: native Settings saves tab display width 8, computed CodeMirror tab-size follows without replacing editor/content DOM or changing source; reset to 4 omits the optional key and restores the original default. No source edits are introduced by this case.\n")
+
+        # Actual formatter processes/LSP inside the real WebView, never mocked IPC.
+        def set_auto_format(enabled):
+            click('[data-action="open-settings"]')
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='编辑器']"})[EID]
+            click_native_node(category)
+            # Use the real searchable Settings UI before clicking a control below
+            # the expanded appearance section. Keep native hit testing and all
+            # checkbox, save, and on-disk assertions; do not synthesize a click.
+            search='[aria-label="搜索设置"]'
+            fill(search, "editor.formatOnSave")
+            wait_for(lambda:cmd("GET",f"/element/{element(search)}/property/value")=="editor.formatOnSave","native format setting search applied")
+            wait_for(lambda:element('[data-settings-result-count="1"]'),"exact format setting result rendered")
+            wait_for(lambda:cmd("GET",f"/element/{element('.format-switch input')}/displayed"),"format setting checkbox displayed")
+            check=element(".format-switch input")
+            selected=cmd("GET",f"/element/{check}/selected")
+            if bool(selected)!=enabled: click_debug_action(".format-switch input")
+            wait_for(lambda:bool(cmd("GET",f"/element/{element('.format-switch input')}/selected"))==enabled,"format preference checkbox changed")
+            # Scroll the actual Settings viewport before exactly one Save click.
+            # WebKit refuses element rects for offscreen nested-scroll controls.
+            reveal_debug_control('[data-settings-focus="editor.save"]',panel_css=".settings-content",top_inset=80)
+            click_debug_action('[data-settings-focus="editor.save"]')
+            wait_for(lambda:json.loads(editor_config.read_text())["formatOnSave"]==enabled,"native format preference saved")
+            click_debug_action('[aria-label="关闭设置"]')
+            wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":'[aria-label="关闭设置"]'}),"settings closed after format preference")
+        set_auto_format(True)
+        formatter_sources={
+            "python3":("py","def solve(values):\n return sum(values)"),
+            "rust":("rs","fn solve(values:Vec<i32>)->i32{values.iter().sum()}"),
+            "golang":("go","func solve(values []int)int{return len(values)}"),
+            "c":("c","int solve(int* values,int valuesSize){return valuesSize;}"),
+            "cpp":("cpp","int solve(vector<int>& values){return values.size();}"),
+            "java":("java","class Solution{public int solve(int[] values){return values.length;}}"),
+        }
+        for language,(extension,unformatted) in formatter_sources.items():
+            click(f'select[aria-label="编程语言"] option[value="{language}"]')
+            if language in ("c","cpp","java"):
+                wait_for(lambda:"已连接" in text(".lsp-status"),language+" formatting service ready",seconds=100)
+            source_file=data/("top.jacek.inkleet/notebook/lc-900000001/"+("solution."+extension))
+            canonical_before=source_file.read_text() if source_file.exists() else None
+            fill(code,unformatted)
+            time.sleep(1.5)
+            assert source_text(code)==unformatted,language+" idle must not format editor"
+            assert (source_file.read_text() if source_file.exists() else None)==canonical_before,language+" idle must not save canonical"
+            assert element('[aria-label="源码未保存"]')
+            save_editor(code)
+            wait_for(lambda:source_file.exists() and source_file.read_text()!=unformatted and source_file.read_text()!=canonical_before and "solve" in source_file.read_text(),language+" explicit format-on-save applied",seconds=25)
+            formatted=source_file.read_text()
+            wait_for(lambda:source_text(code)==formatted.rstrip("\n") or source_text(code)==formatted,language+" formatted file and editor agree")
+            time.sleep(1.5)
+            assert source_file.read_text()==formatted,language+" formatter loop or unexpected write"
+            screenshot(language+"-formatted-native.png")
+            (evidence/(language.upper()+"_FORMAT_NATIVE_RESULT.txt")).write_text("PASS: real Linux Tauri GUI default-on preference, idle preserves raw draft and canonical, explicit Ctrl+S applies and persists private formatter/LSP result, stable subsequent contents.\n")
+        set_auto_format(False)
+        click('select[aria-label="编程语言"] option[value="rust"]')
+        fill(code,marker)
+        save_editor(code)
+
+        # Native modal keyboard workflow, persisted settings, and explicit :w.
+        fill(code,"one two\nthree four")
+        def set_vim(enabled):
+            click('[data-action="open-settings"]')
+            category=cmd("POST","/element",{"using":"xpath","value":"//nav[@aria-label='设置分类']/button[@aria-label='编辑器']"})[EID]
+            click_native_node(category)
+            check=element(".vim-switch input")
+            selected=cmd("GET",f"/element/{check}/selected")
+            if bool(selected)!=enabled: cmd("POST",f"/element/{check}/click",{})
+            # Scroll the actual Settings viewport before exactly one Save click.
+            # WebKit refuses element rects for offscreen nested-scroll controls.
+            reveal_debug_control('[data-settings-focus="editor.save"]',panel_css=".settings-content",top_inset=80)
+            click_debug_action('[data-settings-focus="editor.save"]')
+            wait_for(lambda:json.loads(editor_config.read_text()).get("vim",False)==enabled,"native Vim preference saved")
+            click('[aria-label="关闭设置"]')
+        set_vim(True)
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:text(".editor-status-mode")=="NORMAL","native global NORMAL status")
+        assert len(cmd("POST","/elements",{"using":"css selector","value":".code-pane .cm-vim-panel"}))==0,"no local duplicate mode bar"
+        subprocess.run(["xdotool","key","i"],check=True)
+        wait_for(lambda:text(".editor-status-mode")=="INSERT","native global INSERT status")
+        def measured_insert_block():
+            # WebKit's element-rect endpoint hit-tests the node and rejects this
+            # intentionally pointer-transparent overlay. Read layout without a
+            # hit-test; do not change pointer-events or repeat keyboard input.
+            rect=cmd("POST","/execute/sync",{"script":"""
+                const node=document.querySelector('.code-pane .inkleet-insert-cursor');
+                if(!node)return null;
+                const r=node.getBoundingClientRect(),style=getComputedStyle(node);
+                return {x:r.x,y:r.y,width:r.width,height:r.height,pointerEvents:style.pointerEvents,
+                    inViewport:r.width>0&&r.height>0&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight};
+            ""","args":[]})
+            return rect if rect and rect["width"]>5 and rect["height"]>10 and rect["inViewport"] else None
+        rect=wait_for(measured_insert_block,"native measured INSERT block geometry")
+        assert rect["width"]>5 and rect["height"]>10,"native block geometry"
+        assert rect["pointerEvents"]=="none","visual cursor must not intercept editing"
+        (evidence/"vim-cursor-geometry.json").write_text(json.dumps(rect))
+        time.sleep(1.5)
+        assert cmd("GET",f"/element/{element('.code-pane .inkleet-insert-cursor')}/displayed"),"native block does not blink"
+        assert source_text(code)=="one two\nthree four","cursor cosmetics preserve insertion semantics"
+        screenshot("vim-insert-status-native.png")
+        subprocess.run(["xdotool","key","Escape"],check=True)
+        wait_for(lambda:text(".editor-status-mode")=="NORMAL","return native NORMAL")
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","gg0ciwONE"],check=True)
+        subprocess.run(["xdotool","key","Escape"],check=True)
+        wait_for(lambda:source_text(code)=="ONE two\nthree four","native Vim ciw")
+        subprocess.run(["xdotool","key","u"],check=True)
+        wait_for(lambda:source_text(code)=="one two\nthree four","native Vim atomic undo")
+        subprocess.run(["xdotool","key","ctrl+r"],check=True)
+        wait_for(lambda:source_text(code)=="ONE two\nthree four","native Vim redo")
+        time.sleep(1.4)
+        assert (data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()==marker,"Vim must not idle-save"
+        subprocess.run(["xdotool","type","--clearmodifiers",":w"],check=True)
+        wait_for(lambda:element(".statusbar .cm-vim-panel input"),"native Ex prompt in global status")
+        subprocess.run(["xdotool","key","Return"],check=True)
+        wait_for(lambda:(data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()=="ONE two\nthree four","native Vim explicit write")
+        screenshot("vim-native.png")
+        set_vim(False)
+        assert source_text(code)=="ONE two\nthree four","native Vim toggle preserves document"
+        fill(code,marker)
+        save_editor(code)
+        (evidence/"VIM_NATIVE_RESULT.txt").write_text("PASS: real Linux WebView, OS keyboard ciw, atomic undo/redo, idle canonical preservation, explicit :w, persisted toggle without document replacement. Native IME not verified.\n")
+
+        # Exercise actual native Vim navigation inside immutable library sources.
+        vim_source="fn source_probe() { let _: Vec<i32> = Vec::new(); }"
+        fill(code,vim_source)
+        wait_for(lambda:"rust-analyzer 已连接" in text(".lsp-status"),"Rust ready for native source Vim")
+        set_vim(True)
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","gg0fVgd"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="mod.rs","native main gd opens Vec source",seconds=60)
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","50","/A: Allocator = Global"],check=True)
+        search_input=".source-viewer .cm-vim-panel input"
+        wait_for(lambda:cmd("GET",f"/element/{element(search_input)}/property/value").endswith("A: Allocator = Global"),"native source Vim search input")
+        subprocess.run(["xdotool","key","--clearmodifiers","Return"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":search_input}),"native source Vim search returns to code")
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","fGgd"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="alloc.rs","native source gd reaches Global",seconds=60)
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+o"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="mod.rs","native source Vim Ctrl-O history")
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+i"],check=True)
+        wait_for(lambda:text(".source-viewer h2").strip()=="alloc.rs","native source Vim Ctrl-I history")
+        subprocess.run(["xdotool","type","--clearmodifiers","--delay","60","dd"],check=True)
+        assert "pub struct Global" in text(".source-viewer .cm-content"),"native Vim delete cannot remove the library declaration"
+        assert source_text(code)==vim_source,"native source Vim preserves the editable solution"
+        assert (data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs").read_text()==marker,"source navigation cannot save the solution"
+        screenshot("rust-vim-source-native.png")
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":".source-viewer"}),"native normal Escape closes source viewer")
+        set_vim(False)
+        fill(code,marker)
+        save_editor(code)
+        (evidence/"VIM_SOURCE_NAVIGATION_NATIVE_RESULT.txt").write_text("PASS: actual native main gd, source Vim search/gd, Ctrl-O/I source history, readonly dd, unchanged solution/canonical, normal Escape closure. Native IME remains unverified.\n")
+
+        # A void-call fixture uses the normal cache, actual private Python harness and GUI.
+        stop()
+        original_cache=cache_path.read_text()
+        void_cache=json.loads(original_cache)
+        fixture=next(item for item in void_cache if item["questionId"]=="900000001")
+        void_metadata=json.loads(fixture["metaData"]);void_metadata["return"]={"type":"void"}
+        fixture["metaData"]=json.dumps(void_metadata)
+        cache_path.write_text(json.dumps(void_cache))
+        try:
+            start()
+            click('select[aria-label="编程语言"] option[value="python3"]')
+            wait_for(lambda:"Pyright 已连接" in text(".lsp-status"),"void fixture language ready",seconds=60)
+            fill(code,"def solve(values):\n    values.reverse()")
+            click('.pane-heading .actions button[aria-label="本地"]')
+            wait_for(lambda:element('[aria-label="本地测试输入"]'),"void fixture runner")
+            fill('[aria-label="本地测试输入"]',"[1,2,3]")
+            click_debug_action('[data-action="local-execute"]')
+            wait_for(lambda:json.loads(text('pre[aria-label="调用后 values"]'))==[3,2,1],"real void call displays mutated array",seconds=30)
+            assert len(cmd("POST","/elements",{"using":"css selector","value":".case-argument"}))==1
+            input_bounds=cmd("GET",f"/element/{element('.case-editor')}/rect")
+            output_bounds=cmd("GET",f"/element/{element('.case-output')}/rect")
+            value_node=element('pre[aria-label="调用后 values"]')
+            value_bounds=cmd("GET",f"/element/{value_node}/rect")
+            assert output_bounds["x"]>=input_bounds["x"]+input_bounds["width"]-1,"native result column is independently visible"
+            assert value_bounds["y"]>=output_bounds["y"] and value_bounds["y"]+value_bounds["height"]<=output_bounds["y"]+output_bounds["height"],"native mutation value is visible without opening raw JSON"
+            screenshot("in-place-result-native.png")
+            click('.case-expectation summary')
+            click('select[aria-label="预期结果比较目标"] option[value="argument:0"]')
+            fill('[aria-label="预期结果"]',"[3,2,1]")
+            click_debug_action('[data-action="local-execute"]')
+            wait_for(lambda:"符合预期" in text(".case-result"),"native void argument exact comparison",seconds=30)
+            fill('[aria-label="预期结果"]',"[1,2,3]")
+            click_debug_action('[data-action="local-execute"]')
+            wait_for(lambda:"与预期不符" in text(".case-result"),"native void argument mismatch",seconds=30)
+            assert json.loads(text(".case-expected pre"))==[1,2,3]
+            screenshot("expected-result-native.png")
+            cmd("POST","/execute/sync",{"script":"""
+              window.__nativeCaseProbeId="native-add-case-v1";window.__nativeCaseEvents=[];
+              for(const kind of ["pointerdown","pointerup","click"])document.addEventListener(kind,event=>{
+                const t=event.target instanceof Element?event.target:null;
+                window.__nativeCaseEvents.push({kind,trusted:event.isTrusted,x:event.clientX,y:event.clientY,label:t?.closest("button")?.getAttribute("aria-label"),tag:t?.tagName});
+              },{once:true,capture:true});
+            ""","args":[]})
+            click('[aria-label="添加用例"]')
+            def new_case_ready():
+                state=cmd("POST","/execute/sync",{"script":"""
+                  return {tabs:[...document.querySelectorAll('[role="tablist"][aria-label="测试用例"] [role="tab"]')].map(t=>({name:t.textContent,selected:t.getAttribute("aria-selected")})),
+                    target:document.querySelector('[aria-label="预期结果比较目标"]')?.value,
+                    input:document.querySelector('[aria-label="本地测试输入"]')?.value,
+                    expected:document.querySelector('[aria-label="预期结果"]')?.value,
+                    focus:document.activeElement?.getAttribute("aria-label"),observer:window.__nativeCaseProbeId==="native-add-case-v1"&&Array.isArray(window.__nativeCaseEvents),events:window.__nativeCaseEvents??null};
+                ""","args":[]})
+                (evidence/"native-add-case-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+                assert state["observer"],"native Add observer did not persist"
+                return len(state["tabs"])==2 and state["tabs"][1]["selected"]=="true" and state["tabs"][1]["name"]=="用例 2" and state["target"]=="argument:0"
+            wait_for(new_case_ready,"one native Add click creates and selects second case with inherited argument expectation")
+            fill('[aria-label="本地测试输入"]',"[4,5]")
+            fill('[aria-label="预期结果"]',"[5,4]")
+            click_debug_action('[aria-label="运行全部用例"]')
+            wait_for(lambda:"符合 1" in text(".batch-summary") and "不符 1" in text(".batch-summary"),"native batch preserves both named expectations",seconds=30)
+            assert "2/2 组" in text(".batch-summary")
+            screenshot("named-batch-native.png")
+            click('[role="tablist"][aria-label="测试用例"] [role="tab"]:first-child')
+            fill('[aria-label="预期结果"]',"[3,2,1]")
+            click_debug_action('[aria-label="重跑失败用例"]')
+            wait_for(lambda:"符合 1" in text(".batch-summary") and "1/1 组" in text(".batch-summary"),"native failed-case rerun uses current case expectation",seconds=30)
+            (evidence/"NAMED_BATCH_NATIVE_RESULT.txt").write_text("PASS: actual private Python batch runs two named cases in one backend job, displays one match and one mismatch, and explicit failed-case rerun uses updated expected output. Shared process/time budget; no online judge verdict.\n")
+
+            (evidence/"EXPECTED_RESULT_NATIVE.txt").write_text("PASS: actual Python void output compares against explicitly selected argument expectation, both match and mismatch. Exact JSON policy only, not official judge acceptance.\n")
+
+            (evidence/"IN_PLACE_NATIVE_RESULT.txt").write_text("PASS: actual private Python void call reverses input and normal GUI result displays captured parameter values without raw JSON. Non-void mutation and other language mutation GUI cases not asserted here.\n")
+        except Exception:
+            try:
+                screenshot("case-failure-before-cleanup.png")
+                subprocess.run(["scrot",str(evidence/"case-failure-desktop.png")],check=False)
+                state=cmd("POST","/execute/sync",{"script":"const t=document.querySelector('[aria-label=\"预期结果\"]'),p=t?.closest('.case-editor');return {target:t?.getBoundingClientRect().toJSON(),panel:p?.getBoundingClientRect().toJSON(),scrollTop:p?.scrollTop,active:document.activeElement?.getAttribute('aria-label'),open:document.querySelector('.case-expectation')?.open};","args":[]})
+                (evidence/"case-failure-before-cleanup.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+            except Exception as capture_error:
+                (evidence/"case-failure-capture-error.txt").write_text(str(capture_error))
+            raise
+        finally:
+            stop();cache_path.write_text(original_cache);start()
+
+        (evidence/"MANAGED_IDE_RESULT.txt").write_text("PASS: actual Linux native GUI tool installation, managed Python/Node/Pyright, member completion, F12 stdlib declaration viewer, type diagnostics and draft-preserving language switch. No debugger verification.\n")
+    if os.environ.get("INKLEET_LIVE_CN") == "1":
+        click('[data-action="open-catalogue"]')
+        search = '[aria-label="搜索中国站题目"]'
+        wait_for(lambda: element(search), "catalogue opened")
+        fill(search, "two sum")
+        click('dialog form button[type="submit"]')
+        def live_search_outcome():
+            results=cmd("POST","/elements",{"using":"css selector","value":'dialog button[data-slug="two-sum"]'})
+            if results: return ("result",None)
+            alerts=cmd("POST","/elements",{"using":"css selector","value":'dialog [role="alert"]'})
+            if alerts:
+                message=cmd("GET",f"/element/{alerts[0][EID]}/text")
+                # Only the known upstream access-denied state is environmental.
+                # Unknown UI errors, parsing failures and timeouts remain failures.
+                if "中国站拒绝访问" in message: return ("blocked",message)
+            return None
+        outcome,reason=wait_for(live_search_outcome, "live Chinese search result or explicit upstream denial", seconds=30)
+        if outcome=="blocked":
+            screenshot("public-unavailable-native.png")
+            assert text(code)==marker, "Denied search changed current editor draft"
+            preserved=data/"top.jacek.inkleet/notebook/lc-900000001/solution.rs"
+            wait_for(lambda: preserved.read_text()==marker,"Denied search preserves saved source")
+            click(".catalogue-heading button")
+            raise PublicServiceUnavailable(reason)
+        click('dialog button[data-slug="two-sum"]')
+        wait_for(lambda: "两数之和" in text("article h1"), "real Chinese question rendered", seconds=30)
+        wait_for(lambda: "impl Solution" in text(code), "official Rust template loaded")
+        screenshot("real-cn-question-native.png")
+        fill(code, "// live CN draft persistence")
+        save_editor(code)
+        live_source = data / "top.jacek.inkleet/notebook/lc-1/solution.rs"
+        wait_for(lambda: live_source.exists() and live_source.read_text() == "// live CN draft persistence", "real question local source saved")
+        click('[data-action="open-link"]')
+        link_input = '[aria-label="力扣题目链接"]'
+        wait_for(lambda: element(link_input), "link input opened")
+        linked = "https://leetcode.cn/problems/two-sum/solutions/123/?envType=study-plan-v2#example"
+        fill(link_input, linked)
+        screenshot("question-link-native.png")
+        click('dialog form button[type="submit"]')
+        wait_for(lambda: len(cmd("POST", "/elements", {"using": "css selector", "value": "dialog.catalogue"})) == 0, "link dialog closed after success", seconds=30)
+        wait_for(lambda: "两数之和" in text("article h1"), "real question opened from normalized link", seconds=30)
+        wait_for(lambda: text(code) == "// live CN draft persistence", "duplicate link keeps current draft")
+        assert live_source.read_text() == "// live CN draft persistence", "link opening overwrote local source"
+
+        # 只验证匿名官方登录页面的原生窗口，不输入账号、不解验证码、不读取凭据。
+        main_handle = cmd("GET", "/window")
+        try:
+            click(".login-area > button")
+            handles = wait_for(lambda: (h if len(h := cmd("GET", "/window/handles")) > 1 else None), "isolated login window exposed to WebDriver")
+            login_handle = next(h for h in handles if h != main_handle)
+            cmd("POST", "/window", {"handle": login_handle})
+            wait_for(lambda: "leetcode.cn/accounts/login" in cmd("GET", "/url"), "official login origin", seconds=25)
+            wait_for(lambda: "登录" in text("body") and len(cmd("POST", "/elements", {"using": "css selector", "value": "input"})) > 0, "official login controls", seconds=25)
+            screenshot("official-login-window-native.png")
+            (evidence/"LOGIN_UI_RESULT.txt").write_text("PASS: separate native official anonymous login page and controls loaded. No account login, credentials, CAPTCHA, or session validation performed.\\n")
+        except Exception as error:
+            (evidence/"LOGIN_UI_RESULT.txt").write_text("UNVERIFIED: anonymous native login UI automation could not complete: " + type(error).__name__ + ". Not an authentication verdict.\\n")
+            subprocess.run(["scrot", str(evidence / "login-ui-unverified.png")], check=False)
+        finally:
+            cmd("POST", "/window", {"handle": main_handle})
+            if cmd("POST", "/elements", {"using": "css selector", "value": ".login-panel button:last-child"}):
+                click(".login-panel button:last-child")
+        stop()
+        # 重启后的题库恢复只读本机缓存；代理指向未监听端口，避免成功来自网络。
+        old_proxy = os.environ.get("HTTPS_PROXY")
+        old_no_proxy = os.environ.get("NO_PROXY")
+        os.environ["HTTPS_PROXY"] = "http://127.0.0.1:9"
+        os.environ["NO_PROXY"] = "127.0.0.1,localhost"
+        driver.terminate()
+        driver.wait(timeout=10)
+        driver = subprocess.Popen(["tauri-driver"], stdout=open(evidence/"driver-offline.log","w"), stderr=subprocess.STDOUT)
+        wait_for(lambda: request("GET","/status"), "offline driver ready")
+        start()
+        recent_tab=cmd("POST","/element",{"using":"xpath","value":"//aside[@aria-label='题目导航']//button[text()='最近']"})[EID]
+        cmd("POST",f"/element/{recent_tab}/click",{})
+        wait_for(lambda: element('[data-problem="lc-1"]'), "cached question restored without live search")
+        click('[data-problem="lc-1"]')
+        wait_for(lambda: "两数之和" in text("article h1"), "cached Chinese statement restored")
+        wait_for(lambda: text(code) == "// live CN draft persistence", "real question source restored offline")
+        screenshot("real-cn-offline-native.png")
+        click('[data-action="open-catalogue"]')
+        wait_for(lambda: element(search), "offline catalogue opened")
+        fill(search, "two sum")
+        click('dialog form button[type="submit"]')
+        wait_for(lambda: "无法连接中国站" in text('dialog [role="alert"]'), "network unavailable is explicit", seconds=30)
+        click(".catalogue-heading button")
+        click('[data-action="open-link"]')
+        wait_for(lambda: element(link_input), "offline link input opened")
+        fill(link_input, linked)
+        click('dialog form button[type="submit"]')
+        wait_for(lambda: len(cmd("POST", "/elements", {"using": "css selector", "value": "dialog.catalogue"})) == 0, "offline cached link opened", seconds=30)
+        wait_for(lambda: "已缓存题面" in text("article"), "offline fallback explicitly marked as cached")
+        wait_for(lambda: text(code) == "// live CN draft persistence", "offline link keeps restored draft")
+        assert live_source.read_text() == "// live CN draft persistence", "offline link overwrote source"
+        screenshot("question-link-offline-native.png")
+        if old_proxy is None: os.environ.pop("HTTPS_PROXY", None)
+        else: os.environ["HTTPS_PROXY"] = old_proxy
+        if old_no_proxy is None: os.environ.pop("NO_PROXY", None)
+        else: os.environ["NO_PROXY"] = old_no_proxy
+        (evidence/"LIVE_CN_RESULT.txt").write_text("PASS: real public CN search and question through native GUI, official Rust template, local source save, normalized question-link opening, duplicate draft preservation and offline link/cache recovery. No authenticated login, run or submit.\\n")
+except PublicServiceUnavailable as error:
+    (evidence/"LIVE_CN_RESULT.txt").write_text("UNVERIFIED: public LeetCode CN access denied during live GUI search. Local IDE checks completed; current source preserved. Fresh online question/link/cache sequence not run. " + str(error) + "\n")
+    print("::warning::Live public LeetCode CN verification blocked by upstream access denial; not a passing online or authentication result.",flush=True)
+except Exception:
+    # Read-only failure evidence; never replay a click/key or mutate the document.
+    if session:
+        try:
+            snapshot=cmd("POST","/execute/sync",{"script":"const e=document.activeElement; const l=document.querySelector('.lsp-status'); return {focus:{tag:e?.tagName,label:e?.getAttribute('aria-label')},lsp:{text:l?.textContent,title:l?.getAttribute('title'),label:l?.getAttribute('aria-label'),data:l?{...l.dataset}:null},completion:document.querySelector('.cm-tooltip-autocomplete')?.textContent??null,selection:String(window.getSelection())};","args":[]})
+            (evidence/"failure-state.json").write_text(json.dumps(snapshot,ensure_ascii=False,indent=2))
+        except Exception as diagnostic_error:
+            (evidence/"failure-state-error.txt").write_text(str(diagnostic_error))
+    subprocess.run(["scrot", str(evidence / "desktop-failure.png")], check=False)
+    if session:
+        try: screenshot("failure.png")
+        except Exception: pass
+    raise
+finally:
+    if os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1":
+        try:
+            (evidence/"SNIPPET_NATIVE_WIRE.json").write_text(json.dumps(snippet_trace(),ensure_ascii=False,indent=2))
+        except Exception as trace_error:
+            (evidence/"SNIPPET_TRACE_ERROR.txt").write_text(str(trace_error))
+    stop()
+    driver.terminate()
+    driver.wait(timeout=10)
+

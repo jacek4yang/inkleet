@@ -1,0 +1,40 @@
+name: Java local test harness
+on:
+  push:
+    branches: [feat/first-workbench, main, feat/language-adapter-contract]
+    paths: ['crates/managed-env/src/lsp_scaffold.rs', 'crates/managed-env/src/java_harness.rs', 'crates/managed-env/src/java_runtime.rs', 'crates/managed-env/src/java_launcher_windows.*', 'crates/managed-env/src/java_harness_support.java', 'crates/managed-env/examples/java_harness_probe.rs', '.github/workflows/java-harness.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: java-harness-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  isolated-tools:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15-intel, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: crates/managed-env
+      - name: Compile and run typed Java problem harness
+        shell: bash
+        run: |
+          mkdir -p evidence
+          cargo test --locked --manifest-path crates/managed-env/Cargo.toml --lib
+          cargo run --locked --manifest-path crates/managed-env/Cargo.toml --example java_harness_probe 2>&1 | tee evidence/java-harness.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: java-harness-${{ matrix.os }}
+          path: |
+            evidence/
+            crates/managed-env/Cargo.lock
+          retention-days: 7

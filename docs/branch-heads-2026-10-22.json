@@ -1,0 +1,1012 @@
+{
+  "audited_at": "2026-10-22T12:07:00Z",
+  "repository": "jacek4yang/inkleet",
+  "integration_sha": "9486acd1efea9cfd69d56566fd2ebb44cfc4d51a",
+  "main_sha": "9cfe8674f365b098cd54e060ad620c81e10c1f54",
+  "branches": [
+    {
+      "branch": "build/preview-installers",
+      "sha": "9486acd1efea9cfd69d56566fd2ebb44cfc4d51a",
+      "status": "identical",
+      "ahead_by": 0,
+      "behind_by": 0,
+      "files": []
+    },
+    {
+      "branch": "feat/bounded-snippet-preparation",
+      "sha": "68a3a3d9893c93269c4538fca00228fc030b5b3e",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 160,
+      "files": []
+    },
+    {
+      "branch": "build/performance-preview",
+      "sha": "4471cbf0ec002e75261c6a3411fa51acee7eb730",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 192,
+      "files": [
+        {
+          "filename": ".github/workflows/linux-preview.yml",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "build/case-suite-preview",
+      "sha": "be2354e569177d79ab7698c359d32848f2afb3f5",
+      "status": "diverged",
+      "ahead_by": 3,
+      "behind_by": 179,
+      "files": [
+        {
+          "filename": ".github/workflows/linux-preview.yml",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "build/status-owned-preview",
+      "sha": "a19a82b7407e1db81ab843d368f4395e2c9a738e",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 195,
+      "files": [
+        {
+          "filename": ".github/workflows/linux-preview.yml",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/case-expectations",
+      "sha": "6cac21bda81dcbab1caa29c16a9cbd8c0e28ea3b",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 186,
+      "files": []
+    },
+    {
+      "branch": "build/completion-preview",
+      "sha": "70a323ae1e00973b4b7232c0d77a99e5391e6375",
+      "status": "diverged",
+      "ahead_by": 2,
+      "behind_by": 197,
+      "files": [
+        {
+          "filename": ".github/workflows/completion-release-native.yml",
+          "status": "added"
+        },
+        {
+          "filename": ".github/workflows/linux-preview.yml",
+          "status": "modified"
+        },
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/case-run-context",
+      "sha": "48afd90253ac589b4f71d7ec244b288a237139bf",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 183,
+      "files": []
+    },
+    {
+      "branch": "feat/completion-request-ownership",
+      "sha": "30494cc4d3a3b017ae5a4c77d89801b0106faef2",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 199,
+      "files": []
+    },
+    {
+      "branch": "feat/completion-issuer-order",
+      "sha": "524e1c840199359ee0ce852444bf1d07e49085f9",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 197,
+      "files": []
+    },
+    {
+      "branch": "feat/completion-provider-context",
+      "sha": "ca7a20d0ccb32d168e16416331d7f1d35b468f35",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 236,
+      "files": []
+    },
+    {
+      "branch": "feat/debugger-precision-dock",
+      "sha": "8d0ba1268f85c21536ee37c5f1593feac26dd0ba",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 284,
+      "files": []
+    },
+    {
+      "branch": "feat/debugger-workspace",
+      "sha": "0ed6ae69e2a000abe63790ff666b5f913095dd87",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 319,
+      "files": []
+    },
+    {
+      "branch": "feat/compact-breakpoint-gutter",
+      "sha": "931af3e0494663e2f32ab2916875a3df8e298c79",
+      "status": "diverged",
+      "ahead_by": 3,
+      "behind_by": 241,
+      "files": [
+        {
+          "filename": "src/debug-gutter.ts",
+          "status": "modified"
+        },
+        {
+          "filename": "src/editor.tsx",
+          "status": "modified"
+        },
+        {
+          "filename": "tests/ui.mjs",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/completion-integration",
+      "sha": "0f95e9d4e9b633b4b18e7db7ccb53370515ca6ab",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 201,
+      "files": []
+    },
+    {
+      "branch": "feat/debug-collection-views",
+      "sha": "b4eccd51131cbe93b4cc6ee3526ab83c7c7d5a79",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 236,
+      "files": []
+    },
+    {
+      "branch": "feat/editor-input-reliability",
+      "sha": "b366dfe7bffaea0765e0c79225d32a9c2e53eeae",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 241,
+      "files": []
+    },
+    {
+      "branch": "feat/expanded-documentation",
+      "sha": "86d3ad080a66e98aac002d78df286ce6ce5f9d97",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 85,
+      "files": []
+    },
+    {
+      "branch": "feat/document-code-highlighting",
+      "sha": "a4f848cec29dea9f247ffb7b8531cee61af4d43d",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 61,
+      "files": []
+    },
+    {
+      "branch": "feat/download-proxy-inputs",
+      "sha": "648af7053fa23e87c12c994dd74d8dba1e8d3cb3",
+      "status": "diverged",
+      "ahead_by": 3,
+      "behind_by": 329,
+      "files": [
+        {
+          "filename": "docs/editor-refactor/DOWNLOAD_PROXY_INPUTS.md",
+          "status": "modified"
+        },
+        {
+          "filename": "docs/editor-refactor/evidence/real-catalogue-linux.png",
+          "status": "added"
+        },
+        {
+          "filename": "src-tauri/src/leetcode.rs",
+          "status": "modified"
+        },
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/document-reader-search",
+      "sha": "881cbd4131f99b214020956e0e01cfc8970c48fa",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 64,
+      "files": []
+    },
+    {
+      "branch": "feat/first-workbench",
+      "sha": "dfca6d6cc159a38ede881c4df25448a37713993b",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 343,
+      "files": []
+    },
+    {
+      "branch": "feat/explicit-save",
+      "sha": "302e2fd923e162e71f87a1a171a3fb36a1bfd32a",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 234,
+      "files": []
+    },
+    {
+      "branch": "feat/editor-p0-reliability",
+      "sha": "0060c65f8566b359222e109dba0d64115254c760",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 340,
+      "files": []
+    },
+    {
+      "branch": "feat/ide-icons-surface",
+      "sha": "c35fdd7dc631c45456ee5574eb305ef481880bf2",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 233,
+      "files": []
+    },
+    {
+      "branch": "feat/ide-command-routing",
+      "sha": "6db1ed458a650df47338101f80e766dc9a395de6",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 250,
+      "files": []
+    },
+    {
+      "branch": "feat/linux-preview-editor",
+      "sha": "acfc10a887c794c4823e85843cfef44ec540c5d9",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 250,
+      "files": [
+        {
+          "filename": ".github/workflows/linux-preview.yml",
+          "status": "added"
+        },
+        {
+          "filename": "scripts/package-linux-portable.sh",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/flat-snippet-session",
+      "sha": "713386ed0a6d89ef7194409d1ff25bafa866bfb4",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 152,
+      "files": []
+    },
+    {
+      "branch": "feat/format-on-save",
+      "sha": "774bd32c378ae6070b2ece8c9561dd1782650671",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 267,
+      "files": [
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/linux-preview-input",
+      "sha": "6fd1ed9f8354a8ad76133981efdae299c1d82f35",
+      "status": "diverged",
+      "ahead_by": 2,
+      "behind_by": 241,
+      "files": [
+        {
+          "filename": ".github/workflows/linux-preview.yml",
+          "status": "added"
+        },
+        {
+          "filename": "scripts/package-linux-portable.sh",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/linux-preview-integrated",
+      "sha": "5f0b23c4e1bad072c4f99a3ea12047e8263c44ee",
+      "status": "diverged",
+      "ahead_by": 4,
+      "behind_by": 268,
+      "files": [
+        {
+          "filename": ".github/workflows/linux-preview.yml",
+          "status": "added"
+        },
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/language-adapter-contract",
+      "sha": "219e902e2251a04bb7adf3d2f21e73e2c977c14d",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 297,
+      "files": [
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/nested-snippet-reducer",
+      "sha": "f8dbd8e59b602a5499c40176b71c55b5cfb7ff09",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 135,
+      "files": []
+    },
+    {
+      "branch": "feat/lsp-snippet-fields",
+      "sha": "8d350229e1bf8df2d234dabc9ef4134a17f4a047",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 269,
+      "files": []
+    },
+    {
+      "branch": "feat/named-case-batches",
+      "sha": "1e8de8cf6f074f3fbd7ba70e25caf3900fd431a0",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 178,
+      "files": []
+    },
+    {
+      "branch": "feat/lsp-p1-recovery",
+      "sha": "9ecdbd09a1f65e29bc62b163883f1a8c56f09e19",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 294,
+      "files": []
+    },
+    {
+      "branch": "feat/named-solutions",
+      "sha": "e44b198c2ac0ff86de0a996bf8cc636655613a70",
+      "status": "diverged",
+      "ahead_by": 7,
+      "behind_by": 316,
+      "files": [
+        {
+          "filename": "docs/NAMED_SOLUTIONS.md",
+          "status": "added"
+        },
+        {
+          "filename": "docs/editor-refactor/evidence/named-solutions-linux.png",
+          "status": "added"
+        },
+        {
+          "filename": "src-tauri/src/solutions.rs",
+          "status": "modified"
+        },
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/lsp-status-ownership",
+      "sha": "d48e2becc5c512b391eebba4b78a9a0d8ae5fab3",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 195,
+      "files": []
+    },
+    {
+      "branch": "feat/native-rendering-probe",
+      "sha": "5eaa92c7359b9d7420d605352917492d1cf140df",
+      "status": "diverged",
+      "ahead_by": 4,
+      "behind_by": 211,
+      "files": [
+        {
+          "filename": ".github/workflows/native-rendering.yml",
+          "status": "added"
+        },
+        {
+          "filename": "tests/native_render_probe.py",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "branch": "feat/lsp-semantic-analysis",
+      "sha": "ccd758f41e52a59408bfa8a61588dd58ac2bd78d",
+      "status": "diverged",
+      "ahead_by": 3,
+      "behind_by": 262,
+      "files": [
+        {
+          "filename": "src/semantic-tokens.ts",
+          "status": "modified"
+        },
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        },
+        {
+          "filename": "tests/ui.mjs",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/owned-lsp-cancellation",
+      "sha": "845bbdee03b6b0a98abb179af612135865b16ec0",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 175,
+      "files": []
+    },
+    {
+      "branch": "feat/real-use-hardening",
+      "sha": "4e65d245bb86f52526e9ab67b6c46cea4f09b719",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 211,
+      "files": []
+    },
+    {
+      "branch": "feat/nested-snippet-transforms",
+      "sha": "0ed849172fe101c5cbee27461bd3af81397ca973",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 124,
+      "files": []
+    },
+    {
+      "branch": "feat/owned-snippet-worker",
+      "sha": "c05a6fc0682dcf75b81f03918cc29dde851e0152",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 158,
+      "files": []
+    },
+    {
+      "branch": "feat/owned-lsp-snippet-application",
+      "sha": "1cfcdc4d0191959349d13be8f16189132164b43f",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 126,
+      "files": []
+    },
+    {
+      "branch": "feat/readable-online-results",
+      "sha": "59ff2effa6b5bffeb9a0b379506a33c1cc367657",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 221,
+      "files": []
+    },
+    {
+      "branch": "feat/polished-linux-preview",
+      "sha": "d3a633232f68d08d55cb8a9a948626d7ecb94c23",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 223,
+      "files": []
+    },
+    {
+      "branch": "feat/real-question-workspace",
+      "sha": "dbeb8022b6ef77df7d7fe58fc43f20aba4983303",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 332,
+      "files": [
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "feat/snippet-worker-transforms",
+      "sha": "820311ead24a39ed319e525062554952ac9f9ec6",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 150,
+      "files": []
+    },
+    {
+      "branch": "feat/recursive-source-navigation",
+      "sha": "d5d210e24107c7081a65d63c2dbb05ef1c50c4d4",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 73,
+      "files": []
+    },
+    {
+      "branch": "feat/rename-prepare",
+      "sha": "fed635995340aa086d3452a000701e08f1ef8d04",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 245,
+      "files": []
+    },
+    {
+      "branch": "feat/rename-preview",
+      "sha": "8639f18ad92382809a54078e38d89b111824025b",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 248,
+      "files": []
+    },
+    {
+      "branch": "feat/snippet-transform-navigation",
+      "sha": "b895aa99837549f0d137c07fd07796587621f3f6",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 141,
+      "files": []
+    },
+    {
+      "branch": "feat/snippet-choice-picker",
+      "sha": "d443fe2e2a4fa54365621bfc58a78a4a217db8ea",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 148,
+      "files": []
+    },
+    {
+      "branch": "feat/snippet-context-layout",
+      "sha": "8890acd71d2f8f7c74a5a818c5d652a3c7b464d8",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 129,
+      "files": []
+    },
+    {
+      "branch": "feat/snippet-contract-probe",
+      "sha": "a7c952a564487f86d868baee33094f3258eb01cd",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 202,
+      "files": []
+    },
+    {
+      "branch": "feat/visual-test-workspace",
+      "sha": "751b9ee4306bc0b0ecb81d0aa97fee7de6bead52",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 232,
+      "files": []
+    },
+    {
+      "branch": "feat/vim-status-cursor",
+      "sha": "1551a24bdf10363b82513759718a1c703ab8752b",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 219,
+      "files": []
+    },
+    {
+      "branch": "feat/workbench-visual-polish",
+      "sha": "b375dbca43e8e8324cf14224e3cb984740717f14",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 287,
+      "files": []
+    },
+    {
+      "branch": "feat/vim-keyboard-workflow",
+      "sha": "2344a902480d74615cbcc3b00dd0a4e5312b3136",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 230,
+      "files": []
+    },
+    {
+      "branch": "fix/completion-candidate-admission",
+      "sha": "78c2691530dac97a6bb6fde15913256dadf7b40a",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 60,
+      "files": []
+    },
+    {
+      "branch": "fix/completion-composition-boundary",
+      "sha": "42f55bb04876dee320f16a2517b63856adcd7acc",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 51,
+      "files": []
+    },
+    {
+      "branch": "feat/validated-linux-snippets",
+      "sha": "a63364621710bf3b63b1859b512e5c6acd70e9d8",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 111,
+      "files": []
+    },
+    {
+      "branch": "feat/workbench-minimal-ui",
+      "sha": "5de94c42666bcba9400f61a97ece6d35bcb213b4",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 336,
+      "files": [
+        {
+          "filename": "docs/editor-refactor/MINIMAL_UI_CHECKPOINT.md",
+          "status": "modified"
+        },
+        {
+          "filename": "docs/editor-refactor/evidence/minimal-debug-svg-toolbar.png",
+          "status": "added"
+        },
+        {
+          "filename": "docs/editor-refactor/evidence/minimal-desktop-code.png",
+          "status": "added"
+        },
+        {
+          "filename": "docs/editor-refactor/evidence/minimal-settings-search.png",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "branch": "fix/judge-terminal-verdict",
+      "sha": "f6bde3e1b755ab84d2ca5786fc588a54a275c42f",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 166,
+      "files": []
+    },
+    {
+      "branch": "fix/final-snippet-default-selection",
+      "sha": "9bcc77bc2893f92de68c6c85a58fadebab4ecbb4",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 123,
+      "files": []
+    },
+    {
+      "branch": "fix/completion-snippet-capability",
+      "sha": "8562f5e6142789e4485ef1272b06363c145914e1",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 101,
+      "files": []
+    },
+    {
+      "branch": "fix/in-place-results",
+      "sha": "bf6f2b89cd954fb15bda79e784c72d7c36846fac",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 189,
+      "files": []
+    },
+    {
+      "branch": "fix/result-snapshot-notice",
+      "sha": "bbc80644b7595cb63fceed1c6c483a7b71000685",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 165,
+      "files": []
+    },
+    {
+      "branch": "fix/completion-focus-boundary",
+      "sha": "819a28d567d6285727496589fde512943cda17c1",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 54,
+      "files": []
+    },
+    {
+      "branch": "fix/queued-save-intent",
+      "sha": "9f04add250b519ceee4d38e60b2cc9219c421dd3",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 56,
+      "files": []
+    },
+    {
+      "branch": "fix/completion-usable-readiness",
+      "sha": "2befd055cbc429d82cebb91373358407a448ab0c",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 120,
+      "files": []
+    },
+    {
+      "branch": "fix/session-completion-mode",
+      "sha": "82e2847fdbaa3adc10fcab9facda0558b5c27b52",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 103,
+      "files": []
+    },
+    {
+      "branch": "main",
+      "sha": "9cfe8674f365b098cd54e060ad620c81e10c1f54",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 505,
+      "files": []
+    },
+    {
+      "branch": "fix/selected-text-completion",
+      "sha": "d0a9aebed8e60795ac9e367bebaadede332ec235",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 122,
+      "files": []
+    },
+    {
+      "branch": "fix/settings-session-retention",
+      "sha": "5edd51955e284e911318917e57cc13cdfd811edf",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 49,
+      "files": []
+    },
+    {
+      "branch": "perf/diagnostics-dedup",
+      "sha": "aa021a717d08e2437f2e9b7997a2cf91510c5a0f",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 174,
+      "files": []
+    },
+    {
+      "branch": "perf/editor-session-retention",
+      "sha": "fdd01ef6af121e941bf714ef509f0bb2fd7a4ee9",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 71,
+      "files": []
+    },
+    {
+      "branch": "perf/editor-profile",
+      "sha": "29fae38980a660ac8e6a196ad7b371ebcfd0abb4",
+      "status": "diverged",
+      "ahead_by": 3,
+      "behind_by": 193,
+      "files": [
+        {
+          "filename": "tests/parse-probe.ts",
+          "status": "added"
+        },
+        {
+          "filename": "tests/ui.mjs",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "perf/bounded-document-serialization",
+      "sha": "2a4eecebba30f16dc4ba6322023a7231e37ad563",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 162,
+      "files": []
+    },
+    {
+      "branch": "perf/status-host-updates",
+      "sha": "c828ec76f0fa516384faf40c63c5ee50119514ba",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 53,
+      "files": []
+    },
+    {
+      "branch": "perf/reading-panes",
+      "sha": "2679c2749bb6daacacb4f7233f7565c27ec33f7f",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 192,
+      "files": []
+    },
+    {
+      "branch": "perf/runner-rendering",
+      "sha": "b0f39e684b586c3399930fdb5842fe284d335459",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 193,
+      "files": []
+    },
+    {
+      "branch": "perf/native-baseline",
+      "sha": "fcf0008658c38757698c1f0b9adc1803fad04345",
+      "status": "diverged",
+      "ahead_by": 7,
+      "behind_by": 195,
+      "files": [
+        {
+          "filename": ".github/workflows/native-performance.yml",
+          "status": "added"
+        },
+        {
+          "filename": "tests/native_performance.py",
+          "status": "added"
+        },
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        },
+        {
+          "filename": "tests/perf-tauri-core.ts",
+          "status": "added"
+        },
+        {
+          "filename": "tests/vite-perf.config.ts",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "branch": "perf/live-source-boundary",
+      "sha": "48b711c1c6cf9ab15e7ab742b0ad7e8f76e61cb7",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 171,
+      "files": []
+    },
+    {
+      "branch": "style/full-completion-content",
+      "sha": "0bd46e3c1aa60b6f354653423b2d1b79af36539e",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 90,
+      "files": []
+    },
+    {
+      "branch": "style/continuous-document-matches",
+      "sha": "1ee0def8450a6a8246a3f84ca12a62619dbf13e9",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 58,
+      "files": []
+    },
+    {
+      "branch": "research/snippet-contract",
+      "sha": "a2c743a1fa3c69d2557676c5eb36d9065561fc16",
+      "status": "diverged",
+      "ahead_by": 2,
+      "behind_by": 174,
+      "files": [
+        {
+          "filename": ".github/workflows/snippet-contract.yml",
+          "status": "added"
+        },
+        {
+          "filename": "docs/editor-refactor/SNIPPET_CONTRACT.md",
+          "status": "added"
+        }
+      ]
+    },
+    {
+      "branch": "test/native-clang-snippets",
+      "sha": "a2ef6f9bcdd21a362153cc23295dc0de42c9a1b1",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 107,
+      "files": []
+    },
+    {
+      "branch": "test/native-wait-budgets",
+      "sha": "bd9b83f80629cf05b071dc470fe35706df7fe509",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 48,
+      "files": []
+    },
+    {
+      "branch": "test/native-java-snippets",
+      "sha": "a6e9ccffdf884f102191f2d23b8c9e7872ab6514",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 105,
+      "files": []
+    },
+    {
+      "branch": "style/ide-popovers",
+      "sha": "415ad13b37f19fe27d4ca1ecb0722a2a291efa17",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 93,
+      "files": []
+    },
+    {
+      "branch": "test/native-case-interaction",
+      "sha": "08bdca5e51ee96e922f2d2299eae0f50b1667fde",
+      "status": "diverged",
+      "ahead_by": 3,
+      "behind_by": 179,
+      "files": [
+        {
+          "filename": ".github/workflows/native-case-probe.yml",
+          "status": "added"
+        },
+        {
+          "filename": "tests/native_case_probe.py",
+          "status": "added"
+        },
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "test/reuse-installed-native-tools",
+      "sha": "f7c9be7cabe884471b568ad1c1aa3fb759e60f22",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 166,
+      "files": [
+        {
+          "filename": "tests/native_smoke.py",
+          "status": "modified"
+        }
+      ]
+    },
+    {
+      "branch": "test/editor-input-cost",
+      "sha": "ed053b4a09672697cece782d9235cbb58e2382db",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 67,
+      "files": []
+    },
+    {
+      "branch": "test/native-snippet-validation",
+      "sha": "bc1d7600b1d2f91d7e41e00d7a7e03a5976185ba",
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 114,
+      "files": []
+    },
+    {
+      "branch": "test/snippet-contracts",
+      "sha": "5e6df89f22ffdac6ddc253b4991f30d3ff2e9945",
+      "status": "diverged",
+      "ahead_by": 1,
+      "behind_by": 202,
+      "files": [
+        {
+          "filename": "tests/snippet-contract.html",
+          "status": "added"
+        },
+        {
+          "filename": "tests/snippet-contract.js",
+          "status": "added"
+        },
+        {
+          "filename": "tests/ui.mjs",
+          "status": "modified"
+        }
+      ]
+    }
+  ],
+  "rechecked_at": "2026-10-22T18:47:00Z",
+  "purpose": "Snapshot before branch cleanup. Historical divergent tips are retained as merge parents, not reintroduced wholesale into the current application tree."
+}
