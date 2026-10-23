@@ -343,7 +343,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     const abort=new AbortController();navigationAbort=abort;
     const owner=target.dom.ownerDocument,win=owner.defaultView;
     const current=()=>!closed&&!abort.signal.aborted&&view===target&&session?.id===id&&target.state.doc===doc&&target.state.selection.eq(selection)&&generation===navigationGeneration&&target.hasFocus&&!target.composing&&normal();
-    const cancel=()=>abort.abort();
+    const cancel=()=>{abort.abort();if(view===target&&session?.id===id&&generation===navigationGeneration)status("");};
     const focus=(event:FocusEvent)=>{if(!(event.target instanceof Node)||!target.contentDOM.contains(event.target))cancel();};
     const key=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!event.isComposing)cancel();};
     const focusOut=(event:FocusEvent)=>{if(target.contentDOM.contains(event.target as Node)&&!target.contentDOM.contains(event.relatedTarget as Node))cancel();};

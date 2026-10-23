@@ -1000,7 +1000,7 @@ try {
     await lspPage.evaluate(()=>{window.__lspTest.deferHover=true;delete window.__lspTest.hoverReply;});
     await lspPage.keyboard.type("K");await lspPage.waitForFunction(()=>typeof window.__lspTest.hoverReply==="function");
     if(cancellation==="escape")await lspEditor.press("Escape");
-    else if(cancellation==="move")await lspPage.keyboard.type("h");
+    else if(cancellation==="move")await lspPage.evaluate(async()=>{const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");const view=EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor"));view.dispatch({selection:{anchor:view.state.selection.main.head===0?1:0}});});
     else if(cancellation==="insert")await lspPage.keyboard.type("i");
     else await lspPage.evaluate(()=>document.querySelector(".code-pane .cm-content").blur());
     await lspPage.evaluate(()=>{window.__lspTest.hoverReply();window.__lspTest.deferHover=false;});
@@ -4755,6 +4755,14 @@ try {
   };
   await mountHighlightFixture({kind:"markdown",value:highlightCases.map(([language,code])=>"```"+language+"\n"+code+"```").join("\n\n")+"\n\nA wrapped **reader search** phrase keeps its text and spacing while continuing across several narrow lines of documentation."});
   assert.deepEqual(await reader.locator("pre code").allTextContents(),highlightCases.map(([,code])=>code),"highlighting preserves every code point and newline");
+  const previewCode=presentationPage.locator("#reader-highlight-fixture pre code");
+  assert.deepEqual(await previewCode.allTextContents(),highlightCases.map(([,code])=>code),"preview preserves exact fence text");
+  for(let i=0;i<6;i++){
+    const keyword=previewCode.nth(i).locator(".lsp-code-keyword").first();
+    assert.ok(await keyword.count(),"preview uses parser tokens for "+highlightCases[i][0]);
+    assert.equal(await keyword.evaluate(node=>getComputedStyle(node).color!==getComputedStyle(node.closest("code")).color),true,"preview token color is applied");
+  }
+
   for(let i=0;i<6;i++){
     const code=reader.locator("pre code").nth(i),keyword=code.locator(".lsp-code-keyword").first();
     assert.ok(await keyword.count(),highlightCases[i][0]+" has real parser keyword tokens");
