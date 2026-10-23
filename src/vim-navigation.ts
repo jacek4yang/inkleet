@@ -1,6 +1,6 @@
-import {Vim} from "@replit/codemirror-vim";
+import {Vim,getCM} from "@replit/codemirror-vim";
 import {EditorView,ViewPlugin} from "@codemirror/view";
-type Routes={definition:(view:EditorView)=>boolean};
+type Routes={definition:(view:EditorView)=>boolean;documentation?:(view:EditorView)=>void};
 const owners=new WeakMap<EditorView,Routes>();
 Vim.defineAction("inkleetDefinition",cm=>{
  const view:EditorView=cm.cm6,owner=owners.get(view);
@@ -9,6 +9,11 @@ Vim.defineAction("inkleetDefinition",cm=>{
  queueMicrotask(()=>{if(owner&&owners.get(view)===owner)owner.definition(view);});
 });
 Vim.mapCommand("gd","action","inkleetDefinition",{}, {context:"normal"});
+Vim.defineAction("inkleetDocumentation",cm=>{
+ const view:EditorView=cm.cm6,owner=owners.get(view);
+ queueMicrotask(()=>{const mode=getCM(view)?.state.vim;if(owner&&owners.get(view)===owner&&mode&&!mode.insertMode&&!mode.visualMode)owner.documentation?.(view);});
+});
+Vim.mapCommand("K","action","inkleetDocumentation",{}, {context:"normal"});
 export function vimNavigation(routes:Routes){
  return ViewPlugin.fromClass(class{
   constructor(readonly view:EditorView){owners.set(view,routes);}

@@ -53,15 +53,15 @@ export async function renderDocumentation(value: unknown, legacy = false, signal
           try {
             const html = raw.map(html => html === null ? null : DOMPurify.sanitize(html, {
               ALLOWED_TAGS: tags,
-              ALLOWED_ATTR: ["start", "colspan", "rowspan", ...(options.expanded ? [CODE_MARKER] : [])],
+              ALLOWED_ATTR: ["start", "colspan", "rowspan", CODE_MARKER],
               ALLOW_DATA_ATTR: false, ALLOW_ARIA_ATTR: false,
             }));
-            finish({ html, fences: options.expanded ? fenceMetadata(event.data?.fences, parts.length) : [] });
+            finish({ html, fences: fenceMetadata(event.data?.fences, parts.length) });
           } catch { finish(); }
         };
         worker.onerror = () => finish();
         worker.onmessageerror = () => finish();
-        worker.postMessage({ parts, highlight: options.expanded === true });
+        worker.postMessage({ parts, highlight: true });
       } catch { finish(); }
     });
     if (rendered && !signal?.aborted) {
@@ -87,7 +87,7 @@ export async function renderDocumentation(value: unknown, legacy = false, signal
       const pre = document.createElement("pre"), code = document.createElement("code");
       code.textContent = part.text; pre.append(code); section.append(pre);
       const language = codeLanguage(part.language);
-      if (options.expanded && language) codeParts.push({ id: "legacy-" + i, language, text: part.text, node: code });
+      if (language) codeParts.push({ id: "legacy-" + i, language, text: part.text, node: code });
     } else { section.classList.add("lsp-document-plain"); section.textContent = part.text; }
     if (i === 0 && options.summaryFirst) section.classList.add("lsp-completion-summary");
     sections.push(section); dom.append(section);
@@ -96,12 +96,13 @@ export async function renderDocumentation(value: unknown, legacy = false, signal
     const notice = document.createElement("div"); notice.className = "lsp-document-limit"; notice.setAttribute("role", "note");
     notice.textContent = options.expanded ? "文档超出显示上限，当前内容不完整" : "预览仅显示部分内容"; dom.append(notice);
   }
-  if (options.expanded) {
+  {
     const fences = collectCodeFences(sections, rendered?.fences);
     try { await highlightDocumentCode(dom, [...fences, ...codeParts], signal); }
     catch { /* Optional color must not discard readable documentation. */ }
     if (signal?.aborted) return null;
-  } else {
+  }
+  if (!options.expanded) {
     const expand = document.createElement("button"); expand.type = "button"; expand.className = "lsp-document-expand";
     expand.setAttribute("aria-label", "展开文档"); expand.title = "展开文档";
     expand.append(expandIcon()); expand.addEventListener("mousedown", event => event.preventDefault());
@@ -115,7 +116,7 @@ function expandIcon(pathData="M10 2h4v4M14 2 9 7M6 14H2v-4M2 14l5-5"){
  const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("viewBox","0 0 16 16");svg.setAttribute("width","16");svg.setAttribute("height","16");svg.setAttribute("fill","none");svg.setAttribute("stroke","currentColor");svg.setAttribute("stroke-width","1.2");svg.setAttribute("aria-hidden","true");
  const path=document.createElementNS("http://www.w3.org/2000/svg","path");path.setAttribute("d",pathData);svg.append(path);return svg;
 }
-async function openDocumentationReader(value:unknown,legacy:boolean,owner:AbortSignal|undefined,options:DocumentOptions){
+export async function openDocumentationReader(value:unknown,legacy:boolean,owner:AbortSignal|undefined,options:DocumentOptions){
  if(owner?.aborted)return;closeReader?.();
  const previous=document.activeElement instanceof HTMLElement?document.activeElement:null;
  const dialog=document.createElement("dialog");dialog.className="lsp-document-reader";dialog.setAttribute("aria-label","文档阅读");
@@ -125,8 +126,9 @@ async function openDocumentationReader(value:unknown,legacy:boolean,owner:AbortS
  header.append(title,close);dialog.append(header,body);
  const search=documentReaderSearch(dialog,body,header);
  let disposed=false;
- const dispose=()=>{if(disposed)return;disposed=true;search.destroy();lifetime.abort();owner?.removeEventListener("abort",dispose);if(dialog.open)dialog.close();dialog.remove();if(closeReader===dispose)closeReader=undefined;if(previous?.isConnected)previous.focus({preventScroll:true});};
- closeReader=dispose;close.addEventListener("click",dispose);dialog.addEventListener("cancel",event=>{event.preventDefault();if(!search.cancel())dispose();});owner?.addEventListener("abort",dispose,{once:true});
+ const ownerAbort=()=>dispose(false);
+ const dispose=(restoreFocus=true)=>{if(disposed)return;const ownsFocus=dialog.contains(document.activeElement);disposed=true;search.destroy();lifetime.abort();owner?.removeEventListener("abort",ownerAbort);if(dialog.open)dialog.close();dialog.remove();if(closeReader===dispose)closeReader=undefined;if(restoreFocus&&ownsFocus&&previous?.isConnected)previous.focus({preventScroll:true});};
+ closeReader=dispose;close.addEventListener("click",()=>dispose());dialog.addEventListener("cancel",event=>{event.preventDefault();if(!search.cancel())dispose();});owner?.addEventListener("abort",ownerAbort,{once:true});
  document.body.append(dialog);
  try{
   dialog.showModal();body.focus();
