@@ -4,7 +4,7 @@ import {vimNavigation} from "./vim-navigation";
 import {chooseSourceTarget,sourceSpan,sourceTargets,validSourceSnapshot,type Source,type SourceSnapshot,type SourceTarget,type SourceNavigator,type NavigationKind} from "./source-protocol";
 export type {Source} from "./source-protocol";
 import {completionPopup} from "./completion-popup";
-import {renderDocumentation} from "./lsp-documentation";
+import {renderDocumentation,openDocumentationReader} from "./lsp-documentation";
 import {activeParameterSpan,completionKind,documentationModel} from "./lsp-document-model";
 import {completionIcon} from "./lsp-completion-icons";
 import {completionApplication,completionTextChanges,plainCompletionChanges as completionChanges} from "./completion-application";
@@ -335,6 +335,31 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     ++navigationGeneration;navigationAbort?.abort();navigationAbort=null;cancelSourceRequests();
     if(close)showSource(null);
   }
+  async function keyboardDocumentation(target:EditorView){
+    const normal=()=>{const mode=getCM(target)?.state.vim;return !!mode&&!mode.insertMode&&!mode.visualMode;};
+    if(closed||view!==target||!session||!target.hasFocus||target.composing||!normal())return;
+    invalidateNavigation();
+    const doc=target.state.doc,selection=target.state.selection,id=session.id,generation=navigationGeneration;
+    const abort=new AbortController();navigationAbort=abort;
+    const owner=target.dom.ownerDocument,win=owner.defaultView;
+    const current=()=>!closed&&!abort.signal.aborted&&view===target&&session?.id===id&&target.state.doc===doc&&target.state.selection.eq(selection)&&generation===navigationGeneration&&target.hasFocus&&!target.composing&&normal();
+    const cancel=()=>abort.abort();
+    const focus=(event:FocusEvent)=>{if(!(event.target instanceof Node)||!target.contentDOM.contains(event.target))cancel();};
+    const key=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!event.isComposing)cancel();};
+    const focusOut=(event:FocusEvent)=>{if(target.contentDOM.contains(event.target as Node)&&!target.contentDOM.contains(event.relatedTarget as Node))cancel();};
+    const visibility=()=>{if(owner.hidden)cancel();};
+    const cleanup=()=>{owner.removeEventListener("focusout",focusOut,true);owner.removeEventListener("compositionstart",cancel,true);owner.removeEventListener("visibilitychange",visibility);owner.removeEventListener("focusin",focus,true);owner.removeEventListener("keydown",key,true);win?.removeEventListener("blur",cancel);abort.signal.removeEventListener("abort",cleanup);};
+    owner.addEventListener("focusout",focusOut,true);owner.addEventListener("compositionstart",cancel,true);owner.addEventListener("visibilitychange",visibility);owner.addEventListener("focusin",focus,true);owner.addEventListener("keydown",key,true);win?.addEventListener("blur",cancel);abort.signal.addEventListener("abort",cleanup,{once:true});
+    status("正在读取符号文档…");
+    try{
+      const result=await request("hover",selection.main.head,doc,undefined,undefined,current);
+      if(!current())return;
+      if(!object(result)||!documentationModel(result.contents,true).parts.length){status("此位置没有符号文档");return;}
+      cleanup();beforeReader();status("");
+      await openDocumentationReader(result.contents,true,abort.signal,{title:"符号文档"});
+    }catch(error){if(current())status("读取文档失败："+String(error).slice(0,200));}
+    finally{cleanup();}
+  }
   async function definition(pos: number,kind:NavigationKind="definition") {
     if(!view||!session||!view.hasFocus||view.composing)return;
     if(kind==="implementation"&&session.implementation!==true){status("当前语言服务不支持转到实现");return;}
@@ -465,7 +490,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   const references = findReferences((pos, doc) => request("references", pos, doc), status, !commandsOwned);
   const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned, () => { const id=session?.id; return () => !closed && id!==undefined && session?.id===id; }, (pos,doc) => session?.prepareRename ? request("prepareRename",pos,doc) : Promise.resolve({supported:false}));
   const extensions: Extension[] = [
-    vimNavigation({definition:target=>{void definition(target.state.selection.main.head);return true;}}),
+    vimNavigation({definition:target=>{void definition(target.state.selection.main.head);return true;},documentation:target=>{void keyboardDocumentation(target);}}),
     ...references.extensions,
     ...rename.extensions,
     signatureField,
