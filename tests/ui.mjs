@@ -2856,7 +2856,7 @@ try {
         if(args.epoch!==state.epoch)throw Error("stale epoch");
         state[args.kind+"Draft"]={text:args.text,baseline:args.baseline};persist();return;
       }
-      if(command==="load_recent_questions")return window.__fixtureQuestions;
+      if(command==="load_recent_questions")return window.__fixtureQuestions.map(q=>({...q,codeSnippets:q.codeSnippets.map(s=>({...s,code:"// untouched official template\nfn solve() {}"}))}));
       if(command==="external_editor_supported")return false;
       if(command==="login_status")return null;
       if(command==="list_solutions")return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
@@ -2906,6 +2906,23 @@ try {
   await recoveryPage.reload();
   await recoveryPage.waitForFunction(()=>document.querySelector('[aria-label="代码编辑器"]')?.textContent==="E");
   assert.equal(await recoveryPage.locator('[data-action="review-code-conflict"]').count(),0,"newer draft rebased against older committed save");
+  // No canonical file: returning to the official template must stay clean
+  // across recovery/relaunch, not resurrect a phantom unsaved edit.
+  await recoveryPage.evaluate(()=>{window.__recoveryTest.code=null;window.__recoveryTest.codeDraft=null;window.__persistRecovery();});
+  await recoveryPage.reload();
+  await recoveryCode.waitFor();
+  const untouchedTemplate=await recoveryCode.locator(".cm-line").allTextContents().then(lines=>lines.join("\n"));
+  assert.ok(untouchedTemplate.length>0,"fixture exposes an official initial template");
+  assert.equal(await recoveryPage.getByLabel("源码未保存",{exact:true}).count(),0);
+  await recoveryCode.fill(untouchedTemplate+"\n// temporary edit");
+  await recoveryPage.getByLabel("源码未保存",{exact:true}).waitFor();
+  await recoveryCode.fill(untouchedTemplate);
+  await recoveryPage.waitForFunction(text=>window.__recoveryTest.codeDraft?.text===text,untouchedTemplate);
+  assert.equal(await recoveryPage.getByLabel("源码未保存",{exact:true}).count(),0,"returning to initial content clears dirty");
+  await recoveryPage.reload();
+  await recoveryPage.waitForFunction(text=>Array.from(document.querySelectorAll('[aria-label="代码编辑器"] .cm-line')).map(line=>line.textContent).join("\n")===text,untouchedTemplate);
+  assert.equal(await recoveryPage.getByLabel("源码未保存",{exact:true}).count(),0,"template-only recovery remains clean after restart");
+  assert.equal(await recoveryPage.evaluate(()=>window.__recoveryTest.code),null,"clean initialization never writes a canonical file");
   await recoveryPage.close();
   await writeFile("evidence/EXPLICIT_RECOVERY_UI_RESULT.txt","PASS: mocked disk IPC, real CodeMirror dirty recovery and external conflict, clean source/notes sidecars ignored, save D while editing E rebases recovery to D without clearing dirty.\n");
 
