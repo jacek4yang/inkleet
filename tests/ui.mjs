@@ -1454,6 +1454,9 @@ try {
   await runPanel.getByText(/调试结束/).waitFor();
   assert.equal(await runPage.evaluate(() => window.__runTest.debugStarts), 1);
   await runPage.getByRole("combobox", { name: "编程语言" }).selectOption("golang");
+  await runPage.waitForFunction(()=>window.__retainedDock!==document.querySelector(".local-runner"));
+  await runPage.waitForFunction(expected=>Math.abs(document.querySelector(".local-runner").getBoundingClientRect().height-expected)<2,resizedHeight);
+  assert.ok(Math.abs(await runPage.evaluate(()=>Number(localStorage.getItem("inkleet.panel.local")))-resizedHeight)<2,"language remount preserves the chosen dock height");
   assert.equal(await runPanel.locator('[data-local-tab="debug"]').isDisabled(), false);
   await runPanel.locator('[data-local-tab="run"]').click();
   await runPanel.getByRole("button", { name: "本地执行", exact: true }).click();
