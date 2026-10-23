@@ -142,6 +142,16 @@ function App() {
   function currentText(target:SaveTarget){return target.kind==="notes"?notes.current.get(target.problem)??"":documents.current.get(target.key)?.code??"";}
   function storageKey(target:SaveTarget){return target.kind==="notes"?target.problem+"/notes":target.key;}
   function reconcileDirty(target:SaveTarget){const key=storageKey(target);if(currentText(target)===(clean.current.get(key)??""))dirty.current.delete(key);else dirty.current.add(key);}
+  function reconcileAllDirty(){
+    dirty.current.clear();
+    for(const [key,document] of documents.current){
+      if(editorText(document.code)!==editorText(clean.current.get(key)??""))dirty.current.add(key);
+    }
+    for(const [problem,text] of notes.current){
+      const key=problem+"/notes";
+      if(editorText(text)!==editorText(clean.current.get(key)??""))dirty.current.add(key);
+    }
+  }
   function checkpoint(target:SaveTarget,text:string,baseline:string|null){
     if(!isTauri())return;
     const key=storageKey(target),version=++draftRevision.current;
@@ -187,7 +197,7 @@ function App() {
     failed:()=>{
       saving.current.delete(key);
       const next=pendingNoteSaves.current.get(key);pendingNoteSaves.current.delete(key);next?.resolve(false);
-      dirty.current.add(key);refresh(n=>n+1);
+      reconcileDirty(target);refresh(n=>n+1);
       if(selected.current===target.key)setStatus("保存失败 · 草稿仍在，请先导出");
       resolve(false);
     }}));
@@ -207,13 +217,15 @@ function App() {
             const key=problemId+"/notes",recovered=hasRecoveryEdits(loaded.notesDraft,loaded.notes)?loaded.notesDraft:null;
             notes.current.set(problemId,editorText(recovered?.text??loaded.notes??""));
             persisted.current.set(key,loaded.notes);clean.current.set(key,editorText(loaded.notes??""));
-            if(recovered){dirty.current.add(key);if(recovered.baseline!==loaded.notes){persisted.current.set(key,recovered.baseline);queue.current.block(key);}}
+            reconcileDirty({key:activeKey,problem:problemId,language,solution,kind:"notes"});
+            if(recovered){if(recovered.baseline!==loaded.notes){persisted.current.set(key,recovered.baseline);queue.current.block(key);}}
           }
           if (!documents.current.has(activeKey)) {
-            const recovered=hasRecoveryEdits(loaded.codeDraft,loaded.code)?loaded.codeDraft:null;
+            const recovered=hasRecoveryEdits(loaded.codeDraft,loaded.code,baseCode)?loaded.codeDraft:null;
             documents.current.set(activeKey,{code:editorText(recovered?.text??loaded.code??baseCode),notes:notes.current.get(problemId)??""});
             persisted.current.set(activeKey,loaded.code);clean.current.set(activeKey,editorText(loaded.code??baseCode));
-            if(recovered){dirty.current.add(activeKey);if(recovered.baseline!==loaded.code){persisted.current.set(activeKey,recovered.baseline);queue.current.block(activeKey);}}
+            reconcileDirty({key:activeKey,problem:problemId,language,solution,kind:"code"});
+            if(recovered){if(recovered.baseline!==loaded.code){persisted.current.set(activeKey,recovered.baseline);queue.current.block(activeKey);}}
             if(loaded.draftWarnings?.length)setDraftError(loaded.draftWarnings.join(" · "));
           }
         } else {
@@ -253,6 +265,7 @@ function App() {
   }
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
+      reconcileAllDirty();
       if (dirty.current.size||queue.current.busy||draftQueue.current.busy) { event.preventDefault(); event.returnValue = ""; }
     };
     window.addEventListener("beforeunload", warn);
@@ -271,7 +284,8 @@ function App() {
       // explicitly so native errors do not become silent rejected promises.
       event.preventDefault();
       if(shuttingDown.current)return;
-      if(dirty.current.size||queue.current.busy||draftQueue.current.busy){setCloseError("");setCloseRequested(true);}
+      reconcileAllDirty();
+      if(dirty.current.size){setCloseError("");setCloseRequested(true);}
       else void closeWindow(false);
     }).then(stop=>{if(alive){unlisten=stop;setCloseProtectionReady(true);}else stop();}).catch(error=>setDraftError("关闭保护不可用 · "+String(error)));
     return()=>{alive=false;unlisten?.();};
@@ -281,10 +295,12 @@ function App() {
     if(shuttingDown.current)return;
     shuttingDown.current=true;++formatEpoch.current;setClosing(true);setCloseError("");
     try{
-      if(preserveDrafts){
-        await waitForCloseWrites(async()=>{await queue.current.idle;await draftQueue.current.idle;});
-        if(draftQueue.current.busy||saving.current.size>0)throw Error("恢复草稿尚未写入，请先处理保存错误或导出内容，再重试关闭");
-      }
+      // In-flight writes are not evidence of unsaved edits. Drain them without
+      // a dirty prompt, but never discard failed writes or newly entered text.
+      await waitForCloseWrites(async()=>{await queue.current.idle;await draftQueue.current.idle;});
+      if((!preserveDrafts&&queue.current.busy)||draftQueue.current.busy||saving.current.size>0)throw Error("仍有未完成或失败的写入，请处理保存错误或导出内容后重试关闭");
+      reconcileAllDirty();
+      if(!preserveDrafts&&dirty.current.size){shuttingDown.current=false;setCloseRequested(true);return;}
       await getCurrentWindow().destroy();
     }catch(error){
       shuttingDown.current=false;

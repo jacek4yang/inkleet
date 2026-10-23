@@ -21,3 +21,12 @@ test("real recovered edits preserve raw baselines and empty deletions",()=>{
  assert.equal(hasRecoveryEdits({text:"",baseline:"deleted content"},null),true);
  assert.equal(hasRecoveryEdits({text:"",baseline:"deleted content"},""),false);
 });
+
+test("an untouched initial template is a clean recovery baseline without a disk file",()=>{
+ const template="impl Solution {\n    fn solve() {}\n}";
+ assert.equal(hasRecoveryEdits({text:template,baseline:null},null,template),false);
+ assert.equal(hasRecoveryEdits({text:template.replace(/\n/g,"\r\n"),baseline:null},null,template),false);
+ assert.equal(hasRecoveryEdits({text:template+"\n// changed",baseline:null},null,template),true);
+ assert.equal(hasRecoveryEdits({text:"",baseline:"saved"},null,template),true);
+ assert.equal(hasRecoveryEdits({text:"edited",baseline:"old"},"external",template),true);
+});
