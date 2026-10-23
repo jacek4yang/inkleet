@@ -1303,10 +1303,22 @@ try {
   const initialHeight=(await runPanel.boundingBox()).height;
   await separator.focus();await separator.press("ArrowUp");
   assert.ok((await runPanel.boundingBox()).height>initialHeight,"keyboard resizes dock");
+  // A pointer-up may carry the final coordinate before a move is rendered.
+  await separator.evaluate(node=>node.addEventListener("pointerdown",event=>{window.__dockPointerId=event.pointerId;},{once:true}));
+  const fastBox=await separator.boundingBox(), fastBefore=(await runPanel.boundingBox()).height;
+  await runPage.mouse.move(fastBox.x+fastBox.width/2,fastBox.y+3);await runPage.mouse.down();
+  await separator.evaluate((node,{x,y})=>{
+    node.dispatchEvent(new PointerEvent("pointermove",{bubbles:true,pointerId:window.__dockPointerId,clientX:x,clientY:y+12,buttons:1}));
+    node.dispatchEvent(new PointerEvent("pointerup",{bubbles:true,pointerId:window.__dockPointerId,clientX:x,clientY:y,button:0}));
+  },{x:fastBox.x+fastBox.width/2,y:fastBox.y+3-24});
+  await runPage.mouse.up();
+  await runPage.waitForFunction(expected=>Math.abs(Number(localStorage.getItem("inkleet.panel.local"))-expected)<2,fastBefore+24);
+  assert.ok(Math.abs((await runPanel.boundingBox()).height-(fastBefore+24))<2,"terminal pointer coordinate owns rendered and persisted dock height");
   const dragBox=await separator.boundingBox();
   await runPage.mouse.move(dragBox.x+dragBox.width/2,dragBox.y+3);await runPage.mouse.down();await runPage.mouse.move(dragBox.x+dragBox.width/2,dragBox.y-40,{steps:5});await runPage.mouse.up();
   const resizedHeight=(await runPanel.boundingBox()).height;
   assert.ok(resizedHeight>initialHeight+30,"pointer resizes dock");
+  assert.ok(Math.abs(await runPage.evaluate(()=>Number(localStorage.getItem("inkleet.panel.local")))-resizedHeight)<2,"real drag persists the rendered height");
   await runPage.evaluate(()=>{window.__retainedDock=document.querySelector(".local-runner");});
   await runPanel.getByRole("button",{name:"收起",exact:true}).click();
   await runPanel.waitFor({state:"hidden"});

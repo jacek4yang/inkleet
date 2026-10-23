@@ -6,7 +6,6 @@ export function useResizablePanel(name:string,visible:boolean,initial=300){
   const [height,setHeight]=useState(()=>{try{const n=Number(localStorage.getItem("inkleet.panel."+name));return Number.isFinite(n)&&n>=80&&n<=2000?n:initial;}catch{return initial;}});
   const [maximum,setMaximum]=useState(600),[warning,setWarning]=useState("");
   const drag=useRef<{id:number;y:number;height:number;start:number}|null>(null);
-  const current=useRef(height);current.current=height;
   const persist=(value:number)=>{try{localStorage.setItem("inkleet.panel."+name,String(value));setWarning("");}catch{setWarning("面板高度无法保存，本次仍有效");}};
   useLayoutEffect(()=>{
     const node=panel.current,parent=node?.parentElement;if(!node||!parent)return;
@@ -29,7 +28,10 @@ export function useResizablePanel(name:string,visible:boolean,initial=300){
     const moving=drag.current;if(!moving||moving.id!==event.pointerId)return;
     drag.current=null;
     if(restore){setHeight(moving.start);return;}
-    persist(current.current);
+    // Pointer-up can arrive before React commits the final move. Persist the
+    // terminal pointer coordinate, not the previous render's height.
+    const value=clamp(moving.height+moving.y-event.clientY,minimum,maximum);
+    setHeight(value);persist(value);
     if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);
   };
   const handle=<div className="panel-resizer" role="separator" aria-label={name==="local"?"调整本地面板高度":"调整测试结果高度"} aria-orientation="horizontal" aria-valuemin={Math.round(minimum)} aria-valuemax={Math.round(maximum)} aria-valuenow={Math.round(shown)} tabIndex={0} title={warning||"拖动调整高度 · ↑ ↓ · Home / End"}

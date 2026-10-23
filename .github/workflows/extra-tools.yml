@@ -1,8 +1,10 @@
 name: Additional isolated language tools
 on:
   push:
-    branches: [feat/first-workbench, main]
-    paths: ['crates/managed-env/examples/extra_probe.rs', '.github/workflows/extra-tools.yml']
+    branches: [main]
+    paths: ['crates/managed-env/**', '.github/workflows/extra-tools.yml']
+  pull_request:
+    paths: ['crates/managed-env/**', '.github/workflows/extra-tools.yml']
   workflow_dispatch:
 permissions:
   contents: read
