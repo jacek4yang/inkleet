@@ -1,0 +1,73 @@
+name: Rust collection debugger qualification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-collections-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# This checks the actual managed snapshot target, not the compiler used to build
+# InkLeet itself. Windows snapshots use GNU/DWARF even though the app uses MSVC.
+# It supplements, and never replaces, native GUI or installer qualification.
+jobs:
+  collections:
+    name: Rust collection DAP (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2025
+          - platform: linux-x64
+            runner: ubuntu-24.04
+          - platform: macos-x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: crates/managed-env
+          key: rust-collection-dap-${{ matrix.platform }}
+      - name: Capture real managed Rust collection variables
+        run: |
+          mkdir -p evidence/rust-collections
+          git rev-parse HEAD > evidence/rust-collections/BUILD_COMMIT.txt
+          cargo run --locked --manifest-path crates/managed-env/Cargo.toml --example rust_collections_dap_probe -- evidence/rust-collections 2>&1 | tee evidence/rust-collections/probe.log
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install captured-data rendering test dependencies
+        run: |
+          npm ci --ignore-scripts
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            npx playwright install --with-deps chromium
+          else
+            npx playwright install chromium
+          fi
+      - name: Verify production UI against actual adapter data
+        run: node tests/debug-real-dap-ui.mjs evidence/rust-collections
+      - name: Verify dependency lockfiles were not changed
+        if: always()
+        run: git diff --exit-code -- crates/managed-env/Cargo.lock src-tauri/Cargo.lock package-lock.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: rust-collections-${{ matrix.platform }}-${{ github.sha }}
+          path: evidence/rust-collections/
+          if-no-files-found: error
+          retention-days: 14

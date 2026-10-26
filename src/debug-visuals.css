@@ -1,15 +1,22 @@
-.debug-variable-meta{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:10px;line-height:1.5;margin:0 0 5px;min-width:0}
-.debug-variable-meta>code{font:10px/1.5 var(--font-mono);overflow-wrap:anywhere;white-space:normal;opacity:.85}
-.debug-variable-meta>span{white-space:nowrap}
-.debug-variable>.debug-details-control{margin-left:auto;flex:0 0 auto}.debug-variable .debug-value-details{margin-left:auto;flex:0 0 auto;font-size:10px;color:var(--muted);padding:1px 4px}
-.debug-variable>code{flex:1;min-width:0}
-.debug-field-label{font:10px/1.4 var(--font-ui);color:var(--muted);padding:1px 4px;background:var(--active-line);border-radius:3px}
-.debug-map-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:2px 8px;border-left:2px solid var(--active-line);margin-left:12px;padding-left:4px}
-.debug-map-fields>.debug-page-controls,.debug-map-fields>small,.debug-map-fields>[role=alert]{grid-column:1/-1}
-.debug-value-detail{padding:8px 10px;margin:3px 0 7px 16px;background:var(--active-line);border-radius:5px;min-width:0;display:grid;gap:4px}
-.debug-value-detail>code{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 var(--font-mono)}
-.debug-value-detail>pre{margin:0;max-height:240px;overflow:auto;white-space:pre;font:12px/1.6 var(--font-mono)}
-.debug-value-detail>small{font-size:10px;color:var(--muted)}
-.debug-page-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 7px 16px;color:var(--muted)}
-.debug-page-controls small{font-size:10px}.debug-page-controls button{font-size:11px}
-@media(max-width:600px){.debug-map-fields{grid-template-columns:minmax(0,1fr)}}
+.debug-variable { gap: 7px; align-items: baseline; }
+.debug-variable > code { flex: 1; min-width: 0; }
+.debug-variable-type { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 10px/1.5 var(--font-mono); opacity: .8; }
+.debug-variable .debug-value-details { flex: 0 0 auto; margin-left: auto; padding: 0 4px; color: var(--muted); font-size: 12px; }
+.debug-map-rows { margin: 2px 0 4px 18px; min-width: 0; }
+.debug-map-row { display: grid; grid-template-columns: minmax(56px, 2fr) minmax(64px, 3fr); gap: 8px; border-bottom: 1px solid color-mix(in srgb, var(--muted) 10%, transparent); }
+.debug-map-row > [role=cell] { min-width: 0; }
+.debug-map-row > [data-map-field=value] { padding-left: 8px; border-left: 1px solid color-mix(in srgb, var(--muted) 18%, transparent); }
+.debug-map-cell > .debug-variable > button { max-width: none; flex: 1 1 auto; min-width: 0; text-align: left; }
+.debug-map-cell > .debug-variable > button > code { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; color: var(--ink); font: 11px/1.65 var(--font-mono); }
+.debug-map-cell .debug-variable-type { max-width: 40%; }
+.debug-map-loading { min-height: 25px; color: var(--muted); font: 11px/1.65 var(--font-mono); }
+.debug-map-fallback { min-width: 0; }
+.debug-node-limit { color: var(--muted); font-size: 10px; }
+.debug-value-detail { padding: 8px 10px; margin: 3px 0 7px 16px; background: var(--active-line); border-radius: 5px; min-width: 0; display: grid; gap: 4px; }
+.debug-value-detail > code { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 var(--font-mono); }
+.debug-value-detail > pre { margin: 0; max-height: 240px; overflow: auto; white-space: pre; font: 12px/1.6 var(--font-mono); }
+.debug-value-detail > small { font-size: 10px; color: var(--muted); }
+.debug-page-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 7px 16px; color: var(--muted); }
+.debug-page-controls small { font-size: 10px; }.debug-page-controls button { font-size: 11px; }
+
+.debug-map-rows > .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }

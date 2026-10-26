@@ -1420,7 +1420,7 @@ try:
                 local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
                 if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
-                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let map=std::collections::HashMap::from([(3,30),(8,80)]); let empty:std::collections::HashMap<i32,i32>=std::collections::HashMap::new(); let set=std::collections::HashSet::from([3,8]); let mut total=0;\n for value in values {total+=value;}\n total\n}"
+                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let map=std::collections::HashMap::from([(3,30usize),(8,80usize)]); let empty:std::collections::HashMap<i32,i32>=std::collections::HashMap::new(); let words=std::collections::HashMap::from([(String::from(\"hello\"),42)]); let nested=std::collections::HashMap::from([(String::from(\"nums\"),vec![5,9])]); let set=std::collections::HashSet::from([3,8]); let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
                 save_editor(code)
                 if group=="golang":
@@ -1463,30 +1463,72 @@ try:
                 if group=="rust":
                     map_node='.debug-tree-node:has(> .debug-variable > button[aria-label="map"])'
                     reveal_debug_control('.debug-variable > button[aria-label="map"]');click_debug_action('.debug-variable > button[aria-label="map"]')
-                    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashMap exposes two logical pairs")
+                    def map_rows(selector):
+                        rows=cmd("POST","/elements",{"using":"css selector","value":selector+' > .debug-tree-children > .debug-map-rows > .debug-map-row'})
+                        result=[]
+                        for row in rows:
+                            cells=[]
+                            for field in ("key","value"):
+                                nodes=cmd("POST",f"/element/{row[EID]}/elements",{"using":"css selector","value":'[data-map-field="'+field+'"] > .debug-tree-node > .debug-variable > button > code'})
+                                if len(nodes)!=1:return []
+                                cells.append(cmd("GET",f"/element/{nodes[0][EID]}/property/textContent"))
+                            result.append(cells)
+                        return sorted(result)
+                    def capture_map_rows(selector,name):
+                        group=selector+' > .debug-tree-children > .debug-map-rows'
+                        reveal_debug_control(group)
+                        panel_rect=cmd("GET",f"/element/{element('.debug-body')}/rect")
+                        window_rect=cmd("GET","/window/rect")
+                        cells=cmd("POST","/elements",{"using":"css selector","value":group+' > .debug-map-row > [data-map-field] > .debug-tree-node > .debug-variable > button > code'})
+                        assert cells,"map screenshot must contain actual key/value cells"
+                        bounds=[]
+                        for cell in cells:
+                            rect=cmd("GET",f"/element/{cell[EID]}/rect")
+                            assert rect["width"]>0 and rect["height"]>0,"map cell must have painted bounds"
+                            assert rect["x"]>=panel_rect["x"] and rect["x"]+rect["width"]<=panel_rect["x"]+panel_rect["width"]+1,"map cells must be inside horizontal viewport"
+                            assert rect["y"]>=panel_rect["y"] and rect["y"]+rect["height"]<=min(panel_rect["y"]+panel_rect["height"],window_rect["height"])+1,"map cells must be visible in screenshot"
+                            bounds.append({"text":cmd("GET",f"/element/{cell[EID]}/property/textContent"),"rect":rect})
+                        (evidence/(name+'.json')).write_text(json.dumps(bounds,ensure_ascii=False))
+                        screenshot(name+'.png')
+                    wait_for(lambda:map_rows(map_node)==[["3","30"],["8","80"]],"one HashMap expansion renders actual key/value associations in the same row")
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"], '+map_node+' button[aria-label="[raw]"]'}),"internal map layout hidden by default"
-                    pair_buttons=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-variable > button'})
-                    pair_names=[cmd("GET",f"/element/{pair[EID]}/attribute/aria-label") for pair in pair_buttons]
-                    for pair_name in pair_names:
-                        pair_selector=map_node+' > .debug-tree-children > .debug-tree-node:has(> .debug-variable > button[aria-label="'+pair_name+'"])'
-                        reveal_debug_control(pair_selector+' > .debug-variable > button');click_debug_action(pair_selector+' > .debug-variable > button')
-                        wait_for(lambda:cmd("GET",f"/element/{element(pair_selector+' > .debug-variable > button')}/attribute/aria-expanded")=="true","pair visibly expanded")
-                        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":pair_selector+' > .debug-tree-children > .debug-tree-node > .debug-variable > code'}))==2,"pair children loaded before next layout-dependent click")
-                    def map_values():
-                        nodes=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-tree-children > .debug-tree-node > .debug-variable > code'})
-                        return sorted(cmd("GET",f"/element/{item[EID]}/property/textContent") for item in nodes)
-                    wait_for(lambda:map_values()==["3","30","8","80"],"logical HashMap keys and values regardless of iteration order")
+                    assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' .debug-variable-meta, '+map_node+' .debug-field-label, '+map_node+' .debug-page-controls'}),"small map has no label decoration or redundant metadata/footer"
+                    assert "{...}" not in text(map_node),"a fully decoded scalar map must not render opaque tuple summaries"
+                    actual_rows=cmd("POST","/elements",{"using":"css selector","value":map_node+' .debug-map-row'})
+                    map_evidence={"type":cmd("GET",f"/element/{element(map_node+' > .debug-variable > button')}/attribute/title"),"pairs":map_rows(map_node),"fields":[]}
+                    for row in actual_rows:
+                        fields=cmd("POST",f"/element/{row[EID]}/elements",{"using":"css selector","value":"[data-map-field]"})
+                        map_evidence["fields"].append([cmd("GET",f"/element/{field[EID]}/attribute/data-source-name") for field in fields])
+                    (evidence/"rust-map-row-data.json").write_text(json.dumps(map_evidence,ensure_ascii=False))
+                    capture_map_rows(map_node,"rust-map-key-value-rows-native")
                     reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
                     wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
                     reveal_debug_control(map_node+' button[aria-label="[raw]"]');click_debug_action(map_node+' button[aria-label="[raw]"]')
                     wait_for(lambda:element(map_node+' button[aria-label="base"]'),"raw map retains implementation fields")
                     reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"]'}),"hide raw removes internal layout"
+                    empty_node='.debug-tree-node:has(> .debug-variable > button[aria-label="empty"])'
+                    reveal_debug_control('.debug-variable > button[aria-label="empty"]');click_debug_action('.debug-variable > button[aria-label="empty"]')
+                    wait_for(lambda:"空" in text(empty_node),"empty HashMap has explicit empty state")
+                    words_node='.debug-tree-node:has(> .debug-variable > button[aria-label="words"])'
+                    reveal_debug_control('.debug-variable > button[aria-label="words"]');click_debug_action('.debug-variable > button[aria-label="words"]')
+                    wait_for(lambda:map_rows(words_node)==[['"hello"',"42"]],"String map key rendered alongside its actual value")
+                    capture_map_rows(words_node,"rust-string-map-rows-native")
+                    nested_node='.debug-tree-node:has(> .debug-variable > button[aria-label="nested"])'
+                    reveal_debug_control('.debug-variable > button[aria-label="nested"]');click_debug_action('.debug-variable > button[aria-label="nested"]')
+                    wait_for(lambda:len(map_rows(nested_node))==1,"nested map entry automatically decoded")
+                    nested_value=nested_node+' [data-map-field="value"] > .debug-tree-node > .debug-variable > button'
+                    reveal_debug_control(nested_value);click_debug_action(nested_value)
+                    def nested_values():
+                        nodes=cmd("POST","/elements",{"using":"css selector","value":nested_node+' [data-map-field="value"] .debug-tree-children > .debug-tree-node > .debug-variable > code'})
+                        return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
+                    wait_for(lambda:nested_values()==["5","9"],"nested Vec map value expands into real indexed elements")
+                    capture_map_rows(nested_node,"rust-nested-map-rows-native")
                     reveal_debug_control('.debug-variable > button[aria-label="set"]');click_debug_action('.debug-variable > button[aria-label="set"]')
                     set_node='.debug-tree-node:has(> .debug-variable > button[aria-label="set"])'
                     wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":set_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashSet logical elements")
                     screenshot("rust-logical-collections-native.png")
-                    (evidence/"RUST_COLLECTIONS_NATIVE_RESULT.txt").write_text("PASS: private Rust compiler visualizers expose two HashMap pairs with exact keys/values, two HashSet elements, default-hidden raw layout and explicit reversible raw view. Large-map retrieval and other platforms unverified.\\n")
+                    (evidence/"RUST_COLLECTIONS_NATIVE_RESULT.txt").write_text("PASS: one expansion renders HashMap<i32,usize> exact 3=30 and 8=80 associations in shared rows without tuple clicks or placeholder summaries; String keys, nested Vec values and empty maps verified; HashSet members and reversible raw view preserved. Linux native evidence only; Windows and macOS qualification remains separate.\\n")
 
                 screenshot(group+"-debug-native.png")
                 for _ in range(3):
