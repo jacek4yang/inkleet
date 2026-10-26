@@ -2,7 +2,7 @@ import "./reading-layout.css";
 import React,{useCallback,useEffect,useLayoutEffect,useRef,useState} from "react";
 import {bounded,parseReadingPreferences,readingDefaults,readingStorageKey,splitBounds,type ReadingPreferences} from "./reading-preferences";
 
-type Drag={id:number;x:number;ratio:number;start:number;width:number;node:HTMLDivElement};
+type Drag={id:number;x:number;ratio:number;start:number;width:number;viewport:number;node:HTMLDivElement};
 function release(drag:Drag){if(drag.node.hasPointerCapture(drag.id))drag.node.releasePointerCapture(drag.id);}
 export function useReadingLayout(focus:boolean) {
  const root=useRef<HTMLElement>(null);
@@ -29,9 +29,10 @@ export function useReadingLayout(focus:boolean) {
  useLayoutEffect(()=>{if(preferences.hidden)cancel();},[preferences.hidden,cancel]);
  useEffect(()=>{
   const escape=(event:KeyboardEvent)=>{if(event.key==="Escape"&&drag.current){event.preventDefault();event.stopPropagation();cancel();}};
-  window.addEventListener("keydown",escape,true);return()=>{window.removeEventListener("keydown",escape,true);cancel();};
+  window.addEventListener("keydown",escape,true);window.addEventListener("resize",cancel);return()=>{window.removeEventListener("keydown",escape,true);window.removeEventListener("resize",cancel);cancel();};
  },[cancel]);
  const ratio=bounded(preferences.ratio,44,bounds.min,bounds.max);
+ const geometryMatches=()=>{const moving=drag.current,node=root.current;if(!moving||!node||window.innerWidth!==moving.viewport||window.innerWidth<=760||current.current.hidden)return false;const sidebar=node.querySelector<HTMLElement>(".sidebar");return node.clientWidth-(sidebar?.getBoundingClientRect().width??0)-8===moving.width;};
  const valueAt=(x:number)=>{const moving=drag.current!;return bounded(moving.ratio+(x-moving.x)/moving.width*100,44,bounds.min,bounds.max);};
  const reset=()=>{cancel();update({ratio:readingDefaults.ratio});};
  const handle=<div className="reading-resizer" role="separator" aria-label="调整题面宽度" aria-controls="reading-pane code-pane" aria-orientation="vertical" aria-valuemin={Math.round(bounds.min)} aria-valuemax={Math.round(bounds.max)} aria-valuenow={Math.round(ratio)} aria-valuetext={`${Math.round(ratio)}%`} tabIndex={0} title="拖动调整宽度 · ← → · Home / End · 双击或 Enter 重置"
@@ -40,10 +41,10 @@ export function useReadingLayout(focus:boolean) {
    const node=root.current;if(!node||node.clientWidth<=760||current.current.hidden)return;
    const sidebar=node.querySelector<HTMLElement>(".sidebar"),width=node.clientWidth-(sidebar?.getBoundingClientRect().width??0)-8;
    if(width<=0)return;event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);
-   drag.current={id:event.pointerId,x:event.clientX,ratio,start:current.current.ratio,width,node:event.currentTarget};
+   drag.current={id:event.pointerId,x:event.clientX,ratio,start:current.current.ratio,width,viewport:window.innerWidth,node:event.currentTarget};
   }}
-  onPointerMove={event=>{if(drag.current?.id===event.pointerId)update({ratio:valueAt(event.clientX)},false);}}
-  onPointerUp={event=>{const moving=drag.current;if(moving?.id!==event.pointerId)return;const next=valueAt(event.clientX);drag.current=null;release(moving);update({ratio:next});}}
+  onPointerMove={event=>{if(drag.current?.id!==event.pointerId)return;if(!geometryMatches()){cancel();return;}update({ratio:valueAt(event.clientX)},false);}}
+  onPointerUp={event=>{const moving=drag.current;if(moving?.id!==event.pointerId)return;if(!geometryMatches()){cancel();return;}const next=valueAt(event.clientX);drag.current=null;release(moving);update({ratio:next});}}
   onPointerCancel={event=>{if(drag.current?.id===event.pointerId)cancel();}}
   onLostPointerCapture={event=>{if(drag.current?.id===event.pointerId)cancel();}}
   onDoubleClick={reset}
