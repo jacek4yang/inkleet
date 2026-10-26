@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 export async function runNativeLoginUI(testPage) {
+  await runStartupRecoveryUI(testPage);
   const page = await testPage({ viewport: { width: 1000, height: 800 } });
   try {
     await page.addInitScript(() => {
@@ -46,4 +47,44 @@ export async function runNativeLoginUI(testPage) {
     await page.getByRole("button", { name: "重试忘记此设备", exact: true }).click();
     await page.getByRole("button", { name: "重试忘记此设备", exact: true }).waitFor({ state: "hidden" });
   } finally { await page.close(); }
+}
+
+async function runStartupRecoveryUI(testPage) {
+  const page = await testPage({viewport:{width:1200,height:800}});
+  try {
+    await page.addInitScript(() => {
+      window.isTauri=true;window.__authRestoreTest=true;
+      window.__restoreState={fail:true,calls:0,loginStarts:0};
+      window.__TAURI_INTERNALS__={invoke:async(command)=>{
+        if(command==="open_login"||command==="qr_login_start"){window.__restoreState.loginStarts++;throw Error("No unsolicited login");}
+        if(command==="sign_out"){window.__restoreState.fail=false;return;}
+        if(command==="login_status"){window.__restoreState.calls++;if(window.__restoreState.fail)throw Error("STORAGE_RECOVERY_REQUIRED");return null;}
+        if(command==="load_recent_questions")return [window.__fixtureQuestions[0]];
+        if(command==="search_questions")return {questions:[],total:0,hasMore:false};
+        if(command==="list_solutions")return {entries:[{id:"default",name:"Default"}],unreadable:0};
+        if(command==="load_document")return {code:"// practice while signed out",notes:null};
+        if(command==="list_judgements")return [];
+        if(command==="external_editor_supported")return false;
+        if(["cancel_login","stop_language_service","save_text"].includes(command))return;
+        throw Error("Unexpected startup recovery fixture: "+command);
+      }};
+    });
+    await page.goto("http://127.0.0.1:5173");
+    const notice=page.getByRole("button",{name:"登录状态",exact:true});await notice.waitFor();
+    const panel=page.getByRole("region",{name:"LeetCode 登录",exact:true});
+    assert.equal(await panel.count(),0,"startup recovery failure must not open an unsolicited overlay");
+    assert.equal(await page.evaluate(()=>window.__restoreState.loginStarts),0,"recovery failure must not start a login automatically");
+    const editor=page.getByRole("textbox",{name:"代码编辑器",exact:true});await editor.waitFor();
+    await editor.click();await editor.press("End");await editor.pressSequentially(" still editable");
+    assert.equal(await editor.evaluate(node=>node===document.activeElement),true,"recovery warning does not capture editor focus");
+    await notice.click();await panel.waitFor();
+    await panel.getByRole("button",{name:"重试恢复登录",exact:true}).waitFor();
+    await panel.getByRole("button",{name:"重试忘记此设备",exact:true}).waitFor();
+    await panel.getByRole("button",{name:"收起登录提示",exact:true}).click();assert.equal(await panel.count(),0);
+    await notice.click();
+    await panel.getByRole("button",{name:"重试恢复登录",exact:true}).click();
+    await page.waitForFunction(()=>window.__restoreState.calls===2);
+    await panel.getByRole("button",{name:"重试忘记此设备",exact:true}).click();await panel.waitFor({state:"hidden"});
+    assert.equal(await notice.count(),0,"explicit forget clears the recovery latch and passive warning");
+  } finally {await page.close();}
 }
