@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import DOMPurify from "dompurify";
+import {statementVersion,type StatementLanguage} from "./reading-preferences";
 import { parseQuestionLink } from "./question-link";
 
 export type RemoteQuestion = {
@@ -27,8 +28,8 @@ export async function readQuestion(slug: string) {
 }
 
 // 题面是不可信远程 HTML。仅保留排版，无脚本、表单、链接导航、远程资源或自定义元素。
-export const QuestionStatement=React.memo(function QuestionStatement({ question }: { question: RemoteQuestion }) {
-  const raw = question.translatedContent || question.content || "";
+export const QuestionStatement=React.memo(function QuestionStatement({ question, language="zh" }: { question: RemoteQuestion; language?:StatementLanguage }) {
+  const version=statementVersion(question,language),raw=version.content;
   const clean = useMemo(() => DOMPurify.sanitize(raw, {
     ALLOWED_TAGS: ["p", "div", "span", "strong", "b", "em", "i", "u", "s", "br", "hr",
       "pre", "code", "ul", "ol", "li", "h2", "h3", "h4", "blockquote",
@@ -38,8 +39,9 @@ export const QuestionStatement=React.memo(function QuestionStatement({ question 
   }), [raw]);
   return <>
     <p className="eyebrow">力扣中国站 · {question.questionFrontendId} <span className="badge">{question.difficulty}</span></p>
-    <h1>{question.translatedTitle || question.title}</h1>
-    {clean ? <div className="question-content" dangerouslySetInnerHTML={{ __html: clean }} /> :
+    <h1>{version.title}</h1>
+    {version.fallback && <p className="muted" role="status">{language==="zh"?"暂无中文题面，显示英文原文。":"暂无英文题面，显示中文题面。"}</p>}
+    {clean ? <div className="question-content" lang={version.language==="zh"?"zh-CN":"en"} dangerouslySetInnerHTML={{ __html: clean }} /> :
       <p className="error">{question.isPaidOnly ? "此题需要会员权限；当前只读接入不访问会员题面。" : "题面暂不可用，请稍后重试。"}</p>}
     {/<(?:img|svg|math)\b/i.test(raw) && <p className="muted">此题包含图示或公式；当前预览尚未呈现这些内容，请对照官方题面。</p>}
     <p className="question-source">题目来源：leetcode.cn/problems/{question.titleSlug}/</p>

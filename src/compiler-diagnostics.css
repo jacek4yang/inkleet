@@ -1,0 +1,15 @@
+.compiler-diagnostics { min-width:0; }
+.diagnostic-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.diagnostic-heading h4 { margin:8px 0; }
+.diagnostic-list { list-style:none; padding:0; margin:8px 0; display:grid; gap:12px; }
+.diagnostic-list>li { border:1px solid var(--line,var(--theme-line,#e0e1da)); border-radius:5px; padding:10px; min-width:0; }
+.diagnostic-location { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; overflow-wrap:anywhere; }
+.diagnostic-location code,.diagnostic-location button { overflow-wrap:anywhere; white-space:normal; text-align:left; }
+.diagnostic-message { white-space:pre-wrap; overflow-wrap:anywhere; margin:8px 0; }
+.diagnostic-excerpt { overflow:auto; tab-size:4; }
+.diagnostic-excerpt>div { display:flex; min-width:max-content; }
+.diagnostic-excerpt>div>span { width:5ch; text-align:right; padding-right:1ch; flex:none; opacity:.55; font:12px/1.6 var(--font-mono); }
+.case-output .diagnostic-excerpt pre { margin:0; padding:0; white-space:pre; overflow:visible; border:0; background:transparent; }
+.diagnostic-excerpt>div[data-active="true"] { background:var(--theme-hover,#e8e9e2); }
+.case-output .diagnostic-raw pre { white-space:pre; overflow:auto; max-height:320px; tab-size:4; }
+.diagnostic-raw summary { cursor:pointer; margin:8px 0; }

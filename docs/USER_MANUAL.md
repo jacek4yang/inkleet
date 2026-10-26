@@ -1,14 +1,26 @@
 # InkLeet 使用手册
 
-本手册对应开发分支。尚未验收的能力不能视为已可用，具体证据见 ../STATUS.md。
+This manual describes development source, not a guarantee for the published v0.1.0 package. The protected main baseline and acceptance limits are distinguished in [STATUS.md](../STATUS.md). Reading-layout and compiler-diagnostics changes described below are branch features, not yet delivered test-package features.
 
 ## 工作台
 左侧题库与最近题目，中间题面或笔记，右侧代码。顶栏图标提供专注、题库、链接和设置。
 语言选择保留原生键盘操作。Tab 在编辑器内缩进或接受补全；Shift+Tab 反向缩进。普通模式下 Escape 后 Tab 可离开编辑器；Vim 模式使用 Ctrl+M 后 Tab。
 高级功能通过设置进入。成功读取、保存和刷新文件不常驻显示说明；保存失败与冲突仍会提示。
 
+## Reading controls
+
+On desktop-width windows, the statement toolbar offers a 10-32 px font size and explicit Chinese/English selection. If the requested text is absent, the available language is shown with a notice. Font size does not change the code editor. The top-bar toggle hides the statement without closing the editor or discarding its draft.
+
+Drag the vertical separator to resize the statement. Arrow keys adjust it, Shift increases the step, Home/End select bounds, and Enter or double-click resets it. Escape or an interrupted drag restores the starting width. Preferences are stored locally. Previous/next buttons follow the current filtered page, not numeric question IDs; unavailable or paid neighbors are disabled.
+
+## Compiler output
+
+Local error output includes bounded diagnostic summaries for the six supported languages, source excerpts where ownership can be verified, and full captured raw output. Copy copies the raw output and reports clipboard failures. A location is clickable only for the known source filename and an in-range line while the editor still matches the run snapshot. External paths and stale snapshots remain display-only. Unsupported output remains available verbatim; the summary is not a substitute for native compiler acceptance.
+
 ## 设置
-设置按实际功能分组。搜索支持中文、英文和多词筛选，例如 Vim、Tab、Rust 格式化；只展示匹配的设置及必需的关联项。搜索代理地址会保留连接方式；自定义代理的地址与连接方式一起编辑。字体入口当前提供 Intel One Mono 说明，不提供字体选择。
+设置按实际功能分组。搜索支持中文、英文和多词筛选，例如 Vim、Tab、Rust 格式化；只展示匹配的设置及必需的关联项。搜索代理地址会保留连接方式；自定义代理的地址与连接方式一起编辑。
+
+Editor settings include a font selector for installed fonts, with a default Intel One Mono and CJK fallback stack. Missing fonts fall back; selection does not download fonts. The separate Intel One Mono entry shows font information.
 
 设置窗口中 Ctrl+F（macOS Command+F）聚焦搜索；清除图标清空搜索，Escape 关闭当前弹窗。运行面板的信息图标直接打开使用手册。
 
@@ -19,9 +31,11 @@
 “重新读取”成功后才替换草稿并清除先前错误；读取失败保留草稿。隐藏页面的配置错误会显示“查看”，返回原设置后可检查完整原因。该入口不会自动重试。普通格式化运行状态与配置读取、保存错误分别显示。
 
 ## 编辑器命令与语言分析
-代码编辑器获得焦点后，Ctrl+Shift+P（macOS 为 Command+Shift+P）打开编辑器命令面板。输入名称筛选，方向键选择，Enter 执行，Escape 关闭并返回编辑器。该入口目前限于编辑器；工作台全局命令、用户自定义键位和预设仍在开发。
+代码编辑器获得焦点后，Ctrl+Shift+P（macOS 为 Command+Shift+P）打开编辑器命令面板。输入名称筛选，方向键选择，Enter 执行，Escape 关闭并返回编辑器。
 
-- F2：通过 LSP 重命名当前解答中的符号；一次撤销可恢复。当前不包含跨文件重命名和修改预览。
+The toolbar command button opens workbench commands. Ctrl+Shift+P (Command+Shift+P on macOS) also opens them outside the focused editor; inside the editor, its palette includes available workbench actions. Settings support additional custom shortcuts for listed editor and workbench commands, without replacing the existing defaults. Named keybinding presets are not provided.
+
+- F2: rename a symbol in the current solution through LSP; one undo restores the change. Use Preview or Shift+Enter to review edits before applying them. Cross-file edits are not supported.
 - F12：转到定义；工具链源码在只读窗口打开。
 - Shift+F12：查找当前解答中的引用。
 - Ctrl+Space：补全；Ctrl+Shift+Space（macOS 为 Command+Shift+Space）：参数提示。

@@ -1,3 +1,5 @@
+import {runReadingControlsUI} from "./reading-controls-ui.mjs";
+import {runCompilerDiagnosticsUI} from "./compiler-diagnostics-ui.mjs";
 import {runCopyAIContextUI} from "./copy-ai-context-ui.mjs";
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
@@ -23,7 +25,9 @@ async function openSettings(page, category) {
 }
 
 const server = spawn("npm", ["run", "dev", "--", "--port", "5173"], { stdio: "inherit" });
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.INKLEET_CHROMIUM_PATH
+  ? { executablePath: process.env.INKLEET_CHROMIUM_PATH }
+  : {});
 const fixtures = JSON.parse(await readFile(new URL("./fixtures/public-questions.json", import.meta.url), "utf8"));
 async function testPage(options) {
   const page = await browser.newPage(options);
@@ -53,6 +57,8 @@ try {
     try { if ((await fetch("http://127.0.0.1:5173")).ok) break; } catch {}
     await new Promise(r => setTimeout(r, 500));
   }
+  await runReadingControlsUI(browser, fixtures);
+  await runCompilerDiagnosticsUI(testPage);
   // Preserve the original approval sheet as history; only owner-approved C is adopted.
   const iconReview = await browser.newPage({viewport:{width:900,height:380}});
   await iconReview.setContent(await readFile("docs/design/inkleet-icon-candidates.svg","utf8"));
