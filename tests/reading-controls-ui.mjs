@@ -61,7 +61,7 @@ export async function runReadingControlsUI(browser,fixtures,baseURL="http://127.
   assert.equal(await splitter.evaluate(node=>node.hasPointerCapture(1)),false,"Escape releases the mouse pointer capture");
   const resizeEvidence=[];
   const recordResize=async phase=>{
-   resizeEvidence.push({phase,...await splitter.evaluate(node=>({width:window.innerWidth,rootWidth:node.closest(".workbench").clientWidth,aria:Number(node.getAttribute("aria-valuenow")),stored:JSON.parse(localStorage.getItem("inkleet.reading.v1")).ratio,capture:node.hasPointerCapture(1),display:getComputedStyle(node).display}))});
+   resizeEvidence.push({phase,...await page.getByRole("separator",{name:"调整题面宽度",includeHidden:true}).evaluate(node=>({width:window.innerWidth,rootWidth:node.closest(".workbench").clientWidth,aria:Number(node.getAttribute("aria-valuenow")),stored:JSON.parse(localStorage.getItem("inkleet.reading.v1")).ratio,capture:node.hasPointerCapture(1),display:getComputedStyle(node).display}))});
    await writeFile("evidence/reading-resize-state.json",JSON.stringify(resizeEvidence,null,2));
   };
   const waitViewport=async width=>{
