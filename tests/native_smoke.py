@@ -1,13 +1,13 @@
 """Linux WebKitGTK smoke test against the built native application, not a browser mock."""
 import base64, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.error, http.client
-from native_wait import JsonlDiagnostics, Polling, operation_label, read_only_command
+from native_wait import NativeDiagnostics, Polling, operation_label, read_only_command
 from native_window_close import check_clean_close
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
 evidence = pathlib.Path(os.environ.get("INKLEET_EVIDENCE_DIR", "evidence/native"))
 evidence.mkdir(parents=True, exist_ok=True)
-polling = Polling(emit=JsonlDiagnostics(evidence / "native-timing.jsonl"))
+polling = Polling(emit=NativeDiagnostics(evidence))
 data = pathlib.Path(os.environ["XDG_DATA_HOME"])
 class PublicServiceUnavailable(Exception): pass
 (evidence/"LIVE_CN_RESULT.txt").write_text("NOT RUN: live public CN validation has not completed.\n")
