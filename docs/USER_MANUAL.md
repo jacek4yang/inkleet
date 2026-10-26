@@ -101,8 +101,8 @@ Windows Java 使用应用自己的 UTF-8 启动器，不修改系统语言设置
 浏览器预览只有内存草稿，刷新前需要导出。
 
 ## 账号与在线评测
-点击顶栏“登录力扣”，在独立官方窗口完成登录，再返回点击“验证登录”。
-当前会话仅在本次运行有效，不保存密码或持久化登录；第三方弹窗登录尚未支持。
+Development source offers a native QR flow and an official-window fallback. For the fallback, complete login in the official window, then return and verify. QR login and restored sessions are validated by the native client before exposing account identity.
+Remember-login is optional and uses the OS credential store, never plaintext files or editor JavaScript. Actual QR/account completion, cross-restart restoration and each platform store remain unaccepted. A locked or unavailable store, or uncertain cleanup, can block login until resolved; cancel/sign-out do not silently ignore credential cleanup errors. See [native login limitations](NATIVE_LOGIN.md).
 公开题库无需登录。登录后才能使用账户完成状态及在线评测。
 运行或提交才发送当前代码与测试用例；不会上传笔记。正式提交仍需确认。
 网络状态未知时不会自动重发；有评测编号时可继续查询原请求。

@@ -1,3 +1,5 @@
+import {runDebugVisualsUI} from "./debug-visuals-ui.mjs";
+import {runNativeLoginUI} from "./native-login-ui.mjs";
 import {runReadingControlsUI} from "./reading-controls-ui.mjs";
 import {runCompilerDiagnosticsUI} from "./compiler-diagnostics-ui.mjs";
 import {runCopyAIContextUI} from "./copy-ai-context-ui.mjs";
@@ -57,8 +59,10 @@ try {
     try { if ((await fetch("http://127.0.0.1:5173")).ok) break; } catch {}
     await new Promise(r => setTimeout(r, 500));
   }
+  await runDebugVisualsUI(testPage);
   await runReadingControlsUI(browser, fixtures);
   await runCompilerDiagnosticsUI(testPage);
+  await runNativeLoginUI(testPage);
   // Preserve the original approval sheet as history; only owner-approved C is adopted.
   const iconReview = await browser.newPage({viewport:{width:900,height:380}});
   await iconReview.setContent(await readFile("docs/design/inkleet-icon-candidates.svg","utf8"));
@@ -80,7 +84,7 @@ try {
       if(command==="load_document"){state.documents.push(args);return {code:null,notes:null};}
       if(command==="save_text"){state.saves.push(args);return;}
       if(command==="external_editor_supported")return false;
-      if(command==="open_login"||command==="cancel_login"||command==="stop_language_service")return;
+      if(command==="open_login"||command==="cancel_login"||command==="sign_out"||command==="stop_language_service")return;
       if(command==="verify_login")return {username:"catalogue-test",account:"account-A",persistence:"memory-only"};
       if(command==="list_judgements")return [];
       throw Error("No service in catalogue test: "+command);
@@ -122,8 +126,9 @@ try {
   assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[2].args.difficulty),"EASY");
   assert.equal(await cataloguePage.getByRole("button",{name:"登录力扣",exact:true}).locator("svg").count(),1,"login destination uses its SVG logo with accessible name");
   await cataloguePage.getByRole("button",{name:"登录力扣",exact:true}).click();
+  await cataloguePage.getByRole("button", { name: "官方网页登录", exact: true }).click();
   assert.deepEqual(await cataloguePage.locator(".login-panel button").allTextContents(),["验证登录","取消登录"],"login panel retains verification and cancellation");
-  assert.equal(await cataloguePage.locator(".login-panel p:not(.error)").count(),0,"login help lives in the manual");
+  assert.ok(await cataloguePage.getByText("在官方窗口完成登录，然后验证账号。").isVisible(),"fallback identifies the official login flow");
   await cataloguePage.getByRole("button",{name:"验证登录",exact:true}).click();
   await cataloguePage.waitForFunction(()=>window.__catalogueTest.requests.length===4);
   assert.equal(await cataloguePage.evaluate(()=>window.__catalogueTest.requests[3].args.account),"account-A");
@@ -430,13 +435,14 @@ try {
       if (command === "list_solutions") return {entries:[{id:"default",name:"默认解答"}],unreadable:0};
       if (command === "load_document") return { code: args.language === "java" ? "// restored Java draft" : null, notes: null };
       if (command === "open_login" || command === "save_text") return;
-      if (command === "cancel_login") { window.__inkAuthTest.cancelled++; return; }
+      if (command === "cancel_login" || command === "sign_out") { window.__inkAuthTest.cancelled++; return; }
       if (command === "verify_login") return new Promise((resolve, reject) => window.__inkAuthTest.pending.push({ resolve, reject }));
       throw new Error("Unexpected test IPC command: " + command);
     }};
   });
   await authPage.goto("http://127.0.0.1:5173");
   await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
+  await authPage.getByRole("button", { name: "官方网页登录", exact: true }).click();
   await authPage.getByRole("button", { name: "验证登录", exact: true }).click();
   await authPage.waitForFunction(() => window.__inkAuthTest.pending.length === 1);
   const cancel = authPage.getByRole("button", { name: "取消登录", exact: true });
@@ -445,6 +451,7 @@ try {
   await cancel.waitFor({ state: "hidden" });
   // 新登录开始后，旧校验的成功不能改变当前账号或关闭当前登录。
   await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
+  await authPage.getByRole("button", { name: "官方网页登录", exact: true }).click();
   await authPage.evaluate(() => window.__inkAuthTest.pending[0].resolve({ username: "stale-test-user", account: "stale", persistence: "memory-only" }));
   await authPage.getByRole("button", { name: "验证登录", exact: true }).waitFor();
   assert.equal(await authPage.getByText("stale-test-user", { exact: false }).count(), 0);
@@ -483,6 +490,7 @@ try {
   assert.equal(await fixtureEditor.innerText(), "// restored Java draft", "读取完成前不能挂载空模板并忽略恢复内容");
   // 以下仍为纯 UI 协议 fixture，不是真实力扣评测。
   await authPage.getByRole("button", { name: "登录力扣", exact: true }).click();
+  await authPage.getByRole("button", { name: "官方网页登录", exact: true }).click();
   await authPage.getByRole("button", { name: "验证登录", exact: true }).click();
   await authPage.waitForFunction(() => window.__inkAuthTest.pending.length === 3);
   await authPage.evaluate(() => window.__inkAuthTest.pending[2].resolve({ username: "fixture-user", account: "fixture-user", persistence: "memory-only" }));
@@ -522,6 +530,7 @@ try {
   await authPage.evaluate(()=>{const job=window.__inkAuthTest.jobs.at(-1);job.state={state:"finished",server_id:"fixture-wa",result:{status_msg:"Wrong Answer",code_output:"[7,0]",expected_output:"[0,1]",last_testcase:"[2,7,11,15]\n9",compare_result:"0000011000",display_runtime:0,total_correct:2,total_testcases:64}};});
   await authPage.getByRole("button",{name:"fixture-user · 退出",exact:true}).click();
   await authPage.getByRole("button",{name:"登录力扣",exact:true}).click();
+  await authPage.getByRole("button", { name: "官方网页登录", exact: true }).click();
   await authPage.getByRole("button",{name:"验证登录",exact:true}).click();
   await authPage.waitForFunction(()=>window.__inkAuthTest.pending.length===4);
   await authPage.evaluate(()=>window.__inkAuthTest.pending[3].resolve({username:"fixture-user",account:"fixture-user",persistence:"memory-only"}));
@@ -536,6 +545,7 @@ try {
   await authPage.evaluate(()=>{const old=window.__inkAuthTest.jobs.at(-1);window.__inkAuthTest.jobs.push({...old,snapshot:{...old.snapshot,id:"other-pending",language:"rust",solution:"alternate"},state:{state:"waiting",server_id:"other-server"}});});
   await authPage.getByRole("button",{name:"fixture-user · 退出",exact:true}).click();
   await authPage.getByRole("button",{name:"登录力扣",exact:true}).click();
+  await authPage.getByRole("button", { name: "官方网页登录", exact: true }).click();
   await authPage.getByRole("button",{name:"验证登录",exact:true}).click();
   await authPage.waitForFunction(()=>window.__inkAuthTest.pending.length===5);
   await authPage.evaluate(()=>window.__inkAuthTest.pending[4].resolve({username:"fixture-user",account:"fixture-user",persistence:"memory-only"}));
@@ -549,6 +559,7 @@ try {
   const reloginFixture=async()=>{
     await authPage.getByRole("button",{name:"fixture-user · 退出",exact:true}).click();
     await authPage.getByRole("button",{name:"登录力扣",exact:true}).click();
+    await authPage.getByRole("button", { name: "官方网页登录", exact: true }).click();
     const next=await authPage.evaluate(()=>window.__inkAuthTest.pending.length);
     await authPage.getByRole("button",{name:"验证登录",exact:true}).click();
     await authPage.waitForFunction(n=>window.__inkAuthTest.pending.length===n+1,next);

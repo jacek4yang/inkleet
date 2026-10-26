@@ -1,5 +1,6 @@
 import {useCodeMismatch,type LiveCode} from "./live-code";
 import type { DebugPosition } from "./debug-position";
+import { VARIABLE_PAGE_SIZE, VARIABLE_NODE_LIMIT, pageRepeats, type VariablePage } from "./debug-visuals";
 import { VariableNode } from "./debug-variable-tree";
 import { debugVariables, debugFrames, debugScopes, debugThreads, type DebugVariable, type DebugFrame as Frame, type DebugScope as Scope } from "./debug-model";
 import { IconButton } from "./icons";
@@ -27,6 +28,8 @@ export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, run
   const [notice,setNotice] = useState("");
   const [error, setError] = useState(""), [pending, setPending] = useState(false);
   const [frames, setFrames] = useState<Frame[]>([]), [variables, setVariables] = useState<Variable[]>([]);
+  const [scopePage, setScopePage] = useState<{reference:number; offset:number; more:boolean; notice:string} | null>(null);
+  const [loadingScope, setLoadingScope] = useState(false), scopeBusy = useRef(false);
   const [scopes, setScopes] = useState<Scope[]>([]), [selectedFrame, setFrame] = useState<number | null>(null);
   frameRef.current = selectedFrame;
   const alive = useRef(true), guard = useRef(false), latest = useRef<State | null>(null), version = useRef(0), pauseCallback = useRef(onPauseLine);
@@ -47,30 +50,56 @@ export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, run
     if (isTauri()) void poll();
     return () => { alive.current = false; ++version.current; ++evaluationVersion.current; clearTimeout(timer); pauseCallback.current(null); };
   }, []);
-  async function inspect(kind: string, reference: number, current: State) {
-    return invoke<Record<string, unknown>>("debug_request", { id: current.id, epoch: current.epoch, kind, reference });
+  async function inspect(kind: string, reference: number, current: State, start?: number, count?: number) {
+    return invoke<Record<string, unknown>>("debug_request", { id: current.id, epoch: current.epoch, kind, reference, ...(start === undefined ? {} : { start, count }) });
   }
   function currentPause(current: State) {
     return alive.current && latest.current?.id === current.id && latest.current?.epoch === current.epoch && latest.current?.phase === "paused";
   }
-  async function readChildren(reference: number, current = latest.current, frame = frameRef.current): Promise<Variable[]> {
+  function resetVariables() {
+    setVariables([]); setScopePage(null); scopeBusy.current = false; setLoadingScope(false);
+  }
+  function variablePage(response: Record<string, unknown>): VariablePage {
+    const raw = Array.isArray(response.variables) ? response.variables : [];
+    const meta = response.inkleetPage as { truncated?: unknown } | undefined;
+    return { items: debugVariables(raw), received: Math.min(raw.length, VARIABLE_PAGE_SIZE), limited: raw.length > VARIABLE_PAGE_SIZE || meta?.truncated === true };
+  }
+  async function readChildren(reference: number, start = 0, count = VARIABLE_PAGE_SIZE, current = latest.current, frame = frameRef.current): Promise<VariablePage> {
     if (!current || !currentPause(current)) throw new Error("暂停位置已改变");
     const revision = inspectionVersion.current;
-    const response = await inspect("variables", reference, current);
+    const response = await inspect("variables", reference, current, start, count);
     if (revision !== inspectionVersion.current || !currentPause(current) || frameRef.current !== frame) throw new Error("忽略旧调用栈的变量");
-    return debugVariables(response.variables);
+    return variablePage(response);
   }
   async function showVariables(reference: number, current = latest.current) {
     if (!current || current.phase !== "paused") return;
     const request = ++version.current;
+    resetVariables();
     try {
-      const response = await inspect("variables", reference, current);
-      if (alive.current && request === version.current && currentPause(current)) setVariables(debugVariables(response.variables));
+      const response = await inspect("variables", reference, current, 0, VARIABLE_PAGE_SIZE);
+      if (alive.current && request === version.current && currentPause(current)) {
+        const page = variablePage(response);
+        setVariables(page.items); setScopePage({ reference, offset: page.received, more: page.received >= VARIABLE_PAGE_SIZE, notice: page.limited ? "调试器返回超出分页范围" : "" });
+      }
     } catch (e) { if (alive.current && request === version.current) setError(String(e)); }
+  }
+  async function moreScopeVariables() {
+    const current = latest.current, page = scopePage, frame = frameRef.current;
+    if (!current || !page?.more || scopeBusy.current || evaluationGuard.current || frame === null || !currentPause(current)) return;
+    scopeBusy.current = true; setLoadingScope(true);
+    const request = version.current;
+    try {
+      const next = await readChildren(page.reference, page.offset, Math.min(VARIABLE_PAGE_SIZE, VARIABLE_NODE_LIMIT - variables.length), current, frame);
+      if (request !== version.current || !currentPause(current) || frameRef.current !== frame) return;
+      if (pageRepeats(variables, next.items)) { setScopePage({ ...page, more: false, notice: "调试器未提供下一页，已停止重复加载" }); return; }
+      const values = [...variables, ...next.items]; setVariables(values);
+      setScopePage({ ...page, offset: page.offset + next.received, more: next.received >= VARIABLE_PAGE_SIZE && values.length < VARIABLE_NODE_LIMIT, notice: values.length >= VARIABLE_NODE_LIMIT ? "已达 1000 项安全上限" : next.limited ? "调试器返回超出分页范围" : "" });
+    } catch (error) { if (request === version.current) setError(String(error)); }
+    finally { if (request === version.current) { scopeBusy.current = false; setLoadingScope(false); } }
   }
   async function showFrame(frame: Frame, current = latest.current) {
     if (!current || current.phase !== "paused") return;
-    const request = ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false); setEvaluation(null); frameRef.current = frame.id; setFrame(frame.id); setVariables([]); setScopes([]);
+    const request = ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false); setEvaluation(null); frameRef.current = frame.id; setFrame(frame.id); resetVariables(); setScopes([]);
     if (!stale && !liveMismatch() && original && frame.inkleetSource===true && (/(?:^|[\\/])(?:solution\.(?:py|go|cpp|c|rs)|Solution\.java)$/.test(frame.source?.path ?? frame.source?.name ?? ""))) pauseCallback.current({line:frame.line,column:frame.column,endLine:frame.endLine,endColumn:frame.endColumn,frameId:frame.id,execution:topFrame.current?.id===frame.id&&topFrame.current.thread===(current.threadId??0)});
     else pauseCallback.current(null);
     try {
@@ -84,7 +113,7 @@ export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, run
     if (!current || !currentPause(current)) return;
     const request = ++version.current; ++evaluationVersion.current;
     ++targetVersion.current;setTargets([]);setChoosing(false);targetContext.current=null;topFrame.current=null;
-    setThread(thread); setFrames([]); setScopes([]); setVariables([]); setFrame(null); frameRef.current = null; setEvaluation(null); pauseCallback.current(null);
+    setThread(thread); setFrames([]); setScopes([]); resetVariables(); setFrame(null); frameRef.current = null; setEvaluation(null); pauseCallback.current(null);
     try {
       const response = await inspect("stackTrace", thread, current);
       if (request !== version.current || !currentPause(current)) return;
@@ -93,7 +122,7 @@ export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, run
     } catch (e) { if (request === version.current && currentPause(current)) setError(String(e)); }
   }
   useEffect(() => {
-    ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false);setEvaluation(null); setThreads([]); setThread(null); setFrames([]); setScopes([]); setVariables([]); setFrame(null); frameRef.current = null; pauseCallback.current(null);
+    ++version.current; ++evaluationVersion.current; ++targetVersion.current;setTargets([]);setChoosing(false);setEvaluation(null); setThreads([]); setThread(null); setFrames([]); setScopes([]); resetVariables(); setFrame(null); frameRef.current = null; pauseCallback.current(null);
     if (!state || state.phase !== "paused") return;
     const current = state;
     void showThread(current.threadId ?? 0, current);
@@ -111,7 +140,7 @@ export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, run
     // previous inspection values before sending; never replay other watches.
     ++targetVersion.current;setTargets([]);setChoosing(false);
     const revision = ++inspectionVersion.current;
-    setInspectionRevision(revision); ++version.current; setVariables([]);
+    setInspectionRevision(revision); ++version.current; resetVariables();
     try {
       const result = await invoke<{ result: string; type?: string; truncated?: boolean; variablesReference: number }>("evaluate_debug", { id: current.id, epoch: current.epoch, frame, expression: value });
       if (alive.current && token === evaluationVersion.current && latest.current?.id === current.id && currentPause(current) && latest.current?.phase === "paused" && frameRef.current === frame) {
@@ -218,7 +247,7 @@ export function DebugPanel({ snapshot, codeSource, breakpoints, onPauseLine, run
     {state?.breakpoints.some(b => !b.verified) && <p className="cache-warning">部分断点尚未验证，可能不是可执行行。</p>}
     {paused && <div className="debug-inspector"><div className="debug-frames"><h4>调用栈</h4>{threads.length > 1 && <select aria-label="调试线程" value={selectedThread ?? ""} onChange={event => void showThread(Number(event.target.value))}>{threads.map(thread => <option key={thread.id} value={thread.id}>{thread.name}</option>)}</select>}{frames.map(frame => <button key={frame.id} aria-pressed={frame.id === selectedFrame} title={`${frame.name} · ${frame.line}`} onClick={() => showFrame(frame)}><span className="debug-frame-name">{frame.name.slice(0, 200)}</span><span className="debug-frame-line"> · {frame.line}</span></button>)}</div>
       <div><h4>变量</h4><div className="local-actions">{scopes.map(scope => <button key={scope.variablesReference} onClick={() => showVariables(scope.variablesReference)}>{scope.name.slice(0,100)}</button>)}</div>
-        {variables.map((variable,index) => <VariableNode key={frameToken + ":" + index + ":" + variable.name} variable={variable} token={frameToken} read={reference => readChildren(reference)} />)}</div></div>}
+        {variables.map((variable,index) => <VariableNode key={frameToken + ":" + index + ":" + variable.name} variable={variable} token={frameToken} read={(reference, start, count) => readChildren(reference, start, count)} />)}{scopePage && <div className="debug-page-controls"><small>已读取 {scopePage.offset} 个变量</small>{scopePage.more && <button type="button" disabled={loadingScope || evaluating || selectedFrame === null} onClick={() => void moreScopeVariables()}>加载更多变量</button>}{scopePage.notice && <small role="status">{scopePage.notice}</small>}</div>}</div></div>}
     {paused && <form className="debug-evaluate" aria-label="调试表达式" onSubmit={event => { event.preventDefault(); void evaluate(); }}>
       <label>表达式<input aria-label="调试表达式输入" value={expression} maxLength={1024} disabled={evaluating || snapshot.language === "java"} onChange={event => { ++evaluationVersion.current; setExpression(event.target.value); setEvaluation(null); }} placeholder="" /></label>
       <IconButton icon="play" label="求值一次" title={snapshot.language === "java" ? "Java 暂不支持表达式求值" : "求值一次 · 可能改变程序状态；超时停止当前调试"} type="submit" disabled={pending || evaluating || stale || selectedFrame === null || !expression.trim() || snapshot.language === "java"} />

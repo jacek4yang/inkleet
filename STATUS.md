@@ -50,9 +50,14 @@ These are 0.1.1 development artifacts, not a new public Release. Build/architect
 - Authenticated login, personalized catalogue status, online Run and Submit: NOT RUN.
 - [Downloaded evidence](https://github.com/jacek4yang/inkleet/actions/runs/39579570256/artifacts/12336092461), SHA-256 `76333106335d965bd8ebfa94c5975c67a4c49f397ed8512e72882f6187f9d8cb`, records application and harness identity separately.
 
+## Login and debugger source changes awaiting acceptance
+- Native QR login, optional OS credential-store restoration, transaction-aware cancellation and explicit sign-out are implemented in this branch. This does not establish successful authentication on a real account. See [native login](docs/NATIVE_LOGIN.md).
+- Variable paging and conservative Rust inspection are implemented, with raw fallback for unsupported shapes. This does not establish full Rust-type or real-debugger acceptance. See [debugger visualization](docs/RUST_VARIABLE_VISUALIZATION.md).
+- Combined local frontend checks: typecheck, 316 domain tests, build and JavaScript syntax passed. Browser and full native acceptance for this batch remain pending; isolated authentication tests are not full application validation.
+
 ## Remaining acceptance gaps
 - Real-account login, personalized catalogue/pagination, online Run/Submit and real native IME are not fully accepted. Public CN success above is not account acceptance.
-- Login is deliberately memory-only: after a full application restart, sign in again before restoring that account's persisted judgement journal. Never retry an uncertain submission automatically.
+- This development branch adds native QR login and opt-in OS credential-store persistence. Real-account completion, restart restoration and platform store behavior remain NOT RUN; unavailable or uncertain storage fails closed without plaintext fallback. Existing test packages do not contain this new batch. Never retry an uncertain submission automatically.
 - Windows/macOS interactive install, upgrade, uninstall and GUI behavior need separate acceptance. Same application identity does not prove upgrade compatibility.
 - Ventura and long-session performance remain unqualified.
 - Windows/macOS packages remain unsigned; macOS is unnotarized. Never disable OS security protections.

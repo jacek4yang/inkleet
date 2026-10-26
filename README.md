@@ -38,6 +38,8 @@ The features below are present in current main; passed checks and remaining acce
 - Vim、搜索式设置、语言格式化覆盖、Tab 显示宽度；显式保存、恢复草稿和配置冲突保护。
 - F2 重命名准备与可选预览；Rust 集合逻辑视图与显式原始视图。
 
+Development source adds bounded debugger-variable paging and conservative Rust collection/Option/Result inspection. Unsupported shapes retain their original debugger view; this is not support for every Rust type. See [visualization limits](docs/RUST_VARIABLE_VISUALIZATION.md). Browser/native acceptance for this batch is pending.
+
 ## 本地运行与调试
 桌面点击「开发环境」安装所选语言工具，再用「本地」面板。
 六语言普通函数题使用独立的元数据驱动，支持常见标量、多参数、数组、二维数组和链表/树。
@@ -53,8 +55,8 @@ Linux 原生六语言 GUI 已验证；四种桌面目标的协议与编译探针
 Android 和 macOS ARM 不属于本次 v0.1.0 首版交付目标。历史探针不能替代当前版本的平台验收。
 
 ## 登录与在线判题
-桌面有独立官方隐私窗口与原生会话校验原型，仅保留本次运行内存会话。
-会话不返回编辑器 JavaScript；尚未进行真实账号端到端验收或安全持久化。
+Development source adds native QR login plus the existing official-window fallback. Optional remember-login uses the OS credential store; no password or session cookie is returned to editor JavaScript.
+Real-account QR completion, cross-restart restoration and platform credential-store acceptance are NOT RUN. If secure storage is unavailable or cleanup is uncertain, login may fail closed; there is no plaintext fallback. See [native login limits](docs/NATIVE_LOGIN.md).
 Android 安全登录隔离仍在适配，不使用明文会话兜底。
 在线运行和提交绑定不可变的题目/账号/语言/代码快照，正式提交须确认。
 发送状态未知时不自动重试，已知请求编号可继续查询。
