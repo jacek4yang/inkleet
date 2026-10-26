@@ -75,6 +75,11 @@ fn configure_rust_visualizers(arguments:&mut Value,rustc:&Path)->Result<(),Strin
     for name in ["lldb_lookup.py","lldb_providers.py","rust_types.py"]{
         if !formatters.join(name).is_file(){return Err("Rust 调试可视化文件缺失，请重新安装应用内 Rust 编译器".into());}
     }
+    // CodeLLDB 1.12.3 passes scriptConfig JSON through a Python string literal.
+    // Windows backslashes lose an escaping layer there (Invalid \\escape),
+    // silently discarding the managed formatter configuration. Windows accepts
+    // forward slashes; normalize only this adapter-facing path, not file checks.
+    let text=if cfg!(windows){text.replace('\\',"/")}else{text.to_owned()};
     arguments["sourceLanguages"]=json!(["rust"]);
     arguments["_adapterSettings"]=json!({"scriptConfig":{"lang.rust.formatters":text}});
     Ok(())
@@ -88,7 +93,8 @@ mod visualizer_tests{
         for name in ["lldb_lookup.py","lldb_providers.py","rust_types.py"]{std::fs::write(dir.join(name),"").unwrap();}
         let mut args=json!({});configure_rust_visualizers(&mut args,&root.join("bin/rustc")).unwrap();
         assert_eq!(args["sourceLanguages"],json!(["rust"]));
-        assert_eq!(args["_adapterSettings"]["scriptConfig"]["lang.rust.formatters"],json!(dir));
+        assert_eq!(args["_adapterSettings"]["scriptConfig"]["lang.rust.formatters"],json!(if cfg!(windows){dir.to_str().unwrap().replace('\\',"/")}else{dir.to_str().unwrap().to_owned()}));
+        if cfg!(windows){assert!(!args["_adapterSettings"]["scriptConfig"]["lang.rust.formatters"].as_str().unwrap().contains('\\'));}
         assert!(args.get("initCommands").is_none());
         std::fs::remove_file(dir.join("lldb_lookup.py")).unwrap();
         assert!(configure_rust_visualizers(&mut json!({}),&root.join("bin/rustc")).is_err());

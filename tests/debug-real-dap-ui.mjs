@@ -59,6 +59,9 @@ try {
   }
   for (const [label, width] of [["", 680], ["-narrow", 320]]) {
     await page.locator('main.debug-panel').evaluate((node, width) => { node.style.width = `${width}px`; }, width);
+    assert.equal(await page.locator('.debug-tree-children > .debug-raw-toggle').count(), 0, "raw inspection must not add permanent footer rows");
+    const headers = await page.locator('.debug-variables > .debug-tree-node > .debug-variable > code').evaluateAll(cells => cells.map(cell => ({ text: cell.textContent, scrollWidth: cell.scrollWidth, clientWidth: cell.clientWidth })));
+    for (const header of headers) assert.ok(header.scrollWidth <= header.clientWidth, `container summary must remain readable at ${width}px: ${header.text}`);
     const panel = await page.locator('main.debug-panel').boundingBox();
     assert.ok(panel);
     const bounds = await page.locator('.debug-map-row [data-map-field] > .debug-tree-node > .debug-variable > button > code').evaluateAll(cells => cells.map(cell => {

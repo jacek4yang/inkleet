@@ -20,3 +20,20 @@
 .debug-page-controls small { font-size: 10px; }.debug-page-controls button { font-size: 11px; }
 
 .debug-map-rows > .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+/* Debug values are data rows, not input controls. Keep inspection keyboard-accessible. */
+.debug-tree-node > .debug-variable > button {
+  border: 0; box-shadow: none; background: transparent; border-radius: 3px;
+  padding: 1px 3px; min-height: 21px; white-space: nowrap; text-overflow: ellipsis;
+}
+.debug-tree-node > .debug-variable > button:hover:not(:disabled) { background: var(--active-line); }
+.debug-tree-node > .debug-variable > button:focus-visible { outline: 2px solid var(--muted); outline-offset: 1px; }
+.debug-tree-node > .debug-variable > code { flex: 0 1 auto; max-width: 45%; }
+.debug-tree-node > .debug-variable > .debug-variable-type { flex: 1 10 0; min-width: 0; max-width: none; text-align: right; }
+.debug-tree-node > .debug-variable > .debug-raw-toggle {
+  flex: 0 0 18px; padding: 0; color: var(--muted); opacity: 0;
+}
+.debug-tree-node > .debug-variable:hover > .debug-raw-toggle,
+.debug-tree-node > .debug-variable:focus-within > .debug-raw-toggle,
+.debug-tree-node > .debug-variable > .debug-raw-toggle[aria-pressed=true] { opacity: 1; }
+.debug-map-cell > .debug-variable > button { padding: 1px 0; }

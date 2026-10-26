@@ -1501,11 +1501,11 @@ try:
                         map_evidence["fields"].append([cmd("GET",f"/element/{field[EID]}/attribute/data-source-name") for field in fields])
                     (evidence/"rust-map-row-data.json").write_text(json.dumps(map_evidence,ensure_ascii=False))
                     capture_map_rows(map_node,"rust-map-key-value-rows-native")
-                    reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    reveal_debug_control(map_node+' > .debug-variable > .debug-raw-toggle');click_debug_action(map_node+' > .debug-variable > .debug-raw-toggle')
                     wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
                     reveal_debug_control(map_node+' button[aria-label="[raw]"]');click_debug_action(map_node+' button[aria-label="[raw]"]')
                     wait_for(lambda:element(map_node+' button[aria-label="base"]'),"raw map retains implementation fields")
-                    reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    reveal_debug_control(map_node+' > .debug-variable > .debug-raw-toggle');click_debug_action(map_node+' > .debug-variable > .debug-raw-toggle')
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"]'}),"hide raw removes internal layout"
                     empty_node='.debug-tree-node:has(> .debug-variable > button[aria-label="empty"])'
                     reveal_debug_control('.debug-variable > button[aria-label="empty"]');click_debug_action('.debug-variable > button[aria-label="empty"]')

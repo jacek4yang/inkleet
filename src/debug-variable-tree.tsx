@@ -98,6 +98,7 @@ export function VariableNode({ variable, token, read, depth = 0, ancestors = [],
       </button>
       {!cellLabel && <code title={variable.value}>{["map", "set", "sequence"].includes(kind) && placeholder && expandable ? "" : summary}</code>}
       {visibleType && <span className="debug-variable-type" title={variable.type}>{visibleType}</span>}
+      {open && raw.length > 0 && <button type="button" className="debug-raw-toggle" aria-label={showRaw ? "隐藏内部结构" : "内部结构"} title={showRaw ? "隐藏内部结构" : "查看内部结构"} aria-pressed={showRaw} onClick={() => setShowRaw(value => !value)}>⋯</button>}
       {needsDetails && (!cellLabel || expandable) && <button type="button" className="debug-value-details" aria-label={`查看变量详情 ${cellLabel ?? variable.name}`} aria-expanded={details} onClick={() => setDetails(value => !value)} title="展开完整返回值">…</button>}
     </div>
     {(cycle || depth >= 12 && variable.variablesReference > 0) && <small className="debug-node-limit">{cycle ? "重复引用 · 已停止展开" : "已达展开深度上限"}</small>}
@@ -112,7 +113,6 @@ export function VariableNode({ variable, token, read, depth = 0, ancestors = [],
       {showRaw && raw.map((child, index) => <VariableNode key={`raw:${index}`} variable={child} token={token} read={read} depth={depth + 1} ancestors={[...ancestors, variable.variablesReference]} />)}
       {loading && <small role="status">读取中…</small>}
       {error && <div role="alert"><small>{error}</small><button type="button" disabled={loading} onClick={() => void load(items ?? [])}>重试读取</button></div>}
-      {raw.length > 0 && <button type="button" className="debug-raw-toggle" aria-pressed={showRaw} onClick={() => setShowRaw(value => !value)}>{showRaw ? "隐藏内部结构" : "内部结构"}</button>}
       {items && logical.length === 0 && !loading && !error && <small>{["map", "set", "sequence"].includes(kind) ? emptyDebugCollection(variable) ? "空" : "调试器未提供元素" : "无子项"}</small>}
       {(more || pagingNotice) && <div className="debug-page-controls">{more && <button type="button" disabled={loading} onClick={() => void load(items ?? [])}>加载下一页</button>}<small>{offset.current}{total === undefined ? "" : ` / ${total}`}</small>{pagingNotice && <small role="status">{pagingNotice}</small>}</div>}
     </div>}
