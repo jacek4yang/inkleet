@@ -247,7 +247,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             "processId":null,"rootUri":root_uri,"initializationOptions":launch.initialization,
             "capabilities":{
                 "general":{"positionEncodings":["utf-16"]},
-                "textDocument":{"implementation":{"dynamicRegistration":false,"linkSupport":true},"rename":{"dynamicRegistration":false,"prepareSupport":true},"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":["plaintext"]},"completion":completion_profile,"publishDiagnostics":{"versionSupport":true}},
+                "textDocument":{"implementation":{"dynamicRegistration":false,"linkSupport":true},"rename":{"dynamicRegistration":false,"prepareSupport":true},"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":hover_content_formats()},"completion":completion_profile,"publishDiagnostics":{"versionSupport":true}},
                 "workspace":{"configuration":true,"workspaceFolders":true,"semanticTokens":{"refreshSupport":true}}
             },
             "workspaceFolders":[{"uri":root_uri,"name":"InkLeet"}]
@@ -296,7 +296,9 @@ fn read_allowed_source(roots:&[PathBuf],uri:&str)->Result<Source>{
     if text.len()>2*1024*1024{return Err("源码文件增长超过大小限制".into());}
     Ok(Source{text,name:canonical.file_name().unwrap_or_default().to_string_lossy().into(),declaration:canonical.extension().is_some_and(|e|e=="pyi"),language:match canonical.extension().and_then(|e|e.to_str()){Some("java")=>"java",Some("rs")=>"rust",Some("go")=>"golang",Some("c")=>"c",Some("cpp"|"h"|"hpp")|None=>"cpp",_=>"python3"}.into()})
 }
+fn hover_content_formats()->[&'static str;2]{["markdown","plaintext"]}
 #[cfg(test)]mod tests{
+    #[test]fn hover_prefers_markdown_with_plaintext_fallback(){assert_eq!(super::hover_content_formats(),["markdown","plaintext"]);}
     use super::*;
     fn uri(path:&Path)->String{reqwest::Url::from_file_path(path).unwrap().to_string()}
     #[test]fn source_viewer_only_reads_bounded_tool_sources(){

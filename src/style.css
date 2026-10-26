@@ -626,15 +626,15 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 .lsp-reader-search-match{background:var(--reader-match-background,#fff4d6);color:inherit;font:inherit;display:inline;vertical-align:baseline;padding:0;margin:0;border:0;outline:0;border-radius:0;box-shadow:none}
 @media(forced-colors:active){.lsp-reader-search-match{background:Highlight;color:HighlightText;forced-color-adjust:none}}
 
-/* Expanded documentation owns these classes; raw Markdown never supplies them. */
-.lsp-document-reader .lsp-code-keyword{color:#80558c}
-.lsp-document-reader .lsp-code-string{color:#4f7044}
-.lsp-document-reader .lsp-code-number{color:#98602e}
-.lsp-document-reader .lsp-code-comment{color:var(--muted);font-style:italic}
-.lsp-document-reader .lsp-code-type{color:#36717b}
-.lsp-document-reader .lsp-code-function{color:#476995}
-.lsp-document-reader .lsp-code-meta{color:var(--accent)}
-@media(forced-colors:active){.lsp-document-reader [class^="lsp-code-"]{color:CanvasText}}
+/* Documentation renderers own these classes; raw Markdown never supplies them. */
+.lsp-documentation .lsp-code-keyword{color:#80558c}
+.lsp-documentation .lsp-code-string{color:#4f7044}
+.lsp-documentation .lsp-code-number{color:#98602e}
+.lsp-documentation .lsp-code-comment{color:var(--muted);font-style:italic}
+.lsp-documentation .lsp-code-type{color:#36717b}
+.lsp-documentation .lsp-code-function{color:#476995}
+.lsp-documentation .lsp-code-meta{color:var(--accent)}
+@media(forced-colors:active){.lsp-documentation [class^="lsp-code-"]{color:CanvasText}}
 
 /* Settings workbench: native controls and retained form owners. */
 .settings-hub{width:min(820px,94vw);max-height:86dvh;padding:0;border:1px solid var(--line,var(--theme-line,#dfe1d9));border-radius:8px;color:var(--ink,var(--theme-ink,#343730));background:var(--surface,var(--theme-surface,#fafaf8));box-shadow:0 16px 64px #252d201c,0 2px 8px #252d2010}

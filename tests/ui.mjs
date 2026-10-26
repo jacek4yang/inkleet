@@ -815,7 +815,7 @@ try {
         if (args.kind === "completion") return { items: [{ label: "popleft", kind: 2, documentation: "<img src=x onerror=alert(1)>plain documentation" }] };
         if (args.kind === "signatureHelp" && state.deferSignature) return new Promise(resolve => { state.signatureReply = resolve; });
         if (args.kind === "signatureHelp") return { signatures: [{ label: "popleft(index: int) -> int", documentation: "<img src=x onerror=alert(1)>signature docs", parameters: [{ label: "index" }] }], activeSignature: 0, activeParameter: 0 };
-        if (args.kind === "hover") return { contents: { kind: "plaintext", value: "deque.popleft() -> int" } };
+        if (args.kind === "hover") {const result={contents:state.hoverContents??{kind:"plaintext",value:"deque.popleft() -> int"}};if(state.deferHover)return new Promise(resolve=>{state.hoverReply=()=>resolve(result);});return result;}
         if(args.kind==="implementation"){
           if(state.implementationMode==="error")throw Error("controlled implementation failure");
           if(state.implementationMode==="empty")return [];
@@ -985,6 +985,30 @@ try {
   await lspPage.waitForFunction(()=>window.__lspTest.settings.vim===true);
   await lspPage.getByRole("button",{name:"关闭设置",exact:true}).click();
   await lspEditor.click();await lspEditor.press("Escape");
+  const beforeK=await lspEditor.innerText();
+  await lspPage.evaluate(()=>{window.__lspTest.hoverContents={kind:"markdown",value:"A dictionary method.\n\n\x60\x60\x60rust\npub fn insert(key: i32) -> Option<i32> { None }\n\x60\x60\x60"};});
+  await lspPage.keyboard.type("K");
+  const vimDocs=lspPage.getByRole("dialog",{name:"文档阅读",exact:true});
+  await vimDocs.waitFor();await vimDocs.locator(".lsp-code-keyword").first().waitFor();
+  assert.equal(await lspEditor.innerText(),beforeK,"Vim K opens documentation without editing");
+  await vimDocs.press("Escape");await vimDocs.waitFor({state:"detached"});
+  await lspPage.keyboard.type("iK");await lspEditor.press("Escape");
+  assert.ok((await lspEditor.innerText()).includes("K"),"Insert-mode K remains text input");
+  await lspPage.keyboard.type("u");assert.equal(await lspEditor.innerText(),beforeK);
+  for(const cancellation of ["escape","move","insert","blur"]){
+    await lspEditor.focus();await lspEditor.press("Escape");
+    await lspPage.evaluate(()=>{window.__lspTest.deferHover=true;delete window.__lspTest.hoverReply;});
+    await lspPage.keyboard.type("K");await lspPage.waitForFunction(()=>typeof window.__lspTest.hoverReply==="function");
+    if(cancellation==="escape")await lspEditor.press("Escape");
+    else if(cancellation==="move")await lspPage.evaluate(async()=>{const {EditorView}=await import("/node_modules/.vite/deps/@codemirror_view.js");const view=EditorView.findFromDOM(document.querySelector(".code-pane .cm-editor"));view.dispatch({selection:{anchor:view.state.selection.main.head===0?1:0}});});
+    else if(cancellation==="insert")await lspPage.keyboard.type("i");
+    else await lspPage.evaluate(()=>document.querySelector(".code-pane .cm-content").blur());
+    await lspPage.evaluate(()=>{window.__lspTest.hoverReply();window.__lspTest.deferHover=false;});
+    await lspPage.waitForTimeout(100);
+    assert.equal(await vimDocs.count(),0,cancellation+" cancels pending documentation");
+    await lspEditor.focus();await lspEditor.press("Escape");
+    assert.equal(await lspEditor.innerText(),beforeK,"cancellation does not modify code");
+  }
   await lspPage.evaluate(()=>{window.__lspTest.primaryDefinition=true;});
   await lspEditor.press("F12");
   await lspPage.waitForFunction(()=>window.__lspTest.requests.at(-1)?.kind==="definition");
@@ -4731,6 +4755,14 @@ try {
   };
   await mountHighlightFixture({kind:"markdown",value:highlightCases.map(([language,code])=>"```"+language+"\n"+code+"```").join("\n\n")+"\n\nA wrapped **reader search** phrase keeps its text and spacing while continuing across several narrow lines of documentation."});
   assert.deepEqual(await reader.locator("pre code").allTextContents(),highlightCases.map(([,code])=>code),"highlighting preserves every code point and newline");
+  const previewCode=presentationPage.locator("#reader-highlight-fixture pre code");
+  assert.deepEqual(await previewCode.allTextContents(),highlightCases.map(([,code])=>code),"preview preserves exact fence text");
+  for(let i=0;i<6;i++){
+    const keyword=previewCode.nth(i).locator(".lsp-code-keyword").first();
+    assert.ok(await keyword.count(),"preview uses parser tokens for "+highlightCases[i][0]);
+    assert.equal(await keyword.evaluate(node=>getComputedStyle(node).color!==getComputedStyle(node.closest("code")).color),true,"preview token color is applied");
+  }
+
   for(let i=0;i<6;i++){
     const code=reader.locator("pre code").nth(i),keyword=code.locator(".lsp-code-keyword").first();
     assert.ok(await keyword.count(),highlightCases[i][0]+" has real parser keyword tokens");
