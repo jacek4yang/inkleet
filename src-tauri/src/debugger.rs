@@ -77,6 +77,10 @@ impl Debugger{
             "variablesReference":response.get("variablesReference").and_then(Value::as_i64).filter(|v|*v>0).unwrap_or(0)}))
     }
     pub fn request(&self,id:u64,epoch:u64,kind:&str,reference:i64)->Result<Value>{
+        self.request_page(id,epoch,kind,reference,None,None,None)
+    }
+    pub fn request_page(&self,id:u64,epoch:u64,kind:&str,reference:i64,start:Option<u32>,count:Option<u32>,filter:Option<&str>)->Result<Value>{
+        let page=variable_page(kind,start,count,filter)?;
         let session=self.session(id)?;
         let _operation=if matches!(kind,"next"|"stepIn"|"stepInTarget"|"stepInTargets"|"stepOut"|"continue"|"pause"){Some(session.operation.try_lock().map_err(|_|"已有调试操作正在处理")?)}else{None};
         if session.evaluating.load(Ordering::Acquire)&&matches!(kind,"next"|"stepIn"|"stepInTarget"|"stepOut"|"continue"|"pause"){return Err("请等待表达式完成，或停止调试".into());}
@@ -105,12 +109,18 @@ impl Debugger{
             "threads" if paused=>json!({}),
             "stackTrace" if paused=>json!({"threadId":if reference>0{reference}else{thread.ok_or("暂停线程缺失")?},"startFrame":0,"levels":64}),
             "scopes" if paused&&reference>=0=>json!({"frameId":reference}),
-            "variables" if paused&&reference>0=>json!({"variablesReference":reference,"start":0,"count":100}),
+            "variables" if paused&&reference>0=>{
+                let (start,count,filter)=page.as_ref().ok_or("变量分页参数缺失")?;
+                let mut args=json!({"variablesReference":reference,"start":start,"count":count});
+                if let Some(filter)=filter{args["filter"]=json!(filter);}
+                args
+            },
             "next"|"stepIn"|"stepOut"|"continue" if paused=>json!({"threadId":thread.ok_or("暂停线程缺失")?}),
             "pause" if phase=="running"=>json!({"threadId":thread.unwrap_or(1)}),
             _=>return Err("当前调试状态不支持该操作".into())
         };
         let mut response=session.client()?.request(if kind=="stepInTarget"{"stepIn"}else{kind},args,Duration::from_secs(10))?;
+        if let Some((start,count,_))=page{bound_variable_page(&mut response,start,count)?;}
         if kind=="stackTrace" {
             if let Some(frames)=response.get_mut("stackFrames").and_then(Value::as_array_mut){
                 for frame in frames {
@@ -357,4 +367,45 @@ fn resume_acknowledged(view:&mut View,requested_epoch:u64){
   assert!(list.permits(3,7,0));assert!(list.permits(3,7,9));
   assert!(!list.permits(4,7,9));assert!(!list.permits(3,8,9));assert!(!list.permits(3,7,8));assert!(!list.permits(3,7,-1));
  }
+}
+
+// Paging never evaluates target expressions or assumes a Rust container layout.
+fn variable_page<'a>(kind:&str,start:Option<u32>,count:Option<u32>,filter:Option<&'a str>)->Result<Option<(u32,u32,Option<&'a str>)>>{
+    if kind!="variables"{
+        if start.is_some()||count.is_some()||filter.is_some(){return Err("分页参数仅用于变量读取".into());}
+        return Ok(None);
+    }
+    let start=start.unwrap_or(0);let count=count.unwrap_or(100);
+    if start>10000||count==0||count>100||filter.is_some_and(|value|!matches!(value,"named"|"indexed")){
+        return Err("变量分页范围无效".into());
+    }
+    Ok(Some((start,count,filter)))
+}
+fn bound_variable_page(response:&mut Value,start:u32,count:u32)->Result<()>{
+    let values=response.get_mut("variables").and_then(Value::as_array_mut).ok_or("调试器未返回变量列表")?;
+    let returned=values.len();
+    values.truncate(count as usize);
+    let retained=values.len();
+    response["inkleetPage"]=json!({"start":start,"count":count,"returned":returned,"retained":retained,"truncated":returned>retained});
+    Ok(())
+}
+#[cfg(test)]mod variable_page_tests{
+    use super::*;
+    #[test]fn defaults_and_bounded_pages(){
+        assert_eq!(variable_page("variables",None,None,None).unwrap(),Some((0,100,None)));
+        assert_eq!(variable_page("variables",Some(10000),Some(1),Some("indexed")).unwrap(),Some((10000,1,Some("indexed"))));
+        assert!(variable_page("variables",Some(10001),None,None).is_err());
+        assert!(variable_page("variables",None,Some(0),None).is_err());
+        assert!(variable_page("variables",None,Some(101),None).is_err());
+        assert!(variable_page("variables",None,None,Some("invalid")).is_err());
+        assert!(variable_page("scopes",Some(0),None,None).is_err());
+        assert_eq!(variable_page("scopes",None,None,None).unwrap(),None);
+    }
+    #[test]fn oversized_adapter_page_is_bounded_and_explicit(){
+        let mut response=json!({"variables":[{"name":"a"},{"name":"b"},{"name":"c"}]});
+        bound_variable_page(&mut response,100,2).unwrap();
+        assert_eq!(response["variables"].as_array().unwrap().len(),2);
+        assert_eq!(response["inkleetPage"],json!({"start":100,"count":2,"returned":3,"retained":2,"truncated":true}));
+        assert!(bound_variable_page(&mut json!({}),0,100).is_err());
+    }
 }

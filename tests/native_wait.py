@@ -89,6 +89,49 @@ class JsonlDiagnostics:
         self.written += len(raw)
 
 
+class NativeDiagnostics:
+    """Keep compact wait progress after verbose driver telemetry reaches its cap.
+
+    Only allowlisted structural fields are retained: never labels, payloads,
+    source text, cookies, or filesystem paths. The latest record stays available
+    even if both bounded journals fill. This is observation, not a retry timer.
+    """
+    FIELDS = ("wait_id", "phase", "parent_wait_id", "deadline_owner", "budget_ms",
+              "outcome", "attempts", "predicate_errors", "error_type", "elapsed_ms",
+              "max_predicate_ms", "overrun_ms")
+
+    def __init__(self, directory, *, clock=time.monotonic, detail_bytes=8*1024*1024,
+                 phase_bytes=1024*1024):
+        self.detail = JsonlDiagnostics(directory / "native-timing.jsonl",
+                                      clock=clock, max_bytes=detail_bytes)
+        self.phases = JsonlDiagnostics(directory / "native-phases.jsonl",
+                                      clock=clock, max_bytes=phase_bytes)
+        self.latest = directory / "native-phase-latest.json"
+        self.clock, self.started = clock, clock()
+
+    def __call__(self, event, **fields):
+        try:
+            self.detail(event, **fields)
+        except Exception:
+            _diagnostic_warning()
+        if event not in ("wait_start", "wait_end"):
+            return
+        safe = {key: fields[key] for key in self.FIELDS if key in fields}
+        try:
+            self.phases(event, **safe)
+        except Exception:
+            _diagnostic_warning()
+        try:
+            record = dict(event=event, utc=datetime.now(timezone.utc).isoformat(),
+                          since_start_ms=round((self.clock()-self.started)*1000, 3),
+                          **safe)
+            temporary = self.latest.with_suffix(".tmp")
+            temporary.write_text(json.dumps(record, ensure_ascii=True)+"\n")
+            temporary.replace(self.latest)
+        except Exception:
+            _diagnostic_warning()
+
+
 class Polling:
     def __init__(self, *, clock=time.monotonic, sleep=time.sleep, emit=None):
         self.clock, self.sleep, self.sink = clock, sleep, emit

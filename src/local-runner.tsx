@@ -1,3 +1,4 @@
+import {CompilerDiagnostics} from "./compiler-diagnostics-panel";
 import {runResultNotice} from "./run-result-notice";
 import {useCodeMismatch,type LiveCode} from "./live-code";
 import {localResultReport,type OutputRow} from "./local-result-model";
@@ -26,8 +27,8 @@ const CaseResult=memo(function CaseResult({row}:{row:OutputRow}){
   {!row.missing&&<details className="local-raw"><summary aria-label="查看原始结果"><Icon name="more"/></summary><pre>{raw}</pre></details>}
  </section>;
 });
-export function LocalRunner({ documentKey, codeSource, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onHelp, onReveal, hidden = false }: {
-  onReveal?:()=>void; hidden?:boolean; documentKey?: string; onHelp?: () => void; codeSource: LiveCode; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
+export function LocalRunner({ documentKey, codeSource, language, title, metadata, sampleInput, exampleInputs = "", onClose, breakpoints, onPauseLine, onHelp, onReveal, onDiagnosticJump, hidden = false }: {
+  onDiagnosticJump?:(line:number,snapshotCode:string)=>void; onReveal?:()=>void; hidden?:boolean; documentKey?: string; onHelp?: () => void; codeSource: LiveCode; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
 }) {
   const resize=useResizablePanel("local",!hidden);
   const names=useMemo(()=>parameterNames(metadata),[metadata]),storageKey="inkleet.test-cases.v1:"+(documentKey??title+":"+language);
@@ -203,7 +204,7 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
     {result&&!busy(result)&&activeRecord&&report&&!report.complete&&!result.timedOut&&!result.canceled&&<p role="alert" className="cache-warning">结果不完整或格式异常，不能判定全部用例通过。</p>}
     {report?.rows.map((row,index)=><CaseResult key={index} row={row}/>)}
     {result?.stdout && <><h4>标准输出</h4><pre>{result.stdout}</pre></>}
-    {result?.stderr && <><h4>错误输出</h4><pre>{result.stderr}</pre></>}
+    {result?.stderr && <CompilerDiagnostics key={result.id} raw={result.stderr} language={activeRecord?.snapshot.language??""} source={activeRecord?.snapshot.code} stale={codeMismatch} onJump={onDiagnosticJump?((line,source)=>{if(activeRecord&&codeSource.read()===source)onDiagnosticJump(line,source);}):undefined}/> }
 
     {result && !busy(result) && result.exitCode!==null&&result.exitCode!==0 && <small className="exit-code">退出码 {result.exitCode}</small>}
     </div></div>

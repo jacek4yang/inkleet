@@ -1,16 +1,14 @@
-export type DebugVariable = { name: string; value: string; type?: string; variablesReference: number; namedVariables?: number; indexedVariables?: number; presentationHint?: { lazy?: boolean; attributes?: string[] } };
+export type DebugVariable = { name: string; value: string; type?: string; variablesReference: number; namedVariables?: number; indexedVariables?: number; valueTruncated?: boolean; typeTruncated?: boolean; presentationHint?: { lazy?: boolean; attributes?: string[] } };
 export type DebugFrame = { id: number; name: string; line: number; column?: number; endLine?: number; endColumn?: number; inkleetSource?: boolean; source?: { name?: string; path?: string; sourceReference?: number } };
 export type DebugScope = { name: string; variablesReference: number; expensive?: boolean };
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const integer = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 export function debugVariables(value: unknown): DebugVariable[] {
-  const all=list(value), bounded=all.slice(0,100), tail=all.at(-1);
-  // CodeLLDB appends its synthetic raw branch after all logical children.
-  if(all.length>100&&record(tail)&&tail.name==="[raw]"&&record(tail.presentationHint)&&Array.isArray(tail.presentationHint.attributes)&&tail.presentationHint.attributes.includes("readOnly")&&tail.presentationHint.attributes.includes("virtual"))bounded[99]=tail;
+  const bounded=list(value).slice(0,100);
   return bounded.flatMap(item => {
     if (!record(item) || typeof item.name !== "string" || typeof item.value !== "string") return [];
-    return [{name: item.name.slice(0, 200), value: item.value.slice(0, 4000), type: typeof item.type === "string" ? item.type.slice(0, 512) : undefined,
+    return [{name: item.name.slice(0, 200), value: item.value.slice(0, 16000), valueTruncated: item.value.length > 16000, type: typeof item.type === "string" ? item.type.slice(0, 2048) : undefined, typeTruncated: typeof item.type === "string" && item.type.length > 2048,
       variablesReference: integer(item.variablesReference) ? item.variablesReference : 0,
       namedVariables: integer(item.namedVariables) ? item.namedVariables : undefined,
       indexedVariables: integer(item.indexedVariables) ? item.indexedVariables : undefined,

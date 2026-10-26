@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from native_wait import JsonlDiagnostics, Polling, WaitTimeout, operation_label, read_only_command
+from native_wait import NativeDiagnostics, JsonlDiagnostics, Polling, WaitTimeout, operation_label, read_only_command
 
 
 class FakeClock:
@@ -354,6 +354,39 @@ class DiagnosticTests(unittest.TestCase):
             self.assertTrue(rows[-1]["later_events_omitted"])
             self.assertIn("utc", rows[0])
             self.assertIn("since_start_ms", rows[0])
+
+
+class NativeDiagnosticsTests(unittest.TestCase):
+    def test_phase_progress_survives_both_journal_caps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            emit = NativeDiagnostics(root, clock=FakeClock(), detail_bytes=512,
+                                     phase_bytes=512)
+            for index in range(30):
+                emit("driver_end", operation="GET /element/:id/text")
+                emit("wait_start", wait_id=index, phase="native_smoke.py:1600",
+                     budget_ms=25000, label="PRIVATE", payload="PRIVATE")
+            emit("wait_end", wait_id=29, phase="native_smoke.py:1600",
+                 outcome="success", elapsed_ms=10, label="PRIVATE")
+            for name in ("native-timing.jsonl", "native-phases.jsonl"):
+                rows = [json.loads(line) for line in (root/name).read_text().splitlines()]
+                self.assertEqual(rows[-1]["event"], "diagnostics_truncated")
+                self.assertLessEqual((root/name).stat().st_size, 512)
+            latest = json.loads((root/"native-phase-latest.json").read_text())
+            self.assertEqual(latest["wait_id"], 29)
+            self.assertEqual(latest["outcome"], "success")
+            self.assertNotIn("PRIVATE", (root/"native-phase-latest.json").read_text())
+            self.assertNotIn("PRIVATE", (root/"native-phases.jsonl").read_text())
+
+    def test_observation_failure_does_not_change_wait_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            emit = NativeDiagnostics(root)
+            def broken(*args, **kwargs):
+                raise OSError("unavailable")
+            emit.detail = emit.phases = broken
+            emit.latest = root / "missing" / "latest.json"
+            self.assertEqual(Polling(emit=emit).wait_for(lambda: 42, "private", 1), 42)
 
 
 if __name__ == "__main__":

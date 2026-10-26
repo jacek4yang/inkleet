@@ -10,8 +10,8 @@ test("DAP inspection rejects malformed payloads without losing frame zero",()=>{
   assert.deepEqual(debugThreads([{id:0,name:"invalid"},{id:1,name:"main"},{id:1,name:"duplicate"}]),[{id:1,name:"main"}]);
 });
 test("variable references, labels and collections remain bounded",()=>{
-  const v=debugVariables([{name:"x".repeat(1000),value:"a".repeat(5000),variablesReference:-1,indexedVariables:Infinity,presentationHint:{lazy:true}}])[0];
-  assert.equal(v.name.length,200);assert.equal(v.value.length,4000);
+  const v=debugVariables([{name:"x".repeat(1000),value:"a".repeat(17000),variablesReference:-1,indexedVariables:Infinity,presentationHint:{lazy:true}}])[0];
+  assert.equal(v.name.length,200);assert.equal(v.value.length,16000);assert.equal(v.valueTruncated,true);
   assert.equal(v.variablesReference,0);assert.equal(v.indexedVariables,undefined);
   assert.equal(v.presentationHint?.lazy,true);
   assert.equal(debugVariables(Array.from({length:1000},()=>({name:"v",value:"1",variablesReference:0}))).length,100);
@@ -29,10 +29,10 @@ test("raw view is identified only by adapter metadata, never user field names",(
   assert.deepEqual(values[3].presentationHint?.attributes,["virtual"]);
 });
 
-test("bounded collection retains the final adapter raw branch",()=>{
+test("bounded page never replaces a logical child with a distant raw branch",()=>{
   const input=Array.from({length:150},(_,i)=>({name:"["+i+"]",value:String(i),variablesReference:0}));
   const raw={name:"[raw]",value:"raw",variablesReference:42,presentationHint:{attributes:["readOnly","virtual"]}};
   const values=debugVariables([...input,raw]);
-  assert.equal(values.length,100);assert.equal(values.filter(isRawDebugVariable).length,1);
-  assert.equal(values.at(-1)?.variablesReference,42);
+  assert.equal(values.length,100);assert.equal(values.filter(isRawDebugVariable).length,0);
+  assert.equal(values.at(-1)?.name,"[99]");
 });

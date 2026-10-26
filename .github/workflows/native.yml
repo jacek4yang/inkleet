@@ -21,7 +21,9 @@ jobs:
       INKLEET_NATIVE_SNIPPETS: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || inputs.snippets == true }}
       INKLEET_NATIVE_SNIPPET_FEATURE: native-java-snippet-validation
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    # Cold APT took 35m; the complete managed-toolchain GUI suite needs its own headroom.
+    # Keep both the total allocation and GUI step bounded; do not weaken assertions.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -70,6 +72,7 @@ jobs:
           printf '%s\n' "$result" > evidence/protocol/exit-code.txt
           exit "$result"
       - name: Verify native storage through the actual GUI
+        timeout-minutes: 45
         env:
           INKLEET_MANAGED_ENV: "1"
           INKLEET_JAVA_SNIPPET_VALIDATION: ${{ env.INKLEET_NATIVE_SNIPPETS == 'true' && env.INKLEET_NATIVE_SNIPPET_FEATURE == 'native-java-snippet-validation' && '1' || '0' }}

@@ -2,13 +2,13 @@
 面向 leetcode.cn 的本地优先跨平台刷题本。暖白、克制，只围绕找题、代码、结果与笔记。
 
 **开发预览，尚未完成真实账号在线判题和全部平台验收。** 逐项测试证据见 [STATUS.md](STATUS.md)。
-统一开发分支：`build/preview-installers`；唯一审阅入口：[PR #94](https://github.com/jacek4yang/inkleet/pull/94)。
+Protected `main` baseline: `ac7bd446`, including merged [PR #97](https://github.com/jacek4yang/inkleet/pull/97). Reading-layout and compiler-diagnostics changes in this branch are not yet included in the linked test packages.
 
-首版目标为 **v0.1.0 Preview**。发布说明与限制见 [v0.1.0](docs/releases/v0.1.0.md)。候选检查通过且发布获确认后，才会创建标签和 Release。
+**v0.1.0 Preview is published**, from source `6b5bca3`. See [release notes and limitations](docs/releases/v0.1.0.md). Development version 0.1.1 remains unpublished; a passing test build does not authorize a merge, tag or Release.
 
 ## 下载与安装
-- 首版目标：macOS Intel x86_64 DMG、Windows x64 setup EXE / MSI、Linux x86_64 tar.gz。
-- 正式下载入口为 [Releases](https://github.com/jacek4yang/inkleet/releases)。在首版发布之前，请使用明确标注提交号的 [Actions 测试产物](https://github.com/jacek4yang/inkleet/actions/workflows/preview-installers.yml)，不要将旧测试包视为 v0.1.0。
+- Preview package targets: macOS Intel x86_64 DMG, Windows x64 setup EXE / MSI, and Linux x86_64 tar.gz.
+- Download the published preview from [Releases](https://github.com/jacek4yang/inkleet/releases/tag/v0.1.0). For newer development packages, use the exact-commit [test artifact links in STATUS.md](STATUS.md#current-pr-97-test-checkpoint); these are not v0.1.0 release packages.
 - Windows 的 EXE / MSI 任选一种；未安装 WebView2 时可能需要联网获取运行时。
 - Linux tar.gz 解压后运行 `./start.sh`。面向 Ubuntu 24.04 / Mint 22 系列，需要 WebKitGTK 4.1 / GTK3；不是全静态或通用 Linux 包。
 - macOS 包仅面向 Intel。Ventura 的完整实际使用仍待验收；构建元数据里的最低系统版本不是兼容性保证。
@@ -30,13 +30,15 @@
 - F2 语义重命名，当前题目内的修改是一次可撤销事务；拒绝过时、跨文件或触及辅助代码的编辑。
 
 ## 新增编辑和笔记能力
-以下已纳入统一候选分支；具体已通过与未完成的验收见 STATUS。
+The features below are present in current main; passed checks and remaining acceptance gaps are recorded in STATUS.md.
 - Shift+F12 本题语义引用列表（含声明），点击跳回原始源码；不读取任意外部文件。
 - 冲突恢复副本列表、两版本预览和显式恢复。恢复前再保留当前两份内容；磁盘再次变化则拒绝覆盖。这不是完整编辑历史。
 - 笔记可请求 Typora 或系统默认编辑器打开；返回窗口或手动刷新时检查文件。干净草稿可更新，脏草稿进入冲突处理。实际 Typora 启动仍待验收。
 - 暂停栈帧表达式求值已接入；显式执行一次，不自动重复，3 秒超时停止调试。Java 当前不支持此求值入口。不能据此宣称与成熟 IDE 调试器等价。
 - Vim、搜索式设置、语言格式化覆盖、Tab 显示宽度；显式保存、恢复草稿和配置冲突保护。
 - F2 重命名准备与可选预览；Rust 集合逻辑视图与显式原始视图。
+
+Development source adds bounded debugger-variable paging and conservative Rust collection/Option/Result inspection. Unsupported shapes retain their original debugger view; this is not support for every Rust type. See [visualization limits](docs/RUST_VARIABLE_VISUALIZATION.md). Browser/native acceptance for this batch is pending.
 
 ## 本地运行与调试
 桌面点击「开发环境」安装所选语言工具，再用「本地」面板。
@@ -53,8 +55,8 @@ Linux 原生六语言 GUI 已验证；四种桌面目标的协议与编译探针
 Android 和 macOS ARM 不属于本次 v0.1.0 首版交付目标。历史探针不能替代当前版本的平台验收。
 
 ## 登录与在线判题
-桌面有独立官方隐私窗口与原生会话校验原型，仅保留本次运行内存会话。
-会话不返回编辑器 JavaScript；尚未进行真实账号端到端验收或安全持久化。
+Development source adds native QR login plus the existing official-window fallback. Optional remember-login uses the OS credential store; no password or session cookie is returned to editor JavaScript.
+Real-account QR completion, cross-restart restoration and platform credential-store acceptance are NOT RUN. If secure storage is unavailable or cleanup is uncertain, login may fail closed; there is no plaintext fallback. See [native login limits](docs/NATIVE_LOGIN.md).
 Android 安全登录隔离仍在适配，不使用明文会话兜底。
 在线运行和提交绑定不可变的题目/账号/语言/代码快照，正式提交须确认。
 发送状态未知时不自动重试，已知请求编号可继续查询。

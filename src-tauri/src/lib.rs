@@ -23,6 +23,9 @@ mod debugger;
 mod debug_launch;
 mod leetcode;
 mod auth;
+mod auth_commit;
+mod qr_login;
+mod session_store;
 mod cache;
 mod judge_transport;
 mod journal;
@@ -149,8 +152,8 @@ async fn open_note_external(window:tauri::WebviewWindow,app:tauri::AppHandle,pro
 }
 
 #[tauri::command]
-async fn open_login(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
-    check_origin(&window)?; auth::open(&app)
+async fn open_login(window: tauri::WebviewWindow, app: tauri::AppHandle, remember: Option<bool>) -> Result<(), String> {
+    check_origin(&window)?; auth::open(&app, remember.unwrap_or(false))
 }
 #[tauri::command]
 async fn verify_login(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<leetcode::Identity, String> {
@@ -162,7 +165,20 @@ async fn cancel_login(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Re
 }
 #[tauri::command]
 async fn login_status(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<Option<leetcode::Identity>, String> {
-    check_origin(&window)?; auth::status(&app)
+    check_origin(&window)?; auth::restore(app).await
+}
+
+#[tauri::command]
+async fn qr_login_start(window: tauri::WebviewWindow, app: tauri::AppHandle, remember: bool) -> Result<auth::QrReply, String> {
+    check_origin(&window)?; auth::qr_start(app, remember).await
+}
+#[tauri::command]
+async fn qr_login_poll(window: tauri::WebviewWindow, app: tauri::AppHandle, attempt: u64) -> Result<auth::QrReply, String> {
+    check_origin(&window)?; auth::qr_poll(app, attempt).await
+}
+#[tauri::command]
+async fn sign_out(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
+    check_origin(&window)?; auth::sign_out(app).await
 }
 
 #[tauri::command]
@@ -340,8 +356,8 @@ async fn set_debug_breakpoints(window:tauri::WebviewWindow,app:tauri::AppHandle,
     check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().breakpoints(id,&code,lines)).await.map_err(|_|"更新断点任务中断".to_owned())?
 }
 #[tauri::command]
-async fn debug_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,epoch:u64,kind:String,reference:i64)->Result<serde_json::Value,String>{
-    check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().request(id,epoch,&kind,reference)).await.map_err(|_|"调试请求任务中断".to_owned())?
+async fn debug_request(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,epoch:u64,kind:String,reference:i64,start:Option<u32>,count:Option<u32>,filter:Option<String>)->Result<serde_json::Value,String>{
+    check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||app.state::<debugger::Debugger>().request_page(id,epoch,&kind,reference,start,count,filter.as_deref())).await.map_err(|_|"调试请求任务中断".to_owned())?
 }
 
 
@@ -429,7 +445,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, local_run_record, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_cancel_completion, language_completion_resolve, language_semantic_tokens, language_diagnostics, read_language_source, acquire_language_source, language_source_definition, language_cancel_source_navigation, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, begin_draft_session, checkpoint_draft, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, local_run_record, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_cancel_completion, language_completion_resolve, language_semantic_tokens, language_diagnostics, read_language_source, acquire_language_source, language_source_definition, language_cancel_source_navigation, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, begin_draft_session, checkpoint_draft, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, qr_login_start, qr_login_poll, sign_out, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {

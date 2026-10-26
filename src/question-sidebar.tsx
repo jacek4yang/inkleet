@@ -1,3 +1,4 @@
+import {adjacentQuestion} from "./reading-preferences";
 import React, { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Icon, IconButton } from "./icons";
@@ -52,6 +53,7 @@ export const QuestionSidebar=React.memo(function QuestionSidebar({ account, rece
     }
   }
   const selectedSlug=recent.find(p=>p.id===selected)?.official?.titleSlug;
+  const previous=adjacentQuestion(data?.questions??[],selectedSlug,-1),next=adjacentQuestion(data?.questions??[],selectedSlug,1);
   return <aside className="sidebar question-sidebar" aria-label="题目导航">
     <div className="question-sidebar-heading"><div role="group" aria-label="题目列表">
       <button aria-pressed={mode==="catalogue"} onClick={()=>setMode("catalogue")}>题库</button>
@@ -80,6 +82,7 @@ export const QuestionSidebar=React.memo(function QuestionSidebar({ account, rece
         {!loading && data && !data.questions.length && <p className="muted">没有匹配题目</p>}
         {error && <p role="alert" className="error">{error}</p>}
       </div>
+      {data && <div className="question-adjacent" role="group" aria-label="当前筛选页内相邻题目"><button disabled={loading||!!opening||!previous} onClick={()=>previous&&void choose(previous.titleSlug)}>上一题</button><small title="按当前筛选页顺序；边界处请翻页，不跳过会员题">本页</small><button disabled={loading||!!opening||!next} onClick={()=>next&&void choose(next.titleSlug)}>下一题</button></div>}
       {data && <div className="question-pagination"><span>{data.total} 题</span><div><IconButton icon="previous" label="上一页题目" disabled={loading||query.offset===0} onClick={()=>setQuery(q=>({...q,offset:Math.max(0,q.offset-25)}))} /><span>{Math.floor(query.offset/25)+1}</span><IconButton icon="chevron" label="下一页题目" disabled={loading||!data.hasMore} onClick={()=>setQuery(q=>({...q,offset:q.offset+25}))} /></div></div>}
     </> : <div className="question-list">
       {recent.map(p=><button className="recent-question" key={p.id} data-problem={p.id} aria-current={p.id===selected?"page":undefined} onClick={()=>onSelectRecent(p.id)}><span className="question-number">{p.number}</span><span className="question-title">{p.title}</span></button>)}

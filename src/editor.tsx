@@ -1,6 +1,6 @@
 import {CommandPreferences} from "./command-preferences";
 import {editorSyntaxTheme} from "./editor-syntax-theme";
-import {editorJumpExtensions,moveEditorJump,settleEditorJump} from "./editor-jump-history";
+import {editorJumpExtensions,jumpEditor,moveEditorJump,settleEditorJump} from "./editor-jump-history";
 import {navigationBindings} from "./command-registry";
 import {snippetSession,moveSnippetField,endSnippet,discardSnippet,snippetChoiceOpen,moveSnippetChoice,acceptSnippetChoice,settleSnippetForAction} from "./snippet-session";
 import {snapshotText} from "./snapshot-text";
@@ -13,7 +13,7 @@ import {formatBinding,type Command} from "./command-registry";
 import type { DebugPosition } from "./debug-position";
 import { formatOnSave, formatDocument, saveDocument } from "./format-on-save";
 import React, { useContext, useLayoutEffect, useRef, useState } from "react";
-import { EditorState, StateEffect, Prec, Compartment } from "@codemirror/state";
+import { EditorState, EditorSelection, StateEffect, Prec, Compartment } from "@codemirror/state";
 import { EditorView, keymap, tooltips, panels } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { indentMore, indentLess, undo, redo, selectAll } from "@codemirror/commands";
@@ -64,15 +64,17 @@ type Props = {
   tabSize?:number;
   documentKey: string; language: Language | "markdown"; value: string; metadata?: string;
   label: string; onChange: (text: string) => void; onStatus?: (status: EditorLanguageStatus) => void; reconnectToken?: number; onSettings?: () => void;
+  onJumpReady?:(jump:((line:number,snapshotCode:string)=>boolean)|null)=>void;
   onSave?:()=>void;onSaveReady?:(save:(()=>boolean)|null)=>void;
   formatting?: {epoch?:()=>number;ready?:(save:boolean)=>boolean;enabled:boolean;save:(text:string)=>Promise<boolean>;report:(message:string)=>void};
   breakpoints?: number[]; onBreakpoints?: (lines: number[]) => void; pausedPosition?: DebugPosition|null;
 };
-export function CodeEditor({ vimEnabled=false, tabSize=4, wordWrap=false, showIndentGuides=true, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, statusOwner, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady }: Props) {
+export function CodeEditor({ vimEnabled=false, tabSize=4, wordWrap=false, showIndentGuides=true, documentKey, language, value, label, onChange, metadata, breakpoints = [], onBreakpoints, pausedPosition = null, onStatus, statusOwner, reconnectToken = 0, onSettings, formatting, onSave, onSaveReady, onJumpReady }: Props) {
   const commandPreferences=useContext(CommandPreferences),preferencesRef=useRef(commandPreferences);preferencesRef.current=commandPreferences;
   const wrapSlot=useRef(new Compartment()),guideSlot=useRef(new Compartment());
   const formatOptions=useRef(formatting);formatOptions.current=formatting;
   const saveCallback=useRef(onSave),saveReady=useRef(onSaveReady);saveCallback.current=onSave;saveReady.current=onSaveReady;
+  const jumpReady=useRef(onJumpReady);jumpReady.current=onJumpReady;
   const host = useRef<HTMLDivElement>(null);
   const vimSlot=useRef(new Compartment()),tabSizeSlot=useRef(new Compartment()),liveView=useRef<EditorView|null>(null),vimSave=useRef<(view:EditorView)=>boolean>(()=>false);
   const [lspStatus, setLspStatus] = useState<EditorLanguageStatus>({owner:"",text:""});
@@ -146,6 +148,13 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, wordWrap=false, showIn
     const view = new EditorView({ state, parent: host.current! });
     liveView.current=view;
     saveReady.current?.(()=>save(view));
+    jumpReady.current?.((line,snapshotCode)=>{
+      if(!live||view.composing||snapshotText(view.state.doc)!==snapshotCode||!Number.isSafeInteger(line)||line<1||line>view.state.doc.lines)return false;
+      intelligence?.cancelNavigation();
+      discardSnippet(view);
+      jumpEditor(view,EditorSelection.single(view.state.doc.line(line).from));
+      view.focus();return true;
+    });
     if (debug) debugView.current = { view, stopped: debug.stopped };
     if (cached) {view.scrollDOM.scrollTop = cached.scroll;view.scrollDOM.scrollLeft=cached.scrollLeft;}
     if (intelligence) void intelligence.connect(view);
@@ -153,6 +162,7 @@ export function CodeEditor({ vimEnabled=false, tabSize=4, wordWrap=false, showIn
       live=false;setSource(null);
       liveView.current=null;
       saveReady.current?.(null);
+      jumpReady.current?.(null);
       debugView.current = null;
       intelligence?.destroy();
       discardSnippet(view);
