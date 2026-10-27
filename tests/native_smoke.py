@@ -138,7 +138,7 @@ def click_debug_header_action(header_css, action_css):
     # before that move is diagnostic, not proof of whether the target is clickable.
     # The target helper still requires stable bounds, actual hover and hit before
     # the one click; a real overlay/product bug must continue to fail there.
-    click_native_node(element(action_css), panel_css=".debug-body")
+    click_native_node(element(action_css), panel_css=".debug-body", dom_geometry=True)
 
 
 def click_debug_action(css):
@@ -147,9 +147,34 @@ def click_debug_action(css):
     wait_for(lambda:cmd("GET",f"/element/{element(css)}/enabled"),"native action becomes enabled: "+css)
     click_native_node(element(css))
 
-def click_native_node(node, panel_css=None):
+def native_pointer_snapshot(node, x, y, panel_css):
+    # Read-only geometry/paint evidence. Never focus, scroll, click or alter DOM.
+    return cmd("POST","/execute/sync",{"script":"""
+          const t=arguments[0],r=t.getBoundingClientRect(),x=arguments[1]??(r.x+r.width/2),y=arguments[2]??(r.y+r.height/2),h=document.elementFromPoint(x,y),s=getComputedStyle(t);
+          const describe=e=>{if(!e)return null;const c=getComputedStyle(e);return {tag:e.tagName,id:e.id,className:typeof e.className==='string'?e.className:null,label:e.getAttribute('aria-label'),role:e.getAttribute('role'),bounds:e.getBoundingClientRect().toJSON(),pointerEvents:c.pointerEvents,opacity:c.opacity,visibility:c.visibility,display:c.display,overflowX:c.overflowX,overflowY:c.overflowY,position:c.position,zIndex:c.zIndex};};
+          const ancestors=[];for(let e=t.parentElement;e&&ancestors.length<10;e=e.parentElement)ancestors.push(describe(e));
+          const panel=arguments[3]?document.querySelector(arguments[3]):null;
+          return {bounds:r.toJSON(),clientRects:Array.from(t.getClientRects()).slice(0,10).map(rect=>rect.toJSON()),hover:t.matches(':hover'),hit:t===h||t.contains(h),focused:document.hasFocus(),label:t.getAttribute('aria-label'),dpr:devicePixelRatio,
+            point:{x,y},viewport:{width:innerWidth,height:innerHeight},panel:panel?.getBoundingClientRect().toJSON()??null,
+            enabled:!t.disabled,opacity:Number(s.opacity),visibility:s.visibility,display:s.display,
+            target:describe(t),actualHit:describe(h),hitStack:document.elementsFromPoint(x,y).slice(0,10).map(describe),ancestors};
+        ""","args":[{EID:node},x,y,panel_css]})
+
+def click_native_node(node, panel_css=None, dom_geometry=False):
     wait_for(lambda:cmd("GET",f"/element/{node}/enabled"),"native control enabled")
-    rect=cmd("GET",f"/element/{node}/rect")
+    if dom_geometry:
+        # WebKitGTK 2.52.6 GET /rect invokes an interactability hit test before
+        # returning geometry. For this already-revealed secondary action only,
+        # prospectively read DOM geometry before moving the pointer; do not retry
+        # a failed action and do not treat geometry as proof of clickability.
+        before=native_pointer_snapshot(node,None,None,panel_css)
+        (evidence/"native-pointer-before-move.json").write_text(json.dumps(before,ensure_ascii=False,indent=2))
+        rect=before["bounds"];p=before["panel"];v=before["viewport"]
+        assert before["clientRects"] and before["enabled"] and before["opacity"]>0 and before["visibility"]=="visible" and before["display"]!="none", "native target lacks visible DOM geometry"
+        assert rect["width"]>0 and rect["height"]>0 and rect["left"]>=0 and rect["right"]<=v["width"] and rect["top"]>=0 and rect["bottom"]<=v["height"], "native target geometry is outside the viewport"
+        assert panel_css is None or p is not None and rect["left"]>=p["left"] and rect["right"]<=p["right"] and rect["top"]>=p["top"] and rect["bottom"]<=p["bottom"], "native target geometry is outside its panel"
+    else:
+        rect=cmd("GET",f"/element/{node}/rect")
     window=cmd("GET","/window/rect")
     assert rect["width"]>0 and rect["height"]>0, "debug action has no visible bounds"
     assert rect["x"]>=0 and rect["y"]>=0 and rect["x"]+rect["width"]<=window["width"] and rect["y"]+rect["height"]<=window["height"], "debug action is outside the window"
@@ -161,16 +186,7 @@ def click_native_node(node, panel_css=None):
     previous=None
     def pointer_ready():
         nonlocal previous
-        state=cmd("POST","/execute/sync",{"script":"""
-          const t=arguments[0],x=arguments[1],y=arguments[2],r=t.getBoundingClientRect(),h=document.elementFromPoint(x,y),s=getComputedStyle(t);
-          const describe=e=>{if(!e)return null;const c=getComputedStyle(e);return {tag:e.tagName,id:e.id,className:typeof e.className==='string'?e.className:null,label:e.getAttribute('aria-label'),role:e.getAttribute('role'),bounds:e.getBoundingClientRect().toJSON(),pointerEvents:c.pointerEvents,opacity:c.opacity,visibility:c.visibility,display:c.display,overflowX:c.overflowX,overflowY:c.overflowY,position:c.position,zIndex:c.zIndex};};
-          const ancestors=[];for(let e=t.parentElement;e&&ancestors.length<10;e=e.parentElement)ancestors.push(describe(e));
-          const panel=arguments[3]?document.querySelector(arguments[3]):null;
-          return {bounds:r.toJSON(),hover:t.matches(':hover'),hit:t===h||t.contains(h),focused:document.hasFocus(),label:t.getAttribute('aria-label'),dpr:devicePixelRatio,
-            point:{x,y},viewport:{width:innerWidth,height:innerHeight},panel:panel?.getBoundingClientRect().toJSON()??null,
-            enabled:!t.disabled,opacity:Number(s.opacity),visibility:s.visibility,display:s.display,
-            target:describe(t),actualHit:describe(h),hitStack:document.elementsFromPoint(x,y).slice(0,10).map(describe),ancestors};
-        ""","args":[{EID:node},x-window["x"],y-window["y"],panel_css]})
+        state=native_pointer_snapshot(node,x-window["x"],y-window["y"],panel_css)
         (evidence/"native-pointer-last-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
         stable=previous==state["bounds"]
         previous=state["bounds"]
@@ -179,7 +195,7 @@ def click_native_node(node, panel_css=None):
                  and r["width"]>0 and r["height"]>0 and r["left"]>=0 and r["right"]<=v["width"] and r["top"]>=0 and r["bottom"]<=v["height"]
                  and r["left"]<=point["x"]<r["right"] and r["top"]<=point["y"]<r["bottom"])
         inside_panel=(panel_css is None or p is not None and r["left"]>=p["left"] and r["right"]<=p["right"] and r["top"]>=p["top"] and r["bottom"]<=p["bottom"])
-        return state if stable and visible and inside_panel and state["hover"] and state["hit"] else None
+        return state if stable and visible and inside_panel and (not dom_geometry or state["clientRects"]) and state["hover"] and state["hit"] else None
     state=wait_for(pointer_ready,"native pointer settles on its intended control")
     for label,command in [("pointer",["xdotool","getmouselocation","--shell"]),("window",["xdotool","getwindowfocus","getwindowname"])]:
         result=subprocess.run(command,capture_output=True,text=True,check=False)
