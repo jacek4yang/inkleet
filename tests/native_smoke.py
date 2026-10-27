@@ -130,12 +130,15 @@ def click_debug_header_action(header_css, action_css):
         (evidence/"native-header-action-last-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
         if not state:return False
         r=state["bounds"];p=state["panel"];v=state["viewport"]
-        return (state["hover"] and state["opacity"]>0 and state["display"]!="none" and state["visibility"]=="visible" and state["enabled"] and state["hit"]
+        return (state["hover"] and state["opacity"]>0 and state["display"]!="none" and state["visibility"]=="visible" and state["enabled"]
                 and r["width"]>0 and r["height"]>0 and r["left"]>=max(0,p["left"]) and r["right"]<=min(v["width"],p["right"])
                 and r["top"]>=max(0,p["top"]) and r["bottom"]<=min(v["height"],p["bottom"]))
     wait_for(revealed,"secondary debugger action revealed by real header hover")
-    # Existing helper rechecks hover/hit and stable bounds, then sends one click.
-    click_debug_action(action_css)
+    # Visibility is only the prerequisite to moving the real pointer. A hit test
+    # before that move is diagnostic, not proof of whether the target is clickable.
+    # The target helper still requires stable bounds, actual hover and hit before
+    # the one click; a real overlay/product bug must continue to fail there.
+    click_native_node(element(action_css), panel_css=".debug-body")
 
 
 def click_debug_action(css):
@@ -144,7 +147,7 @@ def click_debug_action(css):
     wait_for(lambda:cmd("GET",f"/element/{element(css)}/enabled"),"native action becomes enabled: "+css)
     click_native_node(element(css))
 
-def click_native_node(node):
+def click_native_node(node, panel_css=None):
     wait_for(lambda:cmd("GET",f"/element/{node}/enabled"),"native control enabled")
     rect=cmd("GET",f"/element/{node}/rect")
     window=cmd("GET","/window/rect")
@@ -159,13 +162,24 @@ def click_native_node(node):
     def pointer_ready():
         nonlocal previous
         state=cmd("POST","/execute/sync",{"script":"""
-          const t=arguments[0],r=t.getBoundingClientRect(),h=document.elementFromPoint(arguments[1],arguments[2]);
-          return {bounds:r.toJSON(),hover:t.matches(':hover'),hit:t===h||t.contains(h),focused:document.hasFocus(),label:t.getAttribute('aria-label'),dpr:devicePixelRatio};
-        ""","args":[{EID:node},rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2]})
+          const t=arguments[0],x=arguments[1],y=arguments[2],r=t.getBoundingClientRect(),h=document.elementFromPoint(x,y),s=getComputedStyle(t);
+          const describe=e=>{if(!e)return null;const c=getComputedStyle(e);return {tag:e.tagName,id:e.id,className:typeof e.className==='string'?e.className:null,label:e.getAttribute('aria-label'),role:e.getAttribute('role'),bounds:e.getBoundingClientRect().toJSON(),pointerEvents:c.pointerEvents,opacity:c.opacity,visibility:c.visibility,display:c.display,overflowX:c.overflowX,overflowY:c.overflowY,position:c.position,zIndex:c.zIndex};};
+          const ancestors=[];for(let e=t.parentElement;e&&ancestors.length<10;e=e.parentElement)ancestors.push(describe(e));
+          const panel=arguments[3]?document.querySelector(arguments[3]):null;
+          return {bounds:r.toJSON(),hover:t.matches(':hover'),hit:t===h||t.contains(h),focused:document.hasFocus(),label:t.getAttribute('aria-label'),dpr:devicePixelRatio,
+            point:{x,y},viewport:{width:innerWidth,height:innerHeight},panel:panel?.getBoundingClientRect().toJSON()??null,
+            enabled:!t.disabled,opacity:Number(s.opacity),visibility:s.visibility,display:s.display,
+            target:describe(t),actualHit:describe(h),hitStack:document.elementsFromPoint(x,y).slice(0,10).map(describe),ancestors};
+        ""","args":[{EID:node},x-window["x"],y-window["y"],panel_css]})
         (evidence/"native-pointer-last-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
         stable=previous==state["bounds"]
         previous=state["bounds"]
-        return state if stable and state["hover"] and state["hit"] else None
+        r=state["bounds"];v=state["viewport"];point=state["point"];p=state["panel"]
+        visible=(state["enabled"] and state["opacity"]>0 and state["visibility"]=="visible" and state["display"]!="none"
+                 and r["width"]>0 and r["height"]>0 and r["left"]>=0 and r["right"]<=v["width"] and r["top"]>=0 and r["bottom"]<=v["height"]
+                 and r["left"]<=point["x"]<r["right"] and r["top"]<=point["y"]<r["bottom"])
+        inside_panel=(panel_css is None or p is not None and r["left"]>=p["left"] and r["right"]<=p["right"] and r["top"]>=p["top"] and r["bottom"]<=p["bottom"])
+        return state if stable and visible and inside_panel and state["hover"] and state["hit"] else None
     state=wait_for(pointer_ready,"native pointer settles on its intended control")
     for label,command in [("pointer",["xdotool","getmouselocation","--shell"]),("window",["xdotool","getwindowfocus","getwindowname"])]:
         result=subprocess.run(command,capture_output=True,text=True,check=False)
