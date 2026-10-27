@@ -31,7 +31,9 @@ jobs:
       - name: Verify release version metadata
         run: python3 scripts/verify-release-version.py
       - name: Verify native wait and transport budgets
-        run: python3 -m unittest discover -s tests -p 'test_native_wait.py' -v
+        run: |
+          python3 -m unittest discover -s tests -p 'test_native_wait.py' -v
+          python3 -m unittest discover -s tests -p 'test_native_header_action.py' -v
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'

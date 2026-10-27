@@ -106,6 +106,38 @@ def reveal_debug_control(css, fallback="down", panel_css=".debug-body", top_inse
         time.sleep(.15)
     raise AssertionError("Control remains unreachable through real wheel in "+panel_css+": "+css)
 
+def click_debug_header_action(header_css, action_css):
+    # A hover-only action cannot be used as the scroll anchor: WebKit may reject
+    # its rect while opacity is zero. Reveal the permanently visible header,
+    # then use real pointer movement to expose its secondary action.
+    reveal_debug_control(header_css)
+    header=cmd("GET",f"/element/{element(header_css)}/rect")
+    window=cmd("GET","/window/rect")
+    assert header["width"]>0 and header["height"]>0,"debug header has no visible bounds"
+    x=header["x"]+header["width"]/2; y=header["y"]+header["height"]/2
+    assert 0<=x<window["width"] and 0<=y<window["height"],"debug header is outside the window"
+    subprocess.run(["xdotool","mousemove","--sync",str(int(window["x"]+x)),str(int(window["y"]+y))],check=True)
+    def revealed():
+        state=cmd("POST","/execute/sync",{"script":"""
+          const header=document.querySelector(arguments[0]),action=document.querySelector(arguments[1]),panel=document.querySelector('.debug-body');
+          if(!header||!action||!panel)return null;
+          const r=action.getBoundingClientRect(),p=panel.getBoundingClientRect(),style=getComputedStyle(action);
+          const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+          return {hover:header.matches(':hover'),opacity:Number(style.opacity),display:style.display,visibility:style.visibility,
+            enabled:!action.disabled,bounds:r.toJSON(),panel:p.toJSON(),hit:action===hit||action.contains(hit),
+            viewport:{width:innerWidth,height:innerHeight}};
+        ""","args":[header_css,action_css]})
+        (evidence/"native-header-action-last-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+        if not state:return False
+        r=state["bounds"];p=state["panel"];v=state["viewport"]
+        return (state["hover"] and state["opacity"]>0 and state["display"]!="none" and state["visibility"]=="visible" and state["enabled"] and state["hit"]
+                and r["width"]>0 and r["height"]>0 and r["left"]>=max(0,p["left"]) and r["right"]<=min(v["width"],p["right"])
+                and r["top"]>=max(0,p["top"]) and r["bottom"]<=min(v["height"],p["bottom"]))
+    wait_for(revealed,"secondary debugger action revealed by real header hover")
+    # Existing helper rechecks hover/hit and stable bounds, then sends one click.
+    click_debug_action(action_css)
+
+
 def click_debug_action(css):
     # Choose one real pointer click before sending any mutation. Presence and
     # enabled polling are read-only; an uncertain click is never replayed.
@@ -1501,11 +1533,11 @@ try:
                         map_evidence["fields"].append([cmd("GET",f"/element/{field[EID]}/attribute/data-source-name") for field in fields])
                     (evidence/"rust-map-row-data.json").write_text(json.dumps(map_evidence,ensure_ascii=False))
                     capture_map_rows(map_node,"rust-map-key-value-rows-native")
-                    reveal_debug_control(map_node+' > .debug-variable > .debug-raw-toggle');click_debug_action(map_node+' > .debug-variable > .debug-raw-toggle')
+                    click_debug_header_action(map_node+' > .debug-variable',map_node+' > .debug-variable > .debug-raw-toggle')
                     wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
                     reveal_debug_control(map_node+' button[aria-label="[raw]"]');click_debug_action(map_node+' button[aria-label="[raw]"]')
                     wait_for(lambda:element(map_node+' button[aria-label="base"]'),"raw map retains implementation fields")
-                    reveal_debug_control(map_node+' > .debug-variable > .debug-raw-toggle');click_debug_action(map_node+' > .debug-variable > .debug-raw-toggle')
+                    click_debug_header_action(map_node+' > .debug-variable',map_node+' > .debug-variable > .debug-raw-toggle')
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"]'}),"hide raw removes internal layout"
                     empty_node='.debug-tree-node:has(> .debug-variable > button[aria-label="empty"])'
                     reveal_debug_control('.debug-variable > button[aria-label="empty"]');click_debug_action('.debug-variable > button[aria-label="empty"]')
