@@ -1,0 +1,26 @@
+name: Publish frozen verified v0.1.1
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: publish-inkleet-v0.1.1
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'jacek4yang/inkleet' && github.ref == 'refs/heads/release/v0.1.1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check publisher safety regressions
+        run: python3 -m unittest discover -s tests -p 'test_verified_release.py' -v
+      - name: Verify frozen artifacts, upload draft, verify downloads, publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish-verified-release.py
