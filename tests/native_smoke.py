@@ -2,6 +2,7 @@
 import base64, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.error, http.client
 from native_wait import NativeDiagnostics, Polling, operation_label, read_only_command
 from native_window_close import check_clean_close
+from native_capture import CAPTURE_SNAPSHOT, reveal_capture
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
@@ -1536,21 +1537,22 @@ try:
                                 cells.append(cmd("GET",f"/element/{nodes[0][EID]}/property/textContent"))
                             result.append(cells)
                         return sorted(result)
-                    def capture_map_rows(selector,name):
+                    def capture_map_rows(selector,name,nested=False):
                         group=selector+' > .debug-tree-children > .debug-map-rows'
-                        reveal_debug_control(group)
-                        panel_rect=cmd("GET",f"/element/{element('.debug-body')}/rect")
-                        window_rect=cmd("GET","/window/rect")
-                        cells=cmd("POST","/elements",{"using":"css selector","value":group+' > .debug-map-row > [data-map-field] > .debug-tree-node > .debug-variable > button > code'})
-                        assert cells,"map screenshot must contain actual key/value cells"
-                        bounds=[]
-                        for cell in cells:
-                            rect=cmd("GET",f"/element/{cell[EID]}/rect")
-                            assert rect["width"]>0 and rect["height"]>0,"map cell must have painted bounds"
-                            assert rect["x"]>=panel_rect["x"] and rect["x"]+rect["width"]<=panel_rect["x"]+panel_rect["width"]+1,"map cells must be inside horizontal viewport"
-                            assert rect["y"]>=panel_rect["y"] and rect["y"]+rect["height"]<=min(panel_rect["y"]+panel_rect["height"],window_rect["height"])+1,"map cells must be visible in screenshot"
-                            bounds.append({"text":cmd("GET",f"/element/{cell[EID]}/property/textContent"),"rect":rect})
-                        (evidence/(name+'.json')).write_text(json.dumps(bounds,ensure_ascii=False))
+                        specs=[{"css":group+' > .debug-map-row > [data-map-field] > .debug-tree-node > .debug-variable > button > code',"count":2*len(map_rows(selector))}]
+                        if nested:
+                            leaves=selector+' [data-map-field="value"] .debug-tree-children > .debug-tree-node > .debug-variable'
+                            specs.extend([{"css":leaves+' > button:first-child',"count":2},{"css":leaves+' > code',"count":2}])
+                        def snapshot():
+                            return cmd("POST","/execute/sync",{"script":CAPTURE_SNAPSHOT,"args":[".debug-body",specs]})
+                        def wheel(state,direction):
+                            window=cmd("GET","/window/rect")
+                            point=state["wheel"]
+                            subprocess.run(["xdotool","mousemove","--sync",str(int(window["x"]+point["x"])),str(int(window["y"]+point["y"])),"click","--repeat","2","--delay","80","5" if direction=="down" else "4"],check=True)
+                        def save(state):
+                            with (evidence/(name+'-scroll.jsonl')).open('a') as out:out.write(json.dumps(state,ensure_ascii=False)+"\n")
+                        state=reveal_capture(snapshot,wheel,save,lambda:time.sleep(.15))
+                        (evidence/(name+'.json')).write_text(json.dumps(state,ensure_ascii=False))
                         screenshot(name+'.png')
                     wait_for(lambda:map_rows(map_node)==[["3","30"],["8","80"]],"one HashMap expansion renders actual key/value associations in the same row")
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"], '+map_node+' button[aria-label="[raw]"]'}),"internal map layout hidden by default"
@@ -1593,7 +1595,7 @@ try:
                         nodes=cmd("POST","/elements",{"using":"css selector","value":nested_node+' [data-map-field="value"] .debug-tree-children > .debug-tree-node > .debug-variable > code'})
                         return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
                     wait_for(lambda:nested_values()==["5","9"],"nested Vec map value expands into real indexed elements")
-                    capture_map_rows(nested_node,"rust-nested-map-rows-native")
+                    capture_map_rows(nested_node,"rust-nested-map-rows-native",nested=True)
                     reveal_debug_control('.debug-variable > button[aria-label="set"]');click_debug_action('.debug-variable > button[aria-label="set"]')
                     set_node='.debug-tree-node:has(> .debug-variable > button[aria-label="set"])'
                     wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":set_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashSet logical elements")
