@@ -8,16 +8,23 @@ private Rust memory layouts. Managed CodeLLDB and its matching Rust visualizers
 remain responsible for logical children. Missing visualizers fall back to the
 adapter's generic tree.
 
-- Visible type text, child count when supplied, bounded summaries, and an
-  expandable detail view of the adapter-returned value.
-- On-demand pages of up to 100 children, up to 1000 displayed children per node
-  or scope. Repeated pages stop with an explicit adapter limitation message.
+- Compact, single-line name/value rows. Types are abbreviated visually, with the
+  complete adapter type available on hover. Primitive collection elements do not
+  repeat the enclosing element type. There are no decorative map/set labels or
+  per-row detail buttons for ordinary scalar values.
+- On-demand pages of 20 map entries or 100 ordinary children, up to 1000 displayed
+  children per node or scope. Repeated pages stop with an adapter limitation.
+- Expanding a recognized map fetches the visible entries' actual tuple fields and
+  displays each key beside its associated value without another tuple click.
+  A shared queue limits actual in-flight pair reads to four, including old reads
+  from canceled expansions. Nested values stay lazy. Unsupported field shapes
+  retain an inspectable tree rather than parsing `{...}` or summary strings.
+- Exact `0`/`1`, `.0`/`.1`, or `key`/`value` fields establish association; response
+  order alone is not used. An empty logical response is not called an empty map
+  unless the adapter reports zero count or an explicit zero-size summary.
 - References are scoped to session, pause, frame, and inspection revision.
   Collapse invalidates pending loads. Repeated reference and depth-12 guards
   prevent unbounded automatic recursion.
-- Exact known standard-library type names get presentation hints, not memory
-  interpretation. A recognized map entry with exactly `0`/`1`, `.0`/`.1`, or
-  `key`/`value` fields gets key/value columns. Other shapes retain the tree.
 - Adapter-marked raw internal nodes remain explicitly toggleable when returned.
   Paging does not replace a real indexed element with a distant raw tail.
 - Detail view retains up to 16000 characters of a returned value and 2048 of a
@@ -56,3 +63,16 @@ and retry, collapse before response, continue/pause, frame/thread changes,
 session restart, and evaluation-induced inspection invalidation. Keep the old
 value out of the new paused context. Real native runs on Linux x86_64, macOS Intel,
 and Windows x64 are required before declaring cross-platform support complete.
+
+## Readability evidence
+
+`tests/debug-real-dap-ui.mjs` consumes the platform probe's actual DAP transcript
+and uses the production variable parser and renderer. It checks one-click map
+expansion, exact key/value row associations, no opaque tuple summary, and cell
+bounds before saving a screenshot. This is Chromium rendering of real adapter
+data, not a claim of native WebView interaction. The Linux native smoke test
+also checks same-row associations and visible cell bounds before screenshots.
+Both kinds of evidence must be inspected; successful flattened scalar values
+alone do not prove a readable map UI. Windows qualification is required for the
+reported Windows failure. No repaired-platform result is claimed merely because
+unit tests or the former Linux test passed.

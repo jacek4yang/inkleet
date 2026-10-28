@@ -2,6 +2,7 @@
 import base64, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.error, http.client
 from native_wait import NativeDiagnostics, Polling, operation_label, read_only_command
 from native_window_close import check_clean_close
+from native_capture import CAPTURE_SNAPSHOT, reveal_capture
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
@@ -106,15 +107,75 @@ def reveal_debug_control(css, fallback="down", panel_css=".debug-body", top_inse
         time.sleep(.15)
     raise AssertionError("Control remains unreachable through real wheel in "+panel_css+": "+css)
 
+def click_debug_header_action(header_css, action_css):
+    # A hover-only action cannot be used as the scroll anchor: WebKit may reject
+    # its rect while opacity is zero. Reveal the permanently visible header,
+    # then use real pointer movement to expose its secondary action.
+    reveal_debug_control(header_css)
+    header=cmd("GET",f"/element/{element(header_css)}/rect")
+    window=cmd("GET","/window/rect")
+    assert header["width"]>0 and header["height"]>0,"debug header has no visible bounds"
+    x=header["x"]+header["width"]/2; y=header["y"]+header["height"]/2
+    assert 0<=x<window["width"] and 0<=y<window["height"],"debug header is outside the window"
+    subprocess.run(["xdotool","mousemove","--sync",str(int(window["x"]+x)),str(int(window["y"]+y))],check=True)
+    def revealed():
+        state=cmd("POST","/execute/sync",{"script":"""
+          const header=document.querySelector(arguments[0]),action=document.querySelector(arguments[1]),panel=document.querySelector('.debug-body');
+          if(!header||!action||!panel)return null;
+          const r=action.getBoundingClientRect(),p=panel.getBoundingClientRect(),style=getComputedStyle(action);
+          const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+          return {hover:header.matches(':hover'),opacity:Number(style.opacity),display:style.display,visibility:style.visibility,
+            enabled:!action.disabled,bounds:r.toJSON(),panel:p.toJSON(),hit:action===hit||action.contains(hit),
+            viewport:{width:innerWidth,height:innerHeight}};
+        ""","args":[header_css,action_css]})
+        (evidence/"native-header-action-last-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
+        if not state:return False
+        r=state["bounds"];p=state["panel"];v=state["viewport"]
+        return (state["hover"] and state["opacity"]>0 and state["display"]!="none" and state["visibility"]=="visible" and state["enabled"]
+                and r["width"]>0 and r["height"]>0 and r["left"]>=max(0,p["left"]) and r["right"]<=min(v["width"],p["right"])
+                and r["top"]>=max(0,p["top"]) and r["bottom"]<=min(v["height"],p["bottom"]))
+    wait_for(revealed,"secondary debugger action revealed by real header hover")
+    # Visibility is only the prerequisite to moving the real pointer. A hit test
+    # before that move is diagnostic, not proof of whether the target is clickable.
+    # The target helper still requires stable bounds, actual hover and hit before
+    # the one click; a real overlay/product bug must continue to fail there.
+    click_native_node(element(action_css), panel_css=".debug-body", dom_geometry=True)
+
+
 def click_debug_action(css):
     # Choose one real pointer click before sending any mutation. Presence and
     # enabled polling are read-only; an uncertain click is never replayed.
     wait_for(lambda:cmd("GET",f"/element/{element(css)}/enabled"),"native action becomes enabled: "+css)
     click_native_node(element(css))
 
-def click_native_node(node):
+def native_pointer_snapshot(node, x, y, panel_css):
+    # Read-only geometry/paint evidence. Never focus, scroll, click or alter DOM.
+    return cmd("POST","/execute/sync",{"script":"""
+          const t=arguments[0],r=t.getBoundingClientRect(),x=arguments[1]??(r.x+r.width/2),y=arguments[2]??(r.y+r.height/2),h=document.elementFromPoint(x,y),s=getComputedStyle(t);
+          const describe=e=>{if(!e)return null;const c=getComputedStyle(e);return {tag:e.tagName,id:e.id,className:typeof e.className==='string'?e.className:null,label:e.getAttribute('aria-label'),role:e.getAttribute('role'),bounds:e.getBoundingClientRect().toJSON(),pointerEvents:c.pointerEvents,opacity:c.opacity,visibility:c.visibility,display:c.display,overflowX:c.overflowX,overflowY:c.overflowY,position:c.position,zIndex:c.zIndex};};
+          const ancestors=[];for(let e=t.parentElement;e&&ancestors.length<10;e=e.parentElement)ancestors.push(describe(e));
+          const panel=arguments[3]?document.querySelector(arguments[3]):null;
+          return {bounds:r.toJSON(),clientRects:Array.from(t.getClientRects()).slice(0,10).map(rect=>rect.toJSON()),hover:t.matches(':hover'),hit:t===h||t.contains(h),focused:document.hasFocus(),label:t.getAttribute('aria-label'),dpr:devicePixelRatio,
+            point:{x,y},viewport:{width:innerWidth,height:innerHeight},panel:panel?.getBoundingClientRect().toJSON()??null,
+            enabled:!t.disabled,opacity:Number(s.opacity),visibility:s.visibility,display:s.display,
+            target:describe(t),actualHit:describe(h),hitStack:document.elementsFromPoint(x,y).slice(0,10).map(describe),ancestors};
+        ""","args":[{EID:node},x,y,panel_css]})
+
+def click_native_node(node, panel_css=None, dom_geometry=False):
     wait_for(lambda:cmd("GET",f"/element/{node}/enabled"),"native control enabled")
-    rect=cmd("GET",f"/element/{node}/rect")
+    if dom_geometry:
+        # WebKitGTK 2.52.6 GET /rect invokes an interactability hit test before
+        # returning geometry. For this already-revealed secondary action only,
+        # prospectively read DOM geometry before moving the pointer; do not retry
+        # a failed action and do not treat geometry as proof of clickability.
+        before=native_pointer_snapshot(node,None,None,panel_css)
+        (evidence/"native-pointer-before-move.json").write_text(json.dumps(before,ensure_ascii=False,indent=2))
+        rect=before["bounds"];p=before["panel"];v=before["viewport"]
+        assert before["clientRects"] and before["enabled"] and before["opacity"]>0 and before["visibility"]=="visible" and before["display"]!="none", "native target lacks visible DOM geometry"
+        assert rect["width"]>0 and rect["height"]>0 and rect["left"]>=0 and rect["right"]<=v["width"] and rect["top"]>=0 and rect["bottom"]<=v["height"], "native target geometry is outside the viewport"
+        assert panel_css is None or p is not None and rect["left"]>=p["left"] and rect["right"]<=p["right"] and rect["top"]>=p["top"] and rect["bottom"]<=p["bottom"], "native target geometry is outside its panel"
+    else:
+        rect=cmd("GET",f"/element/{node}/rect")
     window=cmd("GET","/window/rect")
     assert rect["width"]>0 and rect["height"]>0, "debug action has no visible bounds"
     assert rect["x"]>=0 and rect["y"]>=0 and rect["x"]+rect["width"]<=window["width"] and rect["y"]+rect["height"]<=window["height"], "debug action is outside the window"
@@ -126,14 +187,16 @@ def click_native_node(node):
     previous=None
     def pointer_ready():
         nonlocal previous
-        state=cmd("POST","/execute/sync",{"script":"""
-          const t=arguments[0],r=t.getBoundingClientRect(),h=document.elementFromPoint(arguments[1],arguments[2]);
-          return {bounds:r.toJSON(),hover:t.matches(':hover'),hit:t===h||t.contains(h),focused:document.hasFocus(),label:t.getAttribute('aria-label'),dpr:devicePixelRatio};
-        ""","args":[{EID:node},rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2]})
+        state=native_pointer_snapshot(node,x-window["x"],y-window["y"],panel_css)
         (evidence/"native-pointer-last-state.json").write_text(json.dumps(state,ensure_ascii=False,indent=2))
         stable=previous==state["bounds"]
         previous=state["bounds"]
-        return state if stable and state["hover"] and state["hit"] else None
+        r=state["bounds"];v=state["viewport"];point=state["point"];p=state["panel"]
+        visible=(state["enabled"] and state["opacity"]>0 and state["visibility"]=="visible" and state["display"]!="none"
+                 and r["width"]>0 and r["height"]>0 and r["left"]>=0 and r["right"]<=v["width"] and r["top"]>=0 and r["bottom"]<=v["height"]
+                 and r["left"]<=point["x"]<r["right"] and r["top"]<=point["y"]<r["bottom"])
+        inside_panel=(panel_css is None or p is not None and r["left"]>=p["left"] and r["right"]<=p["right"] and r["top"]>=p["top"] and r["bottom"]<=p["bottom"])
+        return state if stable and visible and inside_panel and (not dom_geometry or state["clientRects"]) and state["hover"] and state["hit"] else None
     state=wait_for(pointer_ready,"native pointer settles on its intended control")
     for label,command in [("pointer",["xdotool","getmouselocation","--shell"]),("window",["xdotool","getwindowfocus","getwindowname"])]:
         result=subprocess.run(command,capture_output=True,text=True,check=False)
@@ -1420,7 +1483,7 @@ try:
                 local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
                 if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"
                 if group=="c": local_solution="int solve(int* values,int valuesSize) {\n int total=0;\n for(int i=0;i<valuesSize;i++){total+=values[i];}\n return total;\n}"
-                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let map=std::collections::HashMap::from([(3,30),(8,80)]); let empty:std::collections::HashMap<i32,i32>=std::collections::HashMap::new(); let set=std::collections::HashSet::from([3,8]); let mut total=0;\n for value in values {total+=value;}\n total\n}"
+                if group=="rust": local_solution="fn solve(values: Vec<i32>) -> i32 {\n let map=std::collections::HashMap::from([(3,30usize),(8,80usize)]); let empty:std::collections::HashMap<i32,i32>=std::collections::HashMap::new(); let words=std::collections::HashMap::from([(String::from(\"hello\"),42)]); let nested=std::collections::HashMap::from([(String::from(\"nums\"),vec![5,9])]); let set=std::collections::HashSet::from([3,8]); let mut total=0;\n for value in values {total+=value;}\n total\n}"
                 fill(code,local_solution)
                 save_editor(code)
                 if group=="golang":
@@ -1463,30 +1526,81 @@ try:
                 if group=="rust":
                     map_node='.debug-tree-node:has(> .debug-variable > button[aria-label="map"])'
                     reveal_debug_control('.debug-variable > button[aria-label="map"]');click_debug_action('.debug-variable > button[aria-label="map"]')
-                    wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashMap exposes two logical pairs")
+                    def map_rows(selector):
+                        rows=cmd("POST","/elements",{"using":"css selector","value":selector+' > .debug-tree-children > .debug-map-rows > .debug-map-row'})
+                        result=[]
+                        for row in rows:
+                            cells=[]
+                            for field in ("key","value"):
+                                nodes=cmd("POST",f"/element/{row[EID]}/elements",{"using":"css selector","value":'[data-map-field="'+field+'"] > .debug-tree-node > .debug-variable > button > code'})
+                                if len(nodes)!=1:return []
+                                cells.append(cmd("GET",f"/element/{nodes[0][EID]}/property/textContent"))
+                            result.append(cells)
+                        return sorted(result)
+                    def capture_map_rows(selector,name,nested=False):
+                        group=selector+' > .debug-tree-children > .debug-map-rows'
+                        specs=[{"css":group+' > .debug-map-row > [data-map-field] > .debug-tree-node > .debug-variable > button > code',"count":2*len(map_rows(selector))}]
+                        if nested:
+                            leaves=selector+' [data-map-field="value"] .debug-tree-children > .debug-tree-node > .debug-variable'
+                            specs.extend([{"css":leaves+' > button:first-child',"count":2},{"css":leaves+' > code',"count":2}])
+                        def snapshot():
+                            return cmd("POST","/execute/sync",{"script":CAPTURE_SNAPSHOT,"args":[".debug-body",specs]})
+                        def wheel(state,direction):
+                            window=cmd("GET","/window/rect")
+                            point=state["wheel"]
+                            subprocess.run(["xdotool","mousemove","--sync",str(int(window["x"]+point["x"])),str(int(window["y"]+point["y"])),"click","--repeat","2","--delay","80","5" if direction=="down" else "4"],check=True)
+                        def save(state):
+                            with (evidence/(name+'-scroll.jsonl')).open('a') as out:out.write(json.dumps(state,ensure_ascii=False)+"\n")
+                        state=reveal_capture(snapshot,wheel,save,lambda:time.sleep(.15))
+                        (evidence/(name+'.json')).write_text(json.dumps(state,ensure_ascii=False))
+                        screenshot(name+'.png')
+                    wait_for(lambda:map_rows(map_node)==[["3","30"],["8","80"]],"one HashMap expansion renders actual key/value associations in the same row")
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"], '+map_node+' button[aria-label="[raw]"]'}),"internal map layout hidden by default"
-                    pair_buttons=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-variable > button'})
-                    pair_names=[cmd("GET",f"/element/{pair[EID]}/attribute/aria-label") for pair in pair_buttons]
-                    for pair_name in pair_names:
-                        pair_selector=map_node+' > .debug-tree-children > .debug-tree-node:has(> .debug-variable > button[aria-label="'+pair_name+'"])'
-                        reveal_debug_control(pair_selector+' > .debug-variable > button');click_debug_action(pair_selector+' > .debug-variable > button')
-                        wait_for(lambda:cmd("GET",f"/element/{element(pair_selector+' > .debug-variable > button')}/attribute/aria-expanded")=="true","pair visibly expanded")
-                        wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":pair_selector+' > .debug-tree-children > .debug-tree-node > .debug-variable > code'}))==2,"pair children loaded before next layout-dependent click")
-                    def map_values():
-                        nodes=cmd("POST","/elements",{"using":"css selector","value":map_node+' > .debug-tree-children > .debug-tree-node > .debug-tree-children > .debug-tree-node > .debug-variable > code'})
-                        return sorted(cmd("GET",f"/element/{item[EID]}/property/textContent") for item in nodes)
-                    wait_for(lambda:map_values()==["3","30","8","80"],"logical HashMap keys and values regardless of iteration order")
-                    reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' .debug-variable-meta, '+map_node+' .debug-field-label, '+map_node+' .debug-page-controls'}),"small map has no label decoration or redundant metadata/footer"
+                    assert "{...}" not in text(map_node),"a fully decoded scalar map must not render opaque tuple summaries"
+                    actual_rows=cmd("POST","/elements",{"using":"css selector","value":map_node+' .debug-map-row'})
+                    map_evidence={"type":cmd("GET",f"/element/{element(map_node+' > .debug-variable > button')}/attribute/title"),"pairs":map_rows(map_node),"fields":[]}
+                    for row in actual_rows:
+                        fields=cmd("POST",f"/element/{row[EID]}/elements",{"using":"css selector","value":"[data-map-field]"})
+                        map_evidence["fields"].append([cmd("GET",f"/element/{field[EID]}/attribute/data-source-name") for field in fields])
+                    (evidence/"rust-map-row-data.json").write_text(json.dumps(map_evidence,ensure_ascii=False))
+                    capture_map_rows(map_node,"rust-map-key-value-rows-native")
+                    inline_action=cmd("POST","/execute/sync",{"script":"""
+                      const node=document.querySelector(arguments[0]),header=node.querySelector(':scope > .debug-variable');
+                      const label=header.querySelector(':scope > button:first-child'),action=header.querySelector(':scope > .debug-raw-toggle');
+                      const a=action.getBoundingClientRect(),n=label.getBoundingClientRect();
+                      return {adjacent:action.previousElementSibling===label,label:n.toJSON(),action:a.toJSON(),gap:a.left-n.right};
+                    ""","args":[map_node]})
+                    (evidence/"rust-map-inline-action-layout.json").write_text(json.dumps(inline_action,ensure_ascii=False,indent=2))
+                    assert inline_action["adjacent"] and -1<=inline_action["gap"]<=12,"raw action belongs next to its variable name, not the scrollbar edge"
+                    click_debug_header_action(map_node+' > .debug-variable',map_node+' > .debug-variable > .debug-raw-toggle')
                     wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
                     reveal_debug_control(map_node+' button[aria-label="[raw]"]');click_debug_action(map_node+' button[aria-label="[raw]"]')
                     wait_for(lambda:element(map_node+' button[aria-label="base"]'),"raw map retains implementation fields")
-                    reveal_debug_control(map_node+' > .debug-tree-children > .debug-raw-toggle');click_debug_action(map_node+' > .debug-tree-children > .debug-raw-toggle')
+                    click_debug_header_action(map_node+' > .debug-variable',map_node+' > .debug-variable > .debug-raw-toggle')
                     assert not cmd("POST","/elements",{"using":"css selector","value":map_node+' button[aria-label="base"]'}),"hide raw removes internal layout"
+                    empty_node='.debug-tree-node:has(> .debug-variable > button[aria-label="empty"])'
+                    reveal_debug_control('.debug-variable > button[aria-label="empty"]');click_debug_action('.debug-variable > button[aria-label="empty"]')
+                    wait_for(lambda:"空" in text(empty_node),"empty HashMap has explicit empty state")
+                    words_node='.debug-tree-node:has(> .debug-variable > button[aria-label="words"])'
+                    reveal_debug_control('.debug-variable > button[aria-label="words"]');click_debug_action('.debug-variable > button[aria-label="words"]')
+                    wait_for(lambda:map_rows(words_node)==[['"hello"',"42"]],"String map key rendered alongside its actual value")
+                    capture_map_rows(words_node,"rust-string-map-rows-native")
+                    nested_node='.debug-tree-node:has(> .debug-variable > button[aria-label="nested"])'
+                    reveal_debug_control('.debug-variable > button[aria-label="nested"]');click_debug_action('.debug-variable > button[aria-label="nested"]')
+                    wait_for(lambda:len(map_rows(nested_node))==1,"nested map entry automatically decoded")
+                    nested_value=nested_node+' [data-map-field="value"] > .debug-tree-node > .debug-variable > button'
+                    reveal_debug_control(nested_value);click_debug_action(nested_value)
+                    def nested_values():
+                        nodes=cmd("POST","/elements",{"using":"css selector","value":nested_node+' [data-map-field="value"] .debug-tree-children > .debug-tree-node > .debug-variable > code'})
+                        return [cmd("GET",f"/element/{node[EID]}/property/textContent") for node in nodes]
+                    wait_for(lambda:nested_values()==["5","9"],"nested Vec map value expands into real indexed elements")
+                    capture_map_rows(nested_node,"rust-nested-map-rows-native",nested=True)
                     reveal_debug_control('.debug-variable > button[aria-label="set"]');click_debug_action('.debug-variable > button[aria-label="set"]')
                     set_node='.debug-tree-node:has(> .debug-variable > button[aria-label="set"])'
                     wait_for(lambda:len(cmd("POST","/elements",{"using":"css selector","value":set_node+' > .debug-tree-children > .debug-tree-node'}))==2,"HashSet logical elements")
                     screenshot("rust-logical-collections-native.png")
-                    (evidence/"RUST_COLLECTIONS_NATIVE_RESULT.txt").write_text("PASS: private Rust compiler visualizers expose two HashMap pairs with exact keys/values, two HashSet elements, default-hidden raw layout and explicit reversible raw view. Large-map retrieval and other platforms unverified.\\n")
+                    (evidence/"RUST_COLLECTIONS_NATIVE_RESULT.txt").write_text("PASS: one expansion renders HashMap<i32,usize> exact 3=30 and 8=80 associations in shared rows without tuple clicks or placeholder summaries; String keys, nested Vec values and empty maps verified; HashSet members and reversible raw view preserved. Linux native evidence only; Windows and macOS qualification remains separate.\\n")
 
                 screenshot(group+"-debug-native.png")
                 for _ in range(3):

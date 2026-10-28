@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 /** Isolated fixture: does not change existing tests' drafts or preferences. */
 export async function runReadingControlsUI(browser,fixtures,baseURL="http://127.0.0.1:5173") {
  const page=await browser.newPage({viewport:{width:1440,height:900}});
@@ -58,11 +59,40 @@ export async function runReadingControlsUI(browser,fixtures,baseURL="http://127.
   assert.deepEqual(await page.evaluate(()=>{const p=JSON.parse(localStorage.getItem("inkleet.reading.v1"));return {ratio:p.ratio,language:p.language};}),{ratio:44,language:"en"},"persisting another preference must not save a canceled preview ratio");
   assert.equal(Number(await splitter.getAttribute("aria-valuenow")),44);
   assert.equal(await splitter.evaluate(node=>node.hasPointerCapture(1)),false,"Escape releases the mouse pointer capture");
+  const resizeEvidence=[];
+  const recordResize=async phase=>{
+   resizeEvidence.push({phase,...await page.getByRole("separator",{name:"调整题面宽度",includeHidden:true}).evaluate(node=>({width:window.innerWidth,rootWidth:node.closest(".workbench").clientWidth,aria:Number(node.getAttribute("aria-valuenow")),stored:JSON.parse(localStorage.getItem("inkleet.reading.v1")).ratio,capture:node.hasPointerCapture(1),display:getComputedStyle(node).display}))});
+   await writeFile("evidence/reading-resize-state.json",JSON.stringify(resizeEvidence,null,2));
+  };
+  const waitViewport=async width=>{
+   await page.waitForFunction(width=>{
+    const node=document.querySelector('[aria-label="调整题面宽度"]');
+    return window.innerWidth===width && node && (getComputedStyle(node).display==="none")===(width<=760);
+   },width,{timeout:5000});
+  };
+  const assertCanceled=async phase=>{
+   try {
+    await waitViewport(1440);
+    await page.waitForFunction(()=>document.querySelector('[aria-label="调整题面宽度"]')?.getAttribute("aria-valuenow")==="44",null,{timeout:5000});
+    assert.equal(Number(await splitter.getAttribute("aria-valuenow")),44,"responsive transition cancels rather than persists a partial drag");
+    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem("inkleet.reading.v1")).ratio),44,"responsive cancellation must not persist the preview ratio");
+    assert.equal(await splitter.evaluate(node=>node.hasPointerCapture(1)),false,"responsive cancellation releases pointer capture");
+   } finally { await recordResize(phase); }
+  };
+  // Preserve the rapid transition: only wait for its outcome, never sleep or loosen 44.
   await page.mouse.move(box.x+4,box.y+100);await page.mouse.down();await page.mouse.move(box.x+80,box.y+100);
   await splitter.dispatchEvent("pointerdown",{pointerId:99,button:0,isPrimary:false,clientX:box.x+200});
   await page.setViewportSize({width:600,height:900});await page.mouse.up();
   await page.setViewportSize({width:1440,height:900});
-  assert.equal(Number(await splitter.getAttribute("aria-valuenow")),44,"responsive transition cancels rather than persists a partial drag");
+  await assertCanceled("rapid-transition-result");
+  // Separately establish that the actual responsive breakpoint is reached before release.
+  const responsiveBox=await splitter.boundingBox();
+  await page.mouse.move(responsiveBox.x+4,responsiveBox.y+100);await page.mouse.down();await page.mouse.move(responsiveBox.x+80,responsiveBox.y+100);
+  await recordResize("observed-transition-drag");
+  await page.setViewportSize({width:600,height:900});
+  try { await waitViewport(600); } finally { await recordResize("observed-mobile-before-release"); }
+  await page.mouse.up();await page.setViewportSize({width:1440,height:900});
+  await assertCanceled("observed-transition-result");
   assert.equal(await page.getByRole("button",{name:"上一题",exact:true}).isDisabled(),true);
   await page.getByRole("combobox",{name:"题面语言"}).selectOption("en");
   await page.getByRole("button",{name:"下一题",exact:true}).click();await page.getByText("暂无英文题面，显示中文题面。",{exact:true}).waitFor();
