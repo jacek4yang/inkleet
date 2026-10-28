@@ -96,9 +96,9 @@ export function VariableNode({ variable, token, read, depth = 0, ancestors = [],
         {expandable && <span className={open ? "debug-chevron open" : "debug-chevron"}><Icon name="chevron" /></span>}
         {cellLabel ? <code title={variable.value}>{summary}</code> : variable.name}
       </button>
+      {open && raw.length > 0 && <button type="button" className="debug-raw-toggle" aria-label={showRaw ? "隐藏内部结构" : "内部结构"} title={showRaw ? "隐藏内部结构" : "查看内部结构"} aria-pressed={showRaw} onClick={() => setShowRaw(value => !value)}>⋯</button>}
       {!cellLabel && <code title={variable.value}>{["map", "set", "sequence"].includes(kind) && placeholder && expandable ? "" : summary}</code>}
       {visibleType && <span className="debug-variable-type" title={variable.type}>{visibleType}</span>}
-      {open && raw.length > 0 && <button type="button" className="debug-raw-toggle" aria-label={showRaw ? "隐藏内部结构" : "内部结构"} title={showRaw ? "隐藏内部结构" : "查看内部结构"} aria-pressed={showRaw} onClick={() => setShowRaw(value => !value)}>⋯</button>}
       {needsDetails && (!cellLabel || expandable) && <button type="button" className="debug-value-details" aria-label={`查看变量详情 ${cellLabel ?? variable.name}`} aria-expanded={details} onClick={() => setDetails(value => !value)} title="展开完整返回值">…</button>}
     </div>
     {(cycle || depth >= 12 && variable.variablesReference > 0) && <small className="debug-node-limit">{cycle ? "重复引用 · 已停止展开" : "已达展开深度上限"}</small>}

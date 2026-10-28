@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {checkInlineRawAction} from "./debug-raw-action-ui.mjs";
 import {writeFile} from "node:fs/promises";
 export async function runDebugVisualsUI(testPage){
  const page=await testPage({viewport:{width:1400,height:1100}}),errors=[];
@@ -29,7 +30,7 @@ export async function runDebugVisualsUI(testPage){
       if(state.defer)return new Promise(resolve=>state.reply=()=>resolve({variables:[variable("late_child","stale")]}));
       return {variables:Array.from({length:Math.min(args.count??100,101-(args.start??0))},(_,i)=>variable(`[${i+(args.start??0)}]`,String(i+(args.start??0))))};
      }
-     if(args.reference===3)return {variables:[variable("[0]","{...}",4,"(i32, usize)"),variable("[1]","{...}",6,"(i32, usize)")]};
+     if(args.reference===3)return {variables:[variable("[0]","{...}",4,"(i32, usize)"),variable("[1]","{...}",6,"(i32, usize)"),variable("[raw]","{...}",99,"raw",{presentationHint:{attributes:["readOnly","virtual"]}})]};
      if(args.reference===4||args.reference===6){
       const variables=args.reference===4?[variable("0","3"),variable("1","30",0,"usize")]:[variable("0","8"),variable("1","80",0,"usize")];
       if(state.pairDefer)return new Promise(resolve=>state.pairReplies.push(()=>resolve({variables})));
@@ -39,7 +40,7 @@ export async function runDebugVisualsUI(testPage){
      if(args.reference===11)return{variables:[variable("0",'"hello"',0,"alloc::string::String"),variable("1","42")]};
      if(args.reference===20)return{variables:[variable("[0]","{...}",21,"(alloc::string::String, alloc::vec::Vec<i32>)")]};
      if(args.reference===21)return{variables:[variable("0",'"nums"',0,"alloc::string::String"),variable("1","size=2",22,"alloc::vec::Vec<i32>")]};
-     if(args.reference===22)return{variables:[variable("[0]","5"),variable("[1]","9")]};
+     if(args.reference===22)return{variables:[variable("[0]","5"),variable("[1]","9"),variable("[raw]","{...}",98,"raw",{presentationHint:{attributes:["readOnly","virtual"]}})]};
      if(args.reference===30)return{variables:[]};
      if(args.reference===40)return{variables:[variable("[0]","{...}",41,"(alloc::string::String, i32)")]};
      if(args.reference===41)return{variables:[variable("0",'"'+"long-key-".repeat(10)+'"',0,"alloc::string::String"),variable("1","7")]};
@@ -79,6 +80,7 @@ export async function runDebugVisualsUI(testPage){
  assert.equal((await map.innerText()).includes("键 → 值"),false);
  assert.equal((await map.innerText()).includes("{...}"),false);
  assert.deepEqual(await page.evaluate(()=>window.__visualTest.calls.filter(c=>c.reference===3).map(c=>[c.start,c.count])),[[0,20]]);
+ await checkInlineRawAction(page,map);
  const words=panel.locator('.debug-tree-node:has(> .debug-variable > button[aria-label="words"])');
  await words.getByRole("button",{name:"words",exact:true}).click();
  await words.locator('[data-map-field="key"]').getByText('"hello"',{exact:true}).waitFor();
@@ -88,6 +90,7 @@ export async function runDebugVisualsUI(testPage){
  await nested.getByRole("button",{name:"[0] 的值",exact:true}).click();
  await nested.getByRole("button",{name:"[1]",exact:true}).waitFor();
  assert.deepEqual(await nested.locator('[data-map-field="value"] .debug-tree-children > .debug-tree-node > .debug-variable > code').allTextContents(),["5","9"]);
+ await checkInlineRawAction(page,nested.locator('[data-map-field="value"] > .debug-tree-node'));
  const empty=panel.locator('.debug-tree-node:has(> .debug-variable > button[aria-label="empty"])');
  await empty.getByRole("button",{name:"empty",exact:true}).click();
  await empty.getByText("空",{exact:true}).waitFor();

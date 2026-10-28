@@ -1,5 +1,6 @@
 /** Render actual captured native CodeLLDB output, not an invented adapter fixture. */
 import assert from "node:assert/strict";
+import { checkInlineRawAction } from "./debug-raw-action-ui.mjs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -62,6 +63,7 @@ try {
     assert.equal(await page.locator('.debug-tree-children > .debug-raw-toggle').count(), 0, "raw inspection must not add permanent footer rows");
     const headers = await page.locator('.debug-variables > .debug-tree-node > .debug-variable > code').evaluateAll(cells => cells.map(cell => ({ text: cell.textContent, scrollWidth: cell.scrollWidth, clientWidth: cell.clientWidth })));
     for (const header of headers) assert.ok(header.scrollWidth <= header.clientWidth, `container summary must remain readable at ${width}px: ${header.text}`);
+    const rawAction = await checkInlineRawAction(page, root("map"));
     const panel = await page.locator('main.debug-panel').boundingBox();
     assert.ok(panel);
     const bounds = await page.locator('.debug-map-row [data-map-field] > .debug-tree-node > .debug-variable > button > code').evaluateAll(cells => cells.map(cell => {
@@ -71,7 +73,7 @@ try {
     assert.equal(bounds.length, 8);
     for (const cell of bounds) assert.ok(cell.width > 0 && cell.height > 0 && cell.x >= panel.x && cell.y >= 0 && cell.x + cell.width <= panel.x + panel.width && cell.y + cell.height <= 1000 && cell.scrollWidth <= cell.clientWidth, `every native key/value must be visibly readable at ${width}px, not clipped or off-screen`);
     await page.screenshot({ path: path.join(directory, `actual-dap-rendering${label}.png`) });
-    await writeFile(path.join(directory, `actual-dap-rendering${label}-bounds.json`), JSON.stringify({ panel, cells: bounds }, null, 2));
+    await writeFile(path.join(directory, `actual-dap-rendering${label}-bounds.json`), JSON.stringify({ panel, cells: bounds, rawAction }, null, 2));
   }
   assert.deepEqual(errors, []);
   await writeFile(path.join(directory, "UI_RESULT.txt"), "PASS: production VariableNode renders captured native CodeLLDB map keys and values in the same visible row after one expansion, plus empty map, HashSet and Vec. Chromium replay of actual adapter data; not a native WebView interaction test.\n");

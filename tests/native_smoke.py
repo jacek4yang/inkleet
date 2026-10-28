@@ -1563,6 +1563,14 @@ try:
                         map_evidence["fields"].append([cmd("GET",f"/element/{field[EID]}/attribute/data-source-name") for field in fields])
                     (evidence/"rust-map-row-data.json").write_text(json.dumps(map_evidence,ensure_ascii=False))
                     capture_map_rows(map_node,"rust-map-key-value-rows-native")
+                    inline_action=cmd("POST","/execute/sync",{"script":"""
+                      const node=document.querySelector(arguments[0]),header=node.querySelector(':scope > .debug-variable');
+                      const label=header.querySelector(':scope > button:first-child'),action=header.querySelector(':scope > .debug-raw-toggle');
+                      const a=action.getBoundingClientRect(),n=label.getBoundingClientRect();
+                      return {adjacent:action.previousElementSibling===label,label:n.toJSON(),action:a.toJSON(),gap:a.left-n.right};
+                    ""","args":[map_node]})
+                    (evidence/"rust-map-inline-action-layout.json").write_text(json.dumps(inline_action,ensure_ascii=False,indent=2))
+                    assert inline_action["adjacent"] and -1<=inline_action["gap"]<=12,"raw action belongs next to its variable name, not the scrollbar edge"
                     click_debug_header_action(map_node+' > .debug-variable',map_node+' > .debug-variable > .debug-raw-toggle')
                     wait_for(lambda:element(map_node+' button[aria-label="[raw]"]'),"explicit raw map view available")
                     reveal_debug_control(map_node+' button[aria-label="[raw]"]');click_debug_action(map_node+' button[aria-label="[raw]"]')
