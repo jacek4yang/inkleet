@@ -71,6 +71,14 @@ try {
     $value=[InkLeetCiToken]::Run($node,$script,(Resolve-Path -LiteralPath $Config).Path,$root,360000,$checkpoint)
     if (-not $value.exited -or $value.exit_code -ne 0 -or $value.timed_out -or -not $value.job_handle_closed -or -not $value.job_tree_empty) {throw "Standard child did not complete normally: exit $($value.exit_code)"}
     $state.result='PASS'
-} catch {$state.error=$_.Exception.Message;throw}
+} catch {
+    $state.error=$_.Exception.Message
+    $state.error_chain=@();$cause=$_.Exception
+    for($depth=0;$null -ne $cause -and $depth -lt 8;$depth++) {
+        $state.error_chain+=@([ordered]@{type=$cause.GetType().FullName;message=$cause.Message;hresult=$cause.HResult;native_error_code=$(if($cause -is [ComponentModel.Win32Exception]) {$cause.NativeErrorCode} else {$null})})
+        $cause=$cause.InnerException
+    }
+    throw
+}
 finally {$state | ConvertTo-Json -Depth 12 | Set-Content -Encoding utf8NoBOM $recordPath}
 [pscustomobject]$state

@@ -22,4 +22,14 @@ foreach($argument in @('','bad"quote',"bad`nline",'trailing\')){
 foreach($file in @('windows-ci-host.ps1','test-windows-installed.ps1')){
  $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot "../scripts/$file"),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){throw ($errors|Out-String)}
 }
-Write-Host 'PASS: C# compile, normal-host pure token/argument guards and PowerShell syntax (not native token execution)'
+# Execute the actual catch body with a synthetic nested Win32 error. This proves
+# wrapper messages cannot hide the native code; it does not call a native API.
+$tokens=$null;$errors=$null
+$hostAst=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/windows-ci-host.ps1'),[ref]$tokens,[ref]$errors)
+$captures=@($hostAst.FindAll({param($node)$node -is [System.Management.Automation.Language.CatchClauseAst] -and $node.Extent.Text.Contains('$state.error_chain')},$true))
+if($captures.Count -ne 1){throw 'Expected one native diagnostic catch body'}
+$capture=[scriptblock]::Create(($captures[0].Body.Statements | ForEach-Object {$_.Extent.Text}) -join "`n")
+$state=[ordered]@{};$rethrown=$false
+try {try {throw [Exception]::new('synthetic wrapper',[ComponentModel.Win32Exception]::new(1314,'synthetic native failure'))} catch {& $capture}} catch {$rethrown=$true}
+if(-not $rethrown -or $state.error_chain.Count -gt 8 -or @($state.error_chain | Where-Object {$_.native_error_code -eq 1314}).Count -ne 1){throw 'Native failure diagnostics were lost or error swallowed'}
+Write-Host 'PASS: C# compile, normal-host pure guards, nested native error capture and PowerShell syntax (not native token execution)'

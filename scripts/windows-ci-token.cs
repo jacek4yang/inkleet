@@ -57,7 +57,7 @@ public static class InkLeetCiToken {
   [DllImport("kernel32.dll",SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
   [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle,uint milliseconds);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
-  static void Check(bool ok,string action) { if(!ok)throw new Win32Exception(Marshal.GetLastWin32Error(),action); }
+  static void Check(bool ok,string action) { if(!ok){int code=Marshal.GetLastWin32Error();throw new Win32Exception(code,action+" [Win32 "+code+": "+new Win32Exception(code).Message+"]");} }
   static IntPtr Info(IntPtr token,int kind) {
     int size; GetTokenInformation(token,kind,IntPtr.Zero,0,out size);
     if(size<=0||size>1048576)throw new InvalidOperationException("Invalid token information size");
