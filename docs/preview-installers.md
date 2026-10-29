@@ -2,10 +2,10 @@
 
 The `Preview desktop installers` workflow creates four files for one source
 commit: an Intel macOS DMG, Windows x64 NSIS setup EXE and MSI, and Linux x86_64
-tar.gz. They are GitHub Actions artifacts, not a formal Release. The push trigger
-is restricted to `build/preview-installers`; manual dispatch is also declared.
-GitHub generally requires a manually dispatched workflow to exist on the default
-branch, so the narrow push trigger is the initial branch-only entry point.
+tar.gz. They are GitHub Actions artifacts, not a formal Release. The workflow runs
+on pull requests, pushes to `main`, and manual dispatch. Only successful runs for
+the exact final `main` push qualify for the separate verified-release publisher;
+PR synthetic merge builds and manual runs do not establish final release provenance.
 
 ## Identity and delivery
 
@@ -47,7 +47,12 @@ in evidence where applicable.
 The verifier checks the application is x64 PE32+, the setup executable is a valid
 PE container, and MSI metadata is readable with the expected product/version and
 `x64` Template Summary. NSIS's bootstrap stub may be 32-bit even though the app
-payload is x64. These checks do not install or launch either package.
+payload is x64. Those static checks alone do not install or launch either package.
+A separate mandatory step performs actual MSI installation, upgrade from the
+hash-verified public v0.1.1 MSI, installed WebView2 synthetic-data interaction and
+uninstall preservation checks. Publication requires its exact-run PASS report;
+see [Windows installed-release acceptance](WINDOWS_ACCEPTANCE.md). The NSIS
+installer is not covered by that MSI execution proof.
 
 Choose one installer format for a given installation. The unchanged WebView2
 installation default downloads its bootstrapper if WebView2 is absent, requiring
@@ -59,9 +64,10 @@ blocked, obtain an approved signed build or consult the administrator.
 Real-device acceptance remains: install one format on a clean test machine,
 launch, verify Chinese text and Settings search/save/reopen, save and reopen a
 sample note, restart to check persistence, then check uninstall behavior. Repeat
-with the other format in a clean environment. Upgrades and real account/online
-submission flows need their own tests. Windows GUI acceptance is not inferred
-from Linux browser or native results.
+with the other format in a clean environment. The CI upgrade covers only its
+explicit Windows Server 2025 synthetic-data scenario, not every user environment.
+Real account/online submission flows need separate authorization and tests.
+Windows GUI acceptance is not inferred from Linux browser or native results.
 
 ## Linux x86_64
 
@@ -97,6 +103,16 @@ identity/version, and checks every packaged Mach-O file is exclusively x86_64.
 It records deployment metadata and code-signing inspection. The DMG has no
 Developer ID signing or notarization. It may be blocked by normal macOS security;
 do not remove quarantine or disable system protections to bypass that block.
+
+DMG builds use the pinned CLI's `--verbose` logging and retain both output streams
+in `evidence/macos-intel/DMG_BUILD.log`, including on failure. Tauri 2.12.0's
+[subprocess helper](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.0/crates/tauri-bundler/src/utils/mod.rs)
+logs the bundle script's output at Debug; its default Info-level error alone does
+not identify which disk-image operation failed. The generated `bundle_dmg.sh` is
+also retained as evidence, not rerun or modified. The logging pipeline preserves
+the build's nonzero exit; it does not retry, change signing/security policy, or
+replace the mandatory DMG verification. An orphan disk-image process or elapsed
+time alone is not a root-cause diagnosis.
 
 The configured minimum OS is only metadata. It does not prove that the bundled
 frontend, system WebKit or downloaded language tools work on that version. No

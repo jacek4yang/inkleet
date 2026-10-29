@@ -11,7 +11,6 @@ if ($LASTEXITCODE -ne 0 -or $commit -ne $env:GITHUB_SHA) { throw 'Checkout/sourc
 $evidence = Join-Path $root 'evidence/windows-x64/installed'
 New-Item -ItemType Directory -Force $evidence | Out-Null
 $temporary = Join-Path $env:RUNNER_TEMP ('InkLeet MSI acceptance ' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory $temporary | Out-Null
 $installDir = Join-Path $temporary 'Installed app'
 $appData = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'top.jacek.inkleet'
 $appCache = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'top.jacek.inkleet'
@@ -21,6 +20,7 @@ $report = [ordered]@{
     stages = [System.Collections.Generic.List[string]]::new()
     ui = [ordered]@{}
     payloads = [ordered]@{}
+    hosts = [ordered]@{}
     cleanup_errors = [System.Collections.Generic.List[string]]::new()
     scope = 'Unattended MSI fresh install, verified v0.1.1 upgrade, uninstall and real installed WebView2 synthetic-data UI. No mocked IPC.'
     not_verified = @('interactive MSI/NSIS installer', 'physical desktop/IME', 'SmartScreen reputation', 'signing', 'real account or online judge', 'managed LSP/tool installation')
@@ -112,13 +112,21 @@ function Assert-InstalledPayload([string] $Stage, [string] $Built) {
     if ($LASTEXITCODE -ne 0) { throw "$Stage exact MSI payload verification failed; see hashes, byte sizes and paths" }
     if ($report.payloads[$Stage].result -ne 'PASS') { throw 'Missing successful payload proof' }
 }
+function Standard-Node([string] $Phase, $Configuration) {
+    $Configuration.userSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $Configuration.powershell=(Get-Process -Id $PID).Path
+    $Configuration.nodeExecutable=(Get-Command node -CommandType Application).Source
+    $Configuration.tokenInspector=Join-Path $root 'scripts/windows-ci-host.ps1'
+    $configPath=Join-Path $evidence "$Phase-config.json"
+    $Configuration | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8NoBOM $configPath
+    $hostResult=& ./scripts/windows-ci-host.ps1 -Config $configPath
+    $report.hosts[$Phase]=$hostResult
+    if ($hostResult.result -ne 'PASS') {throw "$Phase standard-host launch did not pass"}
+}
 function Ui-Probe([string] $Phase, [string] $ExpectedVersion, [string] $ApplicationSource) {
     $binary = Installed-Binary
     $config = [ordered]@{phase=$Phase; binary=$binary; installDir=$installDir; appData=$appData; appCache=$appCache; evidence=$evidence; temporary=$temporary; version=$ExpectedVersion; harnessCommit=$commit; applicationSourceCommit=$ApplicationSource}
-    $configPath = Join-Path $temporary "$Phase.json"
-    $config | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8NoBOM $configPath
-    & node tests/windows-installed-ui.mjs $configPath
-    if ($LASTEXITCODE -ne 0) { throw "$Phase installed WebView2 probe failed (no browser/mock fallback)" }
+    Standard-Node $Phase $config
     $result = Get-Content -Raw (Join-Path $evidence "$Phase-ui.json") | ConvertFrom-Json
     if ($result.result -ne 'PASS' -or $result.nativeVersion -ne $ExpectedVersion -or $result.harnessCommit -ne $commit -or $result.applicationSourceCommit -ne $ApplicationSource -or -not $result.normalClose) { throw "$Phase UI evidence is incomplete" }
     $report.ui[$Phase] = $result
@@ -141,6 +149,14 @@ try {
     if ($manifest.repository -ne 'jacek4yang/inkleet' -or $manifest.tag -ne 'v0.1.1' -or $manifest.source_commit -ne 'fbacb2041b83232a30a791965c58d93a7556a4ff') { throw 'Unexpected prior-release provenance' }
     $assets = @($manifest.artifacts.windows.assets | Where-Object { $_.name -match '^[A-Za-z0-9._-]+\.msi$' })
     if ($assets.Count -ne 1 -or $assets[0].sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Ambiguous prior MSI asset' }
+    $preparation=[ordered]@{phase='prepare';appData=$appData;appCache=$appCache;evidence=$evidence;temporary=$temporary;harnessCommit=$commit}
+    Standard-Node 'prepare' $preparation
+    $report.preflight.owned_paths=@()
+    foreach ($path in @($temporary,$appData,$appCache,(Join-Path $temporary 'WebView2 synthetic profile'))) {
+        $owner=(Get-Acl -LiteralPath $path).GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($owner -cne $preparation.userSid) {throw "Synthetic path not owned by current standard user: $path ($owner)"}
+        $report.preflight.owned_paths+=@([ordered]@{path=$path;owner_sid=$owner})
+    }
     $priorPath = Join-Path $temporary $assets[0].name
     $priorUrl = "https://github.com/jacek4yang/inkleet/releases/download/v0.1.1/$($assets[0].name)"
     Invoke-WebRequest -Uri $priorUrl -OutFile $priorPath
@@ -149,13 +165,6 @@ try {
     if ($legacy.version -ne '0.1.1' -or [version]$version -le [version]$legacy.version -or $legacy.upgradeCode -ne $current.upgradeCode -or $legacy.productCode -eq $current.productCode -or (Product-Installed $legacy.productCode)) { throw 'MSI upgrade identity/version is incompatible' }
     $report.prior = [ordered]@{url=$priorUrl; sha256=$assets[0].sha256; bytes=$assets[0].bytes; source_commit=$manifest.source_commit; version=$legacy.version}
     $report.packages = [ordered]@{current=$current; legacy=$legacy}
-    foreach ($path in @($appData, $appCache) | Select-Object -Unique) {
-        New-Item -ItemType Directory -Path $path | Out-Null
-        $commit | Set-Content -Encoding utf8NoBOM (Join-Path $path '.inkleet-ci-owned')
-    }
-    # Tauri uses Windows known-folder paths, not fake APPDATA environment overrides.
-    Copy-Item 'tests/fixtures/public-questions.json' (Join-Path $appCache 'public-questions.json')
-    '{"version":1,"formatOnSave":false,"overrides":{}}' | Set-Content -Encoding utf8NoBOM (Join-Path $appData 'editor-settings.json')
     Install-Owned $current 'fresh-install'
     if (-not (Product-Installed $current.productCode)) { throw 'Fresh MSI did not register the product' }
     $built = 'src-tauri/target/x86_64-pc-windows-msvc/release/inkleet.exe'

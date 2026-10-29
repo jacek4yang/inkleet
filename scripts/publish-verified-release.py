@@ -116,11 +116,107 @@ def validate_gate(m, name, run, jobs, qualification_tree):
         require(len(matches) == 1 and matches[0]['run_id'] == run['id'] and matches[0]['conclusion'] == 'success' and matches[0]['status'] == 'completed', 'Required job missing, skipped or unsuccessful: ' + expected)
 
 
+def validate_windows_token(value, sid=None, session=None, standard=False):
+    require(isinstance(value, dict), 'Missing observed Windows token')
+    user = value.get('user_sid')
+    require(isinstance(user, str) and re.fullmatch(r'S-1-5-21-[0-9]+-[0-9]+-[0-9]+-[0-9]+', user), 'Invalid Windows user identity')
+    require(sid is None or user == sid, 'Windows child changed user')
+    require(type(value.get('session_id')) is int and value['session_id'] >= 0 and (session is None or value['session_id'] == session), 'Windows child changed session')
+    require(positive(value.get('process_id')) and type(value.get('integrity_rid')) is int, 'Invalid Windows process token identity')
+    require(all(type(value.get(key)) is bool for key in ('elevated', 'admin_enabled', 'sandbox_inert')) and value['sandbox_inert'] is False, 'Invalid or security-inert Windows token')
+    privileges = value.get('enabled_privileges')
+    require(isinstance(privileges, list) and len(privileges) <= 128 and all(isinstance(x, str) and x for x in privileges) and len(set(privileges)) == len(privileges), 'Invalid Windows privilege evidence')
+    if standard:
+        require(value.get('owner_sid') == user and value['integrity_rid'] == 8192 and value['elevated'] is False and value['admin_enabled'] is False, 'Windows UI host is not same-user standard medium integrity')
+        require(set(privileges) <= {'SeChangeNotifyPrivilege'}, 'Unexpected enabled standard-host privilege')
+    return user, value['session_id']
+
+
+def windows_owned_paths(values, sid):
+    require(isinstance(values, list) and len(values) == 4, 'Missing Windows synthetic path owners')
+    result = {}
+    for value in values:
+        require(isinstance(value, dict) and value.get('owner_sid') == sid, 'Synthetic path is not owned by the same user')
+        path = value.get('path')
+        require(isinstance(path, str) and 0 < len(path) <= 4096 and re.match(r'^[A-Za-z]:[\\/]', path) and '..' not in pathlib.PureWindowsPath(path).parts, 'Invalid owned Windows path')
+        key = str(pathlib.PureWindowsPath(path)).casefold()
+        require(key not in result, 'Duplicate owned Windows path')
+        result[key] = sid
+    return result
+
+
+def validate_windows_hosts(m, report):
+    hosts = report.get('hosts')
+    require(isinstance(hosts, dict) and set(hosts) == {'prepare', 'fresh', 'legacy', 'upgraded'}, 'Missing standard Windows host phases')
+    identity = None
+    for phase, host in hosts.items():
+        require(isinstance(host, dict) and host.get('result') == 'PASS' and host.get('phase') == phase and host.get('harnessCommit') == m['source_commit'], 'Windows host source/phase did not pass')
+        run = host.get('run')
+        require(isinstance(run, dict) and run.get('exited') is True and type(run.get('exit_code')) is int and run['exit_code'] == 0 and run.get('timed_out') is False and run.get('job_handle_closed') is True and run.get('job_tree_empty') is True, 'Windows host exit, empty owned job or handle closure incomplete')
+        parent = run.get('parent')
+        current = validate_windows_token(parent)
+        require(identity is None or current == identity, 'Windows host user/session changed between phases')
+        identity = current
+        validate_windows_token(run.get('child'), *identity, standard=True)
+        require(run['child']['process_id'] != parent['process_id'], 'Missing distinct Windows child process')
+        if run.get('mode') == 'already-standard-no-token-change':
+            validate_windows_token(parent, *identity, standard=True)
+        else:
+            require(run.get('mode') == 'same-user-LUA-medium' and parent['integrity_rid'] == 12288 and parent['elevated'] is True and parent['admin_enabled'] is True, 'Unexpected Windows host reduction or unverified parent token')
+    preflight = report.get('preflight')
+    require(isinstance(preflight, dict) and preflight.get('related_product_codes') == [], 'Windows pre-existing product refusal not established')
+    owners = windows_owned_paths(preflight.get('owned_paths'), identity[0])
+    return hosts, identity, owners
+
+
+def validate_windows_launch(launch, attempt, host, identity, owners, installed_path):
+    require(isinstance(launch, dict) and isinstance(attempt, dict), 'Invalid Windows launch records')
+    pid, node_pid, port = launch.get('pid'), launch.get('nodePid'), launch.get('port')
+    require(positive(pid) and node_pid == host['run']['child']['process_id'] and type(port) is int and 1 <= port <= 65535, 'Windows launch process/port ownership mismatch')
+    observed = launch.get('observedHost')
+    require(isinstance(observed, dict) and observed.get('result') == 'PASS', 'Missing observed standard app host')
+    for key in ('inspector_token', 'node_token', 'app_token'):
+        validate_windows_token(observed.get(key), *identity, standard=True)
+    require(observed['node_token']['process_id'] == node_pid and observed['app_token']['process_id'] == pid, 'Observed token belongs to another process')
+    require(windows_owned_paths(observed.get('owners'), identity[0]) == owners, 'Observed synthetic path ownership changed')
+    processes = observed.get('processes')
+    require(isinstance(processes, list) and 1 <= len(processes) <= 128, 'Missing owned process tree')
+    by_pid = {}
+    for process in processes:
+        require(isinstance(process, dict) and positive(process.get('pid')) and positive(process.get('parent_pid')) and type(process.get('session_id')) is int and process['session_id'] == identity[1] and process['pid'] not in by_pid and type(process.get('confirmed_exited')) is bool, 'Invalid owned process identity/session')
+        by_pid[process['pid']] = process
+    require(pid in by_pid and by_pid[pid]['parent_pid'] == node_pid and by_pid[pid]['confirmed_exited'] is False, 'Installed app is not the recorded Node child')
+    app = by_pid[pid]
+    require(isinstance(app.get('path'), str) and isinstance(app.get('name'), str) and app['name'].casefold() == 'inkleet.exe' and pathlib.PureWindowsPath(app['path']) == pathlib.PureWindowsPath(installed_path), 'Observed app is not the exact MSI payload location')
+    for process_id in by_pid:
+        seen = set()
+        while process_id != pid:
+            require(process_id in by_pid and process_id not in seen, 'Foreign or cyclic Windows process ancestry')
+            seen.add(process_id)
+            process_id = by_pid[process_id]['parent_pid']
+    require(any(p['confirmed_exited'] is False and p.get('name') == 'msedgewebview2.exe' and isinstance(p.get('webview_file_version'), str) and p['webview_file_version'] for p in processes), 'Missing observed WebView2 runtime version')
+    listeners = observed.get('listeners')
+    require(isinstance(listeners, list) and 1 <= len(listeners) <= 8, 'Missing owned loopback listener')
+    for listener in listeners:
+        require(isinstance(listener, dict) and listener.get('owned') is True and positive(listener.get('pid')) and listener['pid'] in by_pid and by_pid[listener['pid']]['confirmed_exited'] is False and type(listener.get('port')) is int and listener['port'] == port and listener.get('address') in ('127.0.0.1', '::1'), 'CDP is not exclusively owned and loopback-bound')
+    observed_pids = set(by_pid)
+    for key in ('initialObservedPids', 'closingObservedPids'):
+        snapshot = launch.get(key)
+        require(isinstance(snapshot, list) and 1 <= len(snapshot) <= 128 and all(positive(x) for x in snapshot) and len(set(snapshot)) == len(snapshot) and pid in snapshot, 'Missing initial/pre-close owned process observations')
+        observed_pids.update(snapshot)
+    final_pids = launch.get('finalObservedPids')
+    require(isinstance(final_pids, list) and 1 <= len(final_pids) <= 256 and all(positive(x) for x in final_pids) and final_pids == sorted(observed_pids), 'Missing exact union of owned process observations')
+    teardown = launch.get('teardown')
+    require(isinstance(teardown, dict) and teardown.get('result') == 'PASS' and teardown.get('app_pid') == pid and teardown.get('port') == port and teardown.get('app_absent') is True and teardown.get('listener_absent') is True and teardown.get('owned_processes_absent') is True and isinstance(teardown.get('owned_pids'), list) and teardown['owned_pids'] == final_pids, 'Actual app/listener/descendant teardown not observed')
+    require(attempt.get('pid') == pid and attempt.get('node_pid') == node_pid and attempt.get('port') == port and attempt.get('diagnostics') == observed and attempt.get('exited') is True and type(attempt.get('exit_code')) is int and attempt['exit_code'] == 0, 'Attempt did not observe the same app exiting normally')
+
+
 def validate_windows_install(m, metadata, report):
     require(isinstance(report, dict) and report.get('result') == 'PASS', 'Windows installed MSI acceptance missing or failed')
     require(report.get('source_commit') == m['source_commit'] and report.get('version') == VERSION and report.get('runner') == 'windows-2025', 'Windows installed source/version/runner mismatch')
     require(report.get('msi_uncertain') is False and report.get('cleanup_errors') == [], 'Windows installer outcome or cleanup uncertain')
     require(report.get('stages') == WINDOWS_STAGES, 'Incomplete Windows install/upgrade/uninstall stages')
+    hosts, identity, owners = validate_windows_hosts(m, report)
     payloads = report.get('payloads', {})
     require(isinstance(payloads, dict) and set(payloads) == {'fresh', 'upgraded'}, 'Missing exact installed MSI payload proofs')
     for value in payloads.values():
@@ -149,7 +245,11 @@ def validate_windows_install(m, metadata, report):
         require(value.get('assertions') == WINDOWS_UI_ASSERTIONS[phase], 'Missing Windows native assertions')
         launches = value.get('launches', [])
         require(isinstance(launches, list) and len(launches) == (2 if phase == 'upgraded' else 1), 'Missing Windows native restart evidence')
-        for launch in launches:
+        attempts = value.get('launch_attempts')
+        require(isinstance(attempts, list) and len(attempts) == len(launches), 'Missing or extra installed launch attempts')
+        require('cleanupError' not in value, 'Windows UI cleanup failed')
+        for launch, attempt in zip(launches, attempts):
+            validate_windows_launch(launch, attempt, hosts[phase], identity, owners, payloads['fresh']['installed_path'])
             require(positive(launch.get('pid')) and launch.get('version') == expected_version and re.fullmatch(r'https?://tauri\.localhost(?:/.*)?', launch.get('url', '')) and isinstance(launch.get('webviewVersion'), str) and launch['webviewVersion'], 'Invalid installed WebView2 launch evidence')
     packages = report.get('packages', {})
     require(isinstance(packages, dict), 'Invalid installed MSI package records')

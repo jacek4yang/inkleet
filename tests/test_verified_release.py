@@ -29,15 +29,31 @@ def manifest():
     return m
 
 
+def windows_token(pid, elevated=False):
+    sid='S-1-5-21-100-200-300-1001'
+    return {'user_sid':sid,'owner_sid':'S-1-5-32-544' if elevated else sid,'integrity_rid':12288 if elevated else 8192,'elevated':elevated,'admin_enabled':elevated,'sandbox_inert':False,'enabled_privileges':['SeChangeNotifyPrivilege'],'process_id':pid,'session_id':1}
+
+
 def windows_acceptance():
     code='{11111111-1111-1111-1111-111111111111}'; old='{22222222-2222-2222-2222-222222222222}'; upgrade='{33333333-3333-3333-3333-333333333333}'
     prior_source='fbacb2041b83232a30a791965c58d93a7556a4ff'
+    sid=windows_token(1)['user_sid']
+    owners=[{'path':path,'owner_sid':sid} for path in (r'C:\owned',r'C:\data',r'C:\cache',r'C:\owned\WebView2 synthetic profile')]
+    hosts={}
+    for index,phase in enumerate(('prepare','fresh','legacy','upgraded')):
+        hosts[phase]={'result':'PASS','phase':phase,'harnessCommit':SOURCE,'run':{'parent':windows_token(100,True),'child':windows_token(110+index),'mode':'same-user-LUA-medium','exited':True,'exit_code':0,'timed_out':False,'job_handle_closed':True,'job_tree_empty':True}}
     ui={}
-    for phase in ('fresh','legacy','upgraded'):
+    for index,phase in enumerate(('fresh','legacy','upgraded')):
         version='0.1.1' if phase=='legacy' else p.VERSION
-        ui[phase]={'result':'PASS','phase':phase,'harnessCommit':SOURCE,'applicationSourceCommit':prior_source if phase=='legacy' else SOURCE,'nativeVersion':version,'normalClose':True,'assertions':list(p.WINDOWS_UI_ASSERTIONS[phase]),'launches':[{'pid':10+i,'version':version,'url':'http://tauri.localhost/','webviewVersion':'WebView2/test'} for i in range(2 if phase=='upgraded' else 1)]}
+        launches=[]; attempts=[]; node=hosts[phase]['run']['child']['process_id']
+        for i in range(2 if phase=='upgraded' else 1):
+            pid=200+index*10+i; browser=pid+100; port=20000+pid
+            observed={'result':'PASS','inspector_token':windows_token(500+pid),'node_token':windows_token(node),'app_token':windows_token(pid),'owners':copy.deepcopy(owners),'processes':[{'pid':pid,'parent_pid':node,'session_id':1,'confirmed_exited':False,'name':'inkleet.exe','path':r'C:\owned\inkleet.exe','webview_file_version':None},{'pid':browser,'parent_pid':pid,'session_id':1,'confirmed_exited':False,'name':'msedgewebview2.exe','path':r'C:\runtime\msedgewebview2.exe','webview_file_version':'150.0.0.1'}],'listeners':[{'address':'127.0.0.1','port':port,'pid':browser,'owned':True}]}
+            launches.append({'pid':pid,'nodePid':node,'port':port,'version':version,'url':'http://tauri.localhost/','webviewVersion':'WebView2/test','observedHost':observed,'initialObservedPids':[pid,browser],'closingObservedPids':[pid,browser],'finalObservedPids':[pid,browser],'teardown':{'result':'PASS','app_pid':pid,'port':port,'app_absent':True,'owned_processes_absent':True,'owned_pids':[pid,browser],'listener_absent':True}})
+            attempts.append({'pid':pid,'node_pid':node,'port':port,'diagnostics':copy.deepcopy(observed),'exited':True,'exit_code':0})
+        ui[phase]={'result':'PASS','phase':phase,'harnessCommit':SOURCE,'applicationSourceCommit':prior_source if phase=='legacy' else SOURCE,'nativeVersion':version,'normalClose':True,'assertions':list(p.WINDOWS_UI_ASSERTIONS[phase]),'launches':launches,'launch_attempts':attempts}
     payload={'result':'PASS','rule':p.WINDOWS_PAYLOAD_RULE,'built_sha256':'d'*64,'expected_sha256':'e'*64,'installed_sha256':'e'*64,'built_bytes':128,'expected_bytes':128,'installed_bytes':128,'marker_offset':16,'marker_count':1,'marker_bytes':27,'built_path':r'C:\build\inkleet.exe','installed_path':r'C:\owned\inkleet.exe','expected_path':None,'expected_origin':p.WINDOWS_PAYLOAD_ORIGIN}
-    return {'payloads':{'fresh':copy.deepcopy(payload),'upgraded':copy.deepcopy(payload)},'result':'PASS','source_commit':SOURCE,'version':p.VERSION,'runner':'windows-2025','msi_uncertain':False,'cleanup_errors':[],'stages':list(p.WINDOWS_STAGES),'prior':{'url':f'https://github.com/{p.REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi','sha256':'1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0','bytes':6885376,'source_commit':prior_source,'version':'0.1.1'},'ui':ui,'packages':{'current':{'productCode':code,'upgradeCode':upgrade,'version':p.VERSION,'name':'InkLeet'},'legacy':{'productCode':old,'upgradeCode':upgrade,'version':'0.1.1','name':'InkLeet'}}}
+    return {'hosts':hosts,'preflight':{'related_product_codes':[],'owned_paths':owners},'payloads':{'fresh':copy.deepcopy(payload),'upgraded':copy.deepcopy(payload)},'result':'PASS','source_commit':SOURCE,'version':p.VERSION,'runner':'windows-2025','msi_uncertain':False,'cleanup_errors':[],'stages':list(p.WINDOWS_STAGES),'prior':{'url':f'https://github.com/{p.REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi','sha256':'1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0','bytes':6885376,'source_commit':prior_source,'version':'0.1.1'},'ui':ui,'packages':{'current':{'productCode':code,'upgradeCode':upgrade,'version':p.VERSION,'name':'InkLeet'},'legacy':{'productCode':old,'upgradeCode':upgrade,'version':'0.1.1','name':'InkLeet'}}}
 
 
 def archive(m, platform='windows', extra=None, metadata_changes=None, source=SOURCE):
@@ -194,6 +210,74 @@ class PublisherTest(unittest.TestCase):
 class WindowsAcceptanceTest(unittest.TestCase):
     def metadata(self):return {'app_pe':{'bytes':128},'msi':{'product_code':'{11111111-1111-1111-1111-111111111111}'}}
     def test_valid_installed_native_evidence(self):p.validate_windows_install(manifest(),self.metadata(),windows_acceptance())
+    def reject(self, mutate):
+        report=windows_acceptance();mutate(report)
+        with self.assertRaises(ValueError):p.validate_windows_install(manifest(),self.metadata(),report)
+    def reject_observation(self, mutate):
+        def change(report):
+            mutate(report)
+            # Keep duplicated evidence consistent so each negative reaches its
+            # intended security/provenance guard, not the final copy comparison.
+            for phase in report['ui'].values():
+                for launch, attempt in zip(phase['launches'], phase['launch_attempts']):
+                    attempt['diagnostics']=copy.deepcopy(launch['observedHost'])
+        self.reject(change)
+    def test_already_standard_host_needs_no_token_change(self):
+        report=windows_acceptance()
+        for host in report['hosts'].values():
+            host['run']['parent']=windows_token(100);host['run']['mode']='already-standard-no-token-change'
+        p.validate_windows_install(manifest(),self.metadata(),report)
+    def test_all_owned_host_phases_source_and_exit_required(self):
+        for phase in ('prepare','fresh','legacy','upgraded'):
+            self.reject(lambda r:r['hosts'].pop(phase))
+        for change in ({'result':'FAIL'},{'harnessCommit':'f'*40},{'phase':'other'}):
+            self.reject(lambda r:r['hosts']['fresh'].update(change))
+        for change in ({'exited':False},{'exit_code':1},{'exit_code':False},{'timed_out':True},{'job_handle_closed':False},{'job_tree_empty':False},{'mode':'force-standard'}):
+            self.reject(lambda r:r['hosts']['fresh']['run'].update(change))
+    def test_standard_token_requires_observed_identity_security_and_session(self):
+        for change in ({'user_sid':'S-1-5-21-1-2-3-4'},{'owner_sid':'S-1-5-32-544'},{'session_id':2},{'session_id':True},{'integrity_rid':12288},{'elevated':True},{'admin_enabled':True},{'sandbox_inert':True},{'elevated':0},{'enabled_privileges':['SeDebugPrivilege']},{'enabled_privileges':None},{'process_id':0}):
+            with self.subTest(change=change):self.reject(lambda r:r['hosts']['fresh']['run']['child'].update(change))
+        self.reject(lambda r:r['hosts']['fresh']['run'].update(mode='already-standard-no-token-change'))
+        self.reject(lambda r:r['hosts']['fresh']['run']['parent'].update(integrity_rid=8192))
+        self.reject(lambda r:r['hosts']['fresh']['run']['parent'].update(sandbox_inert=True))
+        self.reject(lambda r:r['hosts']['fresh']['run']['parent'].update(session_id=2))
+    def test_path_ownership_and_preexisting_product_refusal_required(self):
+        for mutate in (lambda r:r.pop('preflight'),lambda r:r['preflight'].update(related_product_codes=['existing']),lambda r:r['preflight']['owned_paths'].pop(),lambda r:r['preflight']['owned_paths'][0].update(owner_sid='S-1-5-32-544'),lambda r:r['preflight']['owned_paths'][0].update(path=r'C:\owned\..\foreign'),lambda r:r['preflight']['owned_paths'][0].update(path=r'\\server\share'),lambda r:r['preflight']['owned_paths'].__setitem__(1,copy.deepcopy(r['preflight']['owned_paths'][0]))):
+            self.reject(mutate)
+    def test_launch_tokens_must_match_host_and_exact_app(self):
+        for key in ('inspector_token','node_token','app_token'):
+            self.reject_observation(lambda r:r['ui']['fresh']['launches'][0]['observedHost'][key].update(elevated=True))
+        for change in ({'nodePid':999},{'pid':999},{'port':0},{'port':True}):
+            self.reject(lambda r:r['ui']['fresh']['launches'][0].update(change))
+        self.reject_observation(lambda r:r['ui']['fresh']['launches'][0]['observedHost']['app_token'].update(process_id=999))
+        self.reject_observation(lambda r:r['ui']['fresh']['launches'][0]['observedHost']['owners'][0].update(path=r'C:\foreign'))
+    def test_cdp_requires_owned_loopback_listener_and_runtime(self):
+        for change in ({'address':'0.0.0.0'},{'address':'::'},{'pid':999},{'owned':False},{'port':1234}):
+            self.reject_observation(lambda r:r['ui']['fresh']['launches'][0]['observedHost']['listeners'][0].update(change))
+        for key in ('listeners','processes'):
+            self.reject_observation(lambda r:r['ui']['fresh']['launches'][0]['observedHost'].update({key:[]}))
+        self.reject_observation(lambda r:r['ui']['fresh']['launches'][0]['observedHost']['processes'][1].update(webview_file_version=None))
+    def test_foreign_cyclic_or_duplicate_descendants_fail(self):
+        for change in ({'parent_pid':999},{'parent_pid':300},{'session_id':2},{'session_id':True},{'confirmed_exited':None},{'confirmed_exited':True},{'pid':200}):
+            self.reject_observation(lambda r:r['ui']['fresh']['launches'][0]['observedHost']['processes'][1].update(change))
+        self.reject_observation(lambda r:r['ui']['fresh']['launches'][0]['observedHost']['processes'][0].update(parent_pid=999))
+    def test_running_app_path_is_bound_to_verified_installed_payload(self):
+        for phase in ('fresh','legacy','upgraded'):
+            for change in ({'path':r'C:\foreign\inkleet.exe'},{'path':None},{'name':'other.exe'}):
+                self.reject_observation(lambda r:r['ui'][phase]['launches'][0]['observedHost']['processes'][0].update(change))
+    def test_actual_app_listener_and_descendant_teardown_required(self):
+        for change in ({'result':'FAIL'},{'app_absent':False},{'listener_absent':False},{'owned_processes_absent':False},{'app_pid':999},{'port':1},{'owned_pids':[200]}):
+            self.reject(lambda r:r['ui']['fresh']['launches'][0]['teardown'].update(change))
+        self.reject(lambda r:r['ui']['fresh']['launches'][0].update(initialObservedPids=[]))
+        self.reject(lambda r:r['ui']['fresh']['launches'][0].update(closingObservedPids=[200,300,400]))
+        for pids in ([],[200],[200,200,300],[200,True,300],[300,200]):
+            self.reject(lambda r:r['ui']['fresh']['launches'][0].update(finalObservedPids=pids))
+    def test_attempts_cannot_hide_failed_retries_or_uncertain_close(self):
+        for change in ({'pid':999},{'node_pid':999},{'port':1},{'exited':False},{'exit_code':1},{'exit_code':False},{'diagnostics':None}):
+            self.reject(lambda r:r['ui']['fresh']['launch_attempts'][0].update(change))
+        self.reject(lambda r:r['ui']['fresh'].update(launch_attempts=[]))
+        self.reject(lambda r:r['ui']['fresh']['launch_attempts'].append(copy.deepcopy(r['ui']['fresh']['launch_attempts'][0])))
+        self.reject(lambda r:r['ui']['fresh'].update(cleanupError='failed'))
     def test_expected_stage_and_assertion_labels_match_actual_producers(self):
         root=pathlib.Path(__file__).parents[1]
         ps=(root/'scripts/test-windows-installed.ps1').read_text()

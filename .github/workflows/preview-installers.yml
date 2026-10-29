@@ -121,6 +121,8 @@ jobs:
         run: |
           git diff --exit-code -- package-lock.json src-tauri/Cargo.lock crates/managed-env/Cargo.lock
           if ($LASTEXITCODE -ne 0) { throw 'Dependency lockfiles changed during the build' }
+          ./tests/test-windows-ci-token.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Standard-host control-flow self-test failed' }
           ./tests/test-windows-installed-safety.ps1
           if ($LASTEXITCODE -ne 0) { throw 'MSI lifecycle ownership self-test failed' }
           ./scripts/verify-windows-packages.ps1 -TestOnly
@@ -328,7 +330,11 @@ jobs:
           set -o pipefail
           cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-apple-darwin session_store::native_tests::native_store_restart_roundtrip -- --ignored --exact --nocapture | tee evidence/macos-intel/credential-store.txt
       - name: Build unsigned Intel test DMG
-        run: npm run tauri -- build --ci --no-sign --target x86_64-apple-darwin --bundles dmg -- --locked
+        run: |
+          set -euo pipefail
+          # Tauri 2.12.0 logs bundle_dmg.sh stdout/stderr only at Debug (--verbose).
+          # Keep both streams even on failure; tee must not turn a failed build green.
+          npm run tauri -- build --verbose --ci --no-sign --target x86_64-apple-darwin --bundles dmg -- --locked 2>&1 | tee evidence/macos-intel/DMG_BUILD.log
       - name: Verify the application inside the DMG
         run: |
           git diff --exit-code -- package-lock.json src-tauri/Cargo.lock crates/managed-env/Cargo.lock
@@ -348,6 +354,7 @@ jobs:
             evidence/macos-intel/
             package-lock.json
             src-tauri/Cargo.lock
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/bundle_dmg.sh
           if-no-files-found: warn
           retention-days: 30
 
