@@ -1,14 +1,14 @@
 [package]
 name = "inkleet"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 [features]
 # Opt-in diagnostic tracing; release and non-Linux tracing remain disabled.
 native-snippet-validation = []
-# Temporary C/C++ acceptance experiment, debug Linux x86_64 only.
+# C/C++ acceptance trace alias; capability rollout is independent of features.
 native-clang-snippet-validation = ["native-snippet-validation"]
-# Includes existing gated clang checks in the same full native validation build.
+# Includes C/C++ and Java trace checks in the same full native validation build.
 native-java-snippet-validation = ["native-clang-snippet-validation"]
 
 [lib]

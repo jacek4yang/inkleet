@@ -1,3 +1,5 @@
+import {runSolutionArchiveUI} from "./solution-archive-ui.mjs";
+import {runCodeActionsUI} from "./code-actions-ui.mjs";
 import {runDebugVisualsUI} from "./debug-visuals-ui.mjs";
 import {runNativeLoginUI} from "./native-login-ui.mjs";
 import {runReadingControlsUI} from "./reading-controls-ui.mjs";
@@ -12,6 +14,7 @@ import { runTabSizeUI } from "./tab-size-ui.mjs";
 import { runSettingsWorkbenchUI } from "./settings-workbench-ui.mjs";
 import {runSettingsJSONUI} from "./settings-json-ui.mjs";
 import { runNotesSaveUI } from "./notes-save-ui.mjs";
+import {runLocalPolicyUI} from "./local-policy-ui.mjs";
 import { runCaseInputUI } from "./case-input-ui.mjs";
 import { runNewlineSaveUI } from "./newline-save-ui.mjs";
 import { runDefinitionFocusUI } from "./definition-focus-ui.mjs";
@@ -59,10 +62,12 @@ try {
     try { if ((await fetch("http://127.0.0.1:5173")).ok) break; } catch {}
     await new Promise(r => setTimeout(r, 500));
   }
+  await runCodeActionsUI(testPage);
   await runDebugVisualsUI(testPage);
   await runReadingControlsUI(browser, fixtures);
   await runCompilerDiagnosticsUI(testPage);
   await runNativeLoginUI(testPage);
+  await runSolutionArchiveUI(testPage);
   // Preserve the original approval sheet as history; only owner-approved C is adopted.
   const iconReview = await browser.newPage({viewport:{width:900,height:380}});
   await iconReview.setContent(await readFile("docs/design/inkleet-icon-candidates.svg","utf8"));
@@ -2880,6 +2885,7 @@ try {
 
   await runNotesSaveUI(testPage);
   await runCaseInputUI(testPage);
+  await runLocalPolicyUI(testPage);
   await runOutputCompletenessUI(testPage);
   await runNewlineSaveUI(testPage,openSettings);
 

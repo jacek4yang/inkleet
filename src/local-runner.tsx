@@ -3,7 +3,7 @@ import {runResultNotice} from "./run-result-notice";
 import {useCodeMismatch,type LiveCode} from "./live-code";
 import {localResultReport,type OutputRow} from "./local-result-model";
 import {validateRunContext,sameRunStatus,type RunContext} from "./run-context";
-import {canonicalJson,compareJson,invocationCount,type Expectation} from "./case-expectations";
+import {compareExpectation,invocationCount,type Expectation,type ComparisonMode} from "./case-expectations";
 import "./case-results.css";
 import {parameterNames,seedCases,appendExampleCases,validateCases,inputParts,compactCaseValue,type LocalCase} from "./test-cases";
 import { useResizablePanel } from "./resizable-panel";
@@ -31,6 +31,7 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
   onDiagnosticJump?:(line:number,snapshotCode:string)=>void; onReveal?:()=>void; hidden?:boolean; documentKey?: string; onHelp?: () => void; codeSource: LiveCode; language: Language; title: string; metadata: string; sampleInput: string; exampleInputs?:string; onClose: () => void; breakpoints: number[]; onPauseLine: (position: DebugPosition|null) => void;
 }) {
   const resize=useResizablePanel("local",!hidden);
+  const design=useMemo(()=>{try{const m=JSON.parse(metadata);return !!(m.systemdesign||m.classname);}catch{return false;}},[metadata]);
   const names=useMemo(()=>parameterNames(metadata),[metadata]),storageKey="inkleet.test-cases.v1:"+(documentKey??title+":"+language);
   const [initial]=useState(()=>{
     const fallback=seedCases(sampleInput,exampleInputs,names);
@@ -57,7 +58,17 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
   }
   function setExpectation(value:string,target:Expectation["target"]=currentCase.expectation?.target??{kind:"return"}){
     if(value.length>65536){setCaseError("预期结果超过大小限制");return;}
-    updateCases(cases.map(item=>item.id===selected?{...item,expectation:{mode:"exact-json",target,value}}:item));
+    updateCases(cases.map(item=>item.id===selected?{...item,expectation:{...(currentCase.expectation??{mode:"exact-json" as const}),target,value}}:item));
+  }
+  function setComparison(mode:ComparisonMode){
+    const current=currentCase.expectation??{target:{kind:"return" as const},value:""};
+    const expectation:Expectation=mode==="float-json"?{...current,mode,absoluteTolerance:"1e-6",relativeTolerance:"1e-6"}:{target:current.target,value:current.value,mode};
+    updateCases(cases.map(item=>item.id===selected?{...item,expectation}:item));
+  }
+  function setTolerance(key:"absoluteTolerance"|"relativeTolerance",value:string){
+    const expectation=currentCase.expectation;
+    if(expectation?.mode!=="float-json"||value.length>64)return;
+    updateCases(cases.map(item=>item.id===selected?{...item,expectation:{...expectation,[key]:value}}:item));
   }
   function chooseCase(id:string){setRename(null);updateCases(cases,id);}
   function addCase(){const next={id:crypto.randomUUID(),name:"用例 "+(cases.length+1),input:currentCase.input,expectation:currentCase.expectation};
@@ -149,7 +160,7 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
       for(let caseIndex=0;caseIndex<chosen.length;caseIndex++){
         const item=chosen[caseIndex],expectation=item.expectation;
         validateParameterDraft(item);
-        if(expectation){canonicalJson(expectation.value);if(expectation.target.kind==="argument"&&expectation.target.index>=names.length)throw Error("预期参数不属于当前函数");}
+        if(expectation){compareExpectation(expectation.value,expectation);if(expectation.target.kind==="argument"&&(design||expectation.target.index>=names.length))throw Error("预期参数不属于当前函数");}
         const groups=invocationCount(item.input,names.length);
         if(invocations.length+groups>100)throw Error("一批运行最多 100 组函数调用");
         for(let groupIndex=0;groupIndex<groups;groupIndex++)invocations.push({caseIndex,groupIndex,caseNumber:invocations.length+1});
@@ -192,7 +203,7 @@ export function LocalRunner({ documentKey, codeSource, language, title, metadata
     <div className="case-editor"><div className="case-inputs">
     {parts?parts.map((value,index)=><label key={index}><span>{names[index]}</span><textarea rows={2} aria-label={parts.length===1?"本地测试输入":"参数 "+names[index]} value={value} onChange={e=>{const next=[...parts];next[index]=e.target.value;setInput(next.map(compactCaseValue).join("\n"),next);}} spellCheck={false}/></label>):<label><span>输入</span><textarea aria-label="本地测试输入" value={input} onChange={e=>setInput(e.target.value)} spellCheck={false}/></label>}
     </div>
-    <details className="case-expectation"><summary>预期结果</summary><div className="case-inputs"><label><select title="比较目标" aria-label="预期结果比较目标" value={currentCase.expectation?.target.kind==="argument"?"argument:"+currentCase.expectation.target.index:"return"} onChange={e=>setExpectation(currentCase.expectation?.value??"",e.target.value==="return"?{kind:"return"}:{kind:"argument",index:Number(e.target.value.slice(9))})}><option value="return">返回值</option>{names.map((name,index)=><option key={index} value={"argument:"+index}>调用后 {name}</option>)}</select></label><label><textarea rows={2} aria-label="预期结果" placeholder="未设置" value={currentCase.expectation?.value??""} onChange={e=>setExpectation(e.target.value)} spellCheck={false}/></label></div></details>
+    <details className="case-expectation"><summary>预期结果</summary><div className="case-inputs"><label><select title="比较目标" aria-label="预期结果比较目标" value={currentCase.expectation?.target.kind==="argument"?"argument:"+currentCase.expectation.target.index:"return"} onChange={e=>setExpectation(currentCase.expectation?.value??"",e.target.value==="return"?{kind:"return"}:{kind:"argument",index:Number(e.target.value.slice(9))})}><option value="return">返回值</option>{currentCase.expectation?.target.kind==="argument"&&(design||currentCase.expectation.target.index>=names.length)&&<option disabled value={"argument:"+currentCase.expectation.target.index}>原参数目标不可用</option>}{!design&&names.map((name,index)=><option key={index} value={"argument:"+index}>调用后 {name}</option>)}</select></label><label><select aria-label="预期结果比较方式" title="仅用于本地比较，不推断力扣判题规则" value={currentCase.expectation?.mode??"exact-json"} onChange={e=>setComparison(e.target.value as ComparisonMode)}><option value="exact-json">精确 JSON</option><option value="float-json">数值误差</option><option value="unordered-array">最外层数组无序</option></select></label>{currentCase.expectation?.mode==="float-json"&&<><label><span>绝对误差</span><input aria-label="绝对误差" title="|实际−预期| ≤ max(绝对误差, 相对误差 × max(|实际|, |预期|))；数组顺序不变" value={currentCase.expectation.absoluteTolerance} onChange={e=>setTolerance("absoluteTolerance",e.target.value)} spellCheck={false}/></label><label><span>相对误差</span><input aria-label="相对误差" value={currentCase.expectation.relativeTolerance} onChange={e=>setTolerance("relativeTolerance",e.target.value)} spellCheck={false}/></label></>}<label><textarea rows={2} aria-label="预期结果" placeholder="未设置" value={currentCase.expectation?.value??""} onChange={e=>setExpectation(e.target.value)} spellCheck={false}/></label></div></details>
     </div><div className="case-output">
     <div className="local-actions"><span role="status" hidden={!result}>{result ? busy(result) ? result.phase === "canceling" ? "正在停止" : result.phase === "compiling" ? "编译中…" : "执行中…" : result.canceled ? "已停止" : result.timedOut ? "超过时限，已终止" : result.phase === "error" || result.error ? "未完成" : "执行结束 · " + result.elapsedMs + " ms" : "尚未运行"}</span></div>
     {result?.documentKey&&result.documentKey!==documentKey&&<p className="cache-warning">其他解答的运行结果</p>}

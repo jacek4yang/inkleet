@@ -1,4 +1,8 @@
 # P1：文档同步失败恢复
+
+> Historical design/implementation snapshot, not the current capability matrix.
+> Current supported behavior and evidence boundaries: [Editing support](../EDITING_SUPPORT.md).
+
 基线：2b6eabf05f55f2ba17bf03e510bf315285c167dc。
 参考 Lithe 固定 6210013d06e1410c7bcbb1949e1ff16ea8deae15 的 pending-document-changes.ts / pending-document-changes.test.ts；设计参考，独立实现，无上游代码移植。
 ## 缺陷

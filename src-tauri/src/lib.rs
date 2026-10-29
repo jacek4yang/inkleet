@@ -13,6 +13,7 @@ mod completion_cache;
 mod completion_requests;
 mod completion_context;
 mod lsp_document;
+mod lsp_actions;
 mod lsp_launch;
 mod snippet_validation;
 mod lsp_native;
@@ -290,6 +291,16 @@ async fn language_completion_resolve(window:tauri::WebviewWindow,app:tauri::AppH
     tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().resolve_completion(id,version,token)).await.map_err(|_|"补全解析任务中断".to_owned())?
 }
 #[tauri::command]
+async fn language_code_actions(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32,sequence:u64,start_line:u32,start_character:u32,end_line:u32,end_character:u32)->Result<serde_json::Value,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().code_actions(id,version,sequence,start_line,start_character,end_line,end_character)).await.map_err(|_|"代码操作请求任务中断".to_owned())?
+}
+#[tauri::command]
+async fn language_code_action_resolve(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32,token:u64)->Result<serde_json::Value,String>{
+    check_origin(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().resolve_code_action(id,version,token)).await.map_err(|_|"代码操作解析任务中断".to_owned())?
+}
+#[tauri::command]
 async fn language_semantic_tokens(window:tauri::WebviewWindow,app:tauri::AppHandle,id:u64,version:u32)->Result<serde_json::Value,String>{
     check_origin(&window)?;
     tauri::async_runtime::spawn_blocking(move||app.state::<lsp::Services>().semantic_tokens(id,version)).await.map_err(|_|"语义分析任务中断".to_owned())?
@@ -390,6 +401,15 @@ async fn create_solution(window:tauri::WebviewWindow,app:tauri::AppHandle,proble
 async fn rename_solution(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,id:String,name:String,expected:String)->Result<solutions::Entry,String>{
  check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||{let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;solutions::rename(&state.root,&problem,&language,&id,&expected,&name)}).await.map_err(|_|"重命名解答任务中断".to_owned())?
 }
+#[tauri::command]
+async fn archive_solution(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,id:String,expected:String,code:String,baseline:String)->Result<solutions::Entry,String>{
+ check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||{let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;solutions::archive(&state.root,&problem,&language,&id,&expected,&code,&baseline)}).await.map_err(|_|"归档解答任务中断，请刷新列表确认状态".to_owned())?
+}
+#[tauri::command]
+async fn restore_solution(window:tauri::WebviewWindow,app:tauri::AppHandle,problem:String,language:String,id:String,expected:String)->Result<solutions::Entry,String>{
+ check_origin(&window)?;tauri::async_runtime::spawn_blocking(move||{let state=app.state::<Store>();let _lock=state.gate.lock().map_err(|_|"文件队列不可用")?;solutions::restore(&state.root,&problem,&language,&id,&expected)}).await.map_err(|_|"恢复解答任务中断，请刷新列表确认状态".to_owned())?
+}
+
 
 
 #[tauri::command]
@@ -445,7 +465,7 @@ pub fn run() {
             app.manage(cache::Cache::new(app.path().app_cache_dir()?));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, local_run_record, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_cancel_completion, language_completion_resolve, language_semantic_tokens, language_diagnostics, read_language_source, acquire_language_source, language_source_definition, language_cancel_source_navigation, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, begin_draft_session, checkpoint_draft, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, qr_login_start, qr_login_poll, sign_out, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
+        .invoke_handler(tauri::generate_handler![get_editor_settings,save_editor_settings,format_source,list_solutions,create_solution,rename_solution,archive_solution,restore_solution,get_download_settings,save_download_settings,evaluate_debug,list_recovery,read_recovery,restore_recovery,start_debug, debug_status, stop_debug, debug_request, set_debug_breakpoints, start_local_run, local_run_status, local_run_record, cancel_local_run, start_language_service, stop_language_service, update_language_document, language_request, language_cancel_completion, language_completion_resolve, language_code_actions, language_code_action_resolve, language_semantic_tokens, language_diagnostics, read_language_source, acquire_language_source, language_source_definition, language_cancel_source_navigation, environment_status, install_environment, install_environment_group, cancel_environment_install, load_document, begin_draft_session, checkpoint_draft, save_text, resolve_file_conflict, external_editor_supported, open_note_external, open_login, verify_login, cancel_login, login_status, qr_login_start, qr_login_poll, sign_out, search_questions, get_question, load_recent_questions, start_judge, check_judge, list_judgements, acknowledge_unknown_judge])
         .build(tauri::generate_context!())
         .expect("InkLeet failed to start")
         .run(|_app,event| {

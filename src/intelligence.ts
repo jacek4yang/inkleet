@@ -25,6 +25,7 @@ let formatQueue:Promise<unknown>=Promise.resolve();let queuedFormats=0;
 import { DocumentSyncQueue } from "./document-sync-queue";
 import { findReferences } from "./references";
 import { renameSymbol } from "./rename";
+import { codeActions } from "./code-actions";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
 import { EditorSelection, Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
@@ -33,7 +34,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; implementation?: boolean; semanticTokens?: boolean; prepareRename?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
+type Started = { id: number; version: number; server: string; uri: string; codeActions?: boolean; implementation?: boolean; semanticTokens?: boolean; prepareRename?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 function offset(doc: Text, position: unknown): number | null {
@@ -117,7 +118,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   let changeTimer: ReturnType<typeof setTimeout> | undefined, pollTimer: ReturnType<typeof setTimeout> | undefined;
   function flush() {
     return synchronization.run(async () => {
-      while (!closed && view && session && sent !== view.state.doc) {
+      while (!closed && view && session && !view.composing && sent !== view.state.doc) {
         const doc = view.state.doc, nextVersion = ++version;
         await invoke("update_language_document", { id: session.id, version: nextVersion, text: snapshotText(doc) });
         sent = doc;
@@ -130,7 +131,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     if (!session || closed || !view || !stillCurrent()) return null;
     const owner=view,id=session.id;
     await flush();
-    if (closed || session?.id!==id || view!==owner || owner.state.doc!==doc || !stillCurrent()) return null;
+    if (closed || session?.id!==id || view!==owner || owner.composing || owner.state.doc!==doc || sent!==doc || !stillCurrent()) return null;
     const line = doc.lineAt(pos), askedVersion = version;
     if(kind==="completion"&&completionSequence>=Number.MAX_SAFE_INTEGER)throw Error("补全请求序号已耗尽，请重新连接语言服务");
     const sequence=kind==="completion"?++completionSequence:null;
@@ -468,10 +469,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   async function poll() {
     if (!session || !view || closed) return;
     try {
+      if(view.composing)return;
       await flush();
+      if(closed||!session||!view||view.composing||sent!==view.state.doc)return;
       const id = session.id, askedVersion = version, doc = view.state.doc;
       const result = await invoke<{ version: number; diagnostics: unknown[]; semanticRevision?:number }>("language_diagnostics", { id });
-      if (!closed && session?.id === id && askedVersion === version && result.version === version && view.state.doc === doc) {
+      if (!closed && session?.id === id && askedVersion === version && result.version === version && view.state.doc === doc && !view.composing) {
         if(Number.isSafeInteger(result.semanticRevision)&&result.semanticRevision!==semanticRevision){semanticRevision=result.semanticRevision!;scheduleSemantic();}
         const diagnostics: Diagnostic[] = [];
         for (const item of (Array.isArray(result.diagnostics) ? result.diagnostics : []).slice(0, 200)) {
@@ -487,10 +490,34 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     } catch (e) { if (!closed) status(String(e)); }
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
+  let actionSequence=0;
+  const actions=codeActions(async(from,to,doc)=>{
+    if(closed||!view||!session?.codeActions)return null;
+    const owner=view,id=session.id;
+    await flush();
+    if(closed||view!==owner||session?.id!==id||owner.state.doc!==doc||sent!==doc||owner.composing)return null;
+    if(actionSequence>=Number.MAX_SAFE_INTEGER)throw Error("代码操作序号已耗尽，请重新连接语言服务");
+    const askedVersion=version,start=doc.lineAt(from),end=doc.lineAt(to);
+    const items=await invoke("language_code_actions",{id,version:askedVersion,sequence:++actionSequence,startLine:start.number-1,startCharacter:from-start.from,endLine:end.number-1,endCharacter:to-end.from});
+    const current=()=>!closed&&view===owner&&session?.id===id&&version===askedVersion&&owner.state.doc===doc&&!owner.composing;
+    if(!current())return null;
+    return {items,resolve:async(token:number)=>{
+      if(!current())throw Error("代码操作快照已过期");
+      const result=await invoke("language_code_action_resolve",{id,version:askedVersion,token});
+      if(!current())throw Error("忽略过期的代码操作结果");
+      return result;
+    }};
+  },status,()=>{const id=session?.id;return()=>!closed&&id!==undefined&&session?.id===id;});
+  const openActions=(target:EditorView)=>{
+    if(closed||!session?.codeActions)return false;
+    if(target.state.field(snippetSessionState,false)){status("请先保存参数修改并按 Esc 结束参数补全，再请求代码操作");return true;}
+    return actions.open(target);
+  };
   const references = findReferences((pos, doc) => request("references", pos, doc), status, !commandsOwned);
   const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned, () => { const id=session?.id; return () => !closed && id!==undefined && session?.id===id; }, (pos,doc) => session?.prepareRename ? request("prepareRename",pos,doc) : Promise.resolve({supported:false}));
   const extensions: Extension[] = [
     vimNavigation({definition:target=>{void definition(target.state.selection.main.head);return true;},documentation:target=>{void keyboardDocumentation(target);}}),
+    ...actions.extensions,
     ...references.extensions,
     ...rename.extensions,
     signatureField,
@@ -501,13 +528,19 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     Prec.highest(keymap.of(completionKeymap.map(binding=>binding.run===startCompletion?{...binding,run:invokeCompletion}:binding))),
     keymap.of([{key:"Alt-Enter",run:target=>popup.openDocs(target)},{key:"Alt-PageDown",run:target=>popup.scrollDocs(target,1)},{key:"Alt-PageUp",run:target=>popup.scrollDocs(target,-1)}]),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } },{key:"Mod-F12",run(target:EditorView){void definition(target.state.selection.main.head,"implementation");return true;}}]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
+    keymap.of([...(commandsOwned?[]:[{key:"Mod-.",run:openActions},{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } },{key:"Mod-F12",run(target:EditorView){void definition(target.state.selection.main.head,"implementation");return true;}}]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
     EditorView.domEventObservers({
       keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}},
       compositionstart(_event,target){
         invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;
         // Retire the pre-composition scheduled source before native bookkeeping.
         closeCompletion(target);
+      },
+      compositionend(){
+        // Native composition state settles after the DOM event. Flush the final
+        // document once; never send partial IME text or paint its stale diagnostics.
+        clearTimeout(changeTimer);
+        changeTimer=setTimeout(()=>{void flush().catch(e=>{if(!closed)status(String(e));});scheduleSemantic();},30);
       },
       blur(event,target){
         if(popup.containsFocus(target,event.relatedTarget))return;
@@ -547,8 +580,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     extensions,
     available:()=>!closed&&session!==null,
     cancelNavigation:()=>invalidateNavigation(),
+    codeActionsAvailable:()=>!closed&&session?.codeActions===true,
     implementationAvailable:()=>!closed&&session?.implementation===true,
-    commands:{implementation:(target:EditorView)=>{void definition(target.state.selection.main.head,"implementation");return true;},completion:invokeCompletion,rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
+    commands:{codeActions:openActions,implementation:(target:EditorView)=>{void definition(target.state.selection.main.head,"implementation");return true;},completion:invokeCompletion,rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
     async format(text:string):Promise<string>{
       if(queuedFormats>=8)throw Error("格式化请求过多，请稍后保存");
       ++queuedFormats;
@@ -587,7 +621,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      invalidateNavigation(true);documentationLifetime.abort();snippetPreparation.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      invalidateNavigation(true);documentationLifetime.abort();snippetPreparation.destroy();actions.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       appliedDiagnostics=null;session = null; view = null;
     },

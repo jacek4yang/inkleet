@@ -28,7 +28,7 @@ export function Login({ onIdentity }: { onIdentity: (value: Identity | null) => 
   }
   async function restore(token: number) {
     try { const value = await invoke<Identity | null>("login_status"); if (token === generation.current) { setRestoreFailed(false); setForgetFailed(false); setNoticeOpen(false); setMessage(""); setIdentity(value); notify.current(value); if (value) setOpen(false); } }
-    catch (error) { if (token === generation.current) { const recoveryRequired=String(error).includes("STORAGE_RECOVERY_REQUIRED"); if(recoveryRequired)setForgetFailed(true); setRestoreFailed(true); setMessage(recoveryRequired?"系统凭据状态无法确认，请先忘记此设备，再重新登录。":"暂时无法恢复登录；已保存的会话未被删除，可以稍后重试。"); } }
+    catch (error) { if (token === generation.current) { const recoveryRequired=String(error).includes("STORAGE_RECOVERY_REQUIRED"); if(recoveryRequired)setForgetFailed(true); setRestoreFailed(true); setMessage(recoveryRequired?"系统凭据状态无法确认，请先忘记此设备，再重新登录。":String(error).includes("SESSION_EXPIRED")?"保存的会话已过期，请重新登录；未自动删除系统保存的凭据。":"暂时无法恢复登录；已保存的会话未被删除，可以稍后重试。"); } }
   }
   useEffect(() => {
     if (!isTauri()) return;
@@ -68,7 +68,7 @@ export function Login({ onIdentity }: { onIdentity: (value: Identity | null) => 
       if (!result.svg || result.state !== "WAITING") throw Error("Invalid QR response");
       setQr(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.svg)}`); setMessage("");
       schedule(token, result.attempt, refreshes);
-    } catch (error) { if (token === generation.current) { if(String(error).includes("STORAGE_RECOVERY_REQUIRED")){setForgetFailed(true);setMessage("上次取消登录后，系统凭据未能恢复。请先忘记此设备，再重新登录。");}else setMessage("无法创建二维码。可以重试，或选择官方网页登录。 "); } }
+    } catch (error) { if (token === generation.current) { if(String(error).includes("STORAGE_RECOVERY_REQUIRED")){setForgetFailed(true);setMessage("系统保存的会话尚未清理，请先忘记此设备，再重新登录。");}else setMessage("无法创建二维码。可以重试，或选择官方网页登录。 "); } }
     finally { if (token === generation.current) setBusy(false); }
   }
   async function begin() { setNoticeOpen(false); setRestoreFailed(false); openedAt.current = Date.now(); const token = invalidate(); setOpen(true); setMode("native"); await createQr(token); }

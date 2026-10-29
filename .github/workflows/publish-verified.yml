@@ -1,14 +1,14 @@
-name: Publish frozen verified v0.1.1
+name: Publish frozen verified release
 on:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: publish-inkleet-v0.1.1
+  group: publish-inkleet-verified
   cancel-in-progress: false
 jobs:
   publish:
-    if: github.repository == 'jacek4yang/inkleet' && github.ref == 'refs/heads/release/v0.1.1'
+    if: github.repository == 'jacek4yang/inkleet' && startsWith(github.ref, 'refs/heads/release/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

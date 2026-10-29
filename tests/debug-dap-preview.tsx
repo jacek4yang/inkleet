@@ -12,6 +12,6 @@ const read = async (reference: number, start = 0, count = 100) => {
 };
 createRoot(document.getElementById("root")!).render(<main className="debug-panel" style={{ width: "min(680px, calc(100vw - 40px))", boxSizing: "border-box", margin: "24px auto", padding: 20, background: "var(--paper)", border: "1px solid var(--line)", borderRadius: 8 }}>
   <div className="debug-variables" aria-label="实际调试数据">
-    {debugVariables(evidence.locals).filter(variable => ["map", "string_map", "empty", "set", "vector"].includes(variable.name)).map(variable => <VariableNode key={variable.name} variable={variable} token="captured-native-pause" read={read} />)}
+    {debugVariables(evidence.locals).filter(variable => ["map", "string_map", "empty", "set", "vector", "option_some", "option_none", "option_nested_some", "option_nested_none"].includes(variable.name)).map(variable => <VariableNode key={variable.name} variable={variable} token="captured-native-pause" read={read} />)}
   </div>
 </main>);

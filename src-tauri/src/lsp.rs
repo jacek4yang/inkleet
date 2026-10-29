@@ -11,11 +11,11 @@ struct Document { text:String, version:u32, prefix:u32 }
 struct Session {
     id:u64, client:Client, uri:String, language:String, context:inkleet_managed_env::lsp_scaffold::Context, approved_sources:Mutex<std::collections::HashSet<String>>, document:Mutex<Document>,
     sources:Mutex<crate::source_navigation::Registry>, source_reads:std::sync::atomic::AtomicUsize, source_requests:Mutex<crate::completion_requests::CompletionRequests<inkleet_managed_env::rpc::RequestCanceller>>,
-    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, implementation:bool, prepare_rename:bool, completion_resolve:bool, completion_insert_text_mode:u8, completion_trigger_characters:Vec<String>, completion_requests:Mutex<crate::completion_requests::CompletionRequests<inkleet_managed_env::rpc::RequestCanceller>>, completion_cache:Mutex<crate::completion_cache::CompletionCache>, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
+    diagnostics:Arc<Mutex<Value>>, roots:Vec<PathBuf>, range_formatting:bool, code_actions:bool, code_action_resolve:bool, action_requests:Mutex<crate::completion_requests::CompletionRequests<inkleet_managed_env::rpc::RequestCanceller>>, action_cache:Mutex<crate::lsp_actions::Cache>, implementation:bool, prepare_rename:bool, completion_resolve:bool, completion_insert_text_mode:u8, completion_trigger_characters:Vec<String>, completion_requests:Mutex<crate::completion_requests::CompletionRequests<inkleet_managed_env::rpc::RequestCanceller>>, completion_cache:Mutex<crate::completion_cache::CompletionCache>, semantic_legend:Option<Value>, semantic_revision:Arc<AtomicU64>, formatting:AtomicBool, _workspace:tempfile::TempDir,
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct Started { id:u64, version:u32, server:String, uri:String, semantic_tokens:bool, implementation:bool, prepare_rename:bool, completion_resolve:bool, completion_insert_text_mode:u8, completion_trigger_characters:Vec<String>, completion_snippets:bool }
+pub struct Started { id:u64, version:u32, server:String, uri:String, semantic_tokens:bool, code_actions:bool, implementation:bool, prepare_rename:bool, completion_resolve:bool, completion_insert_text_mode:u8, completion_trigger_characters:Vec<String>, completion_snippets:bool }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Source { text:String, name:String, declaration:bool, language:String }
@@ -40,6 +40,7 @@ impl Services {
         session.client.notify("textDocument/didChange",json!({"textDocument":{"uri":session.uri,"version":version},"contentChanges":[{"text":wrapped}]}))?;
         document.text=text;document.version=version;document.prefix=prefix;
         if let Ok(mut cache)=session.completion_cache.lock(){cache.clear();}
+        if let Ok(mut cache)=session.action_cache.lock(){cache.clear();}
         if let Ok(mut diagnostics)=session.diagnostics.lock(){*diagnostics=Value::Null;}
         Ok(())
     }
@@ -138,11 +139,65 @@ impl Services {
         self.session(id)?;
         let document=session.document.lock().map_err(|_|"文档状态不可用")?;
         if document.version!=version{return Err("忽略过期的补全解析".into());}
+        let mut resolved=resolved;
+        crate::lsp_document::completion_imports(&session.language,&mut resolved,document.prefix,&document.text);
         let mut response=Value::Array(vec![resolved]);
         crate::lsp_document::response("completion",&mut response,document.prefix);
         let result=response.as_array_mut().and_then(|items|items.pop()).ok_or_else(||"补全导入涉及语言环境辅助代码，未应用任何修改".to_owned())?;
         crate::snippet_validation::resolved(&self.root,id,version,token,session.completion_insert_text_mode,&result);
         Ok(result)
+    }
+    pub fn code_actions(&self,id:u64,version:u32,sequence:u64,start_line:u32,start_character:u32,end_line:u32,end_character:u32)->Result<Value>{
+        let session=self.session(id)?;
+        if !session.code_actions{return Err("当前语言服务不支持代码操作".into());}
+        let prefix={
+            let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+            if document.version!=version{return Err("代码操作快照已经过期".into());}
+            crate::lsp_actions::position(&document.text,start_line,start_character)?;
+            crate::lsp_actions::position(&document.text,end_line,end_character)?;
+            if (start_line,start_character)>(end_line,end_character){return Err("代码操作范围顺序无效".into());}
+            document.prefix
+        };
+        let diagnostics=session.diagnostics.lock().map_err(|_|"诊断状态不可用")?;
+        let items=if diagnostics.get("version").and_then(Value::as_u64)==Some(version as u64){diagnostics.get("diagnostics").and_then(Value::as_array).map(|items|items.iter().take(200).cloned().collect::<Vec<_>>()).unwrap_or_default()}else{Vec::new()};
+        drop(diagnostics);
+        let params=json!({"textDocument":{"uri":session.uri},"range":{"start":{"line":start_line+prefix,"character":start_character},"end":{"line":end_line+prefix,"character":end_character}},"context":{"diagnostics":items,"only":["quickfix","refactor"],"triggerKind":1}});
+        let (sequence,request)={
+            let mut requests=session.action_requests.lock().map_err(|_|"代码操作请求状态不可用")?;
+            let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+            if document.version!=version{return Err("代码操作快照已经过期".into());}
+            let admitted=requests.begin(Some(sequence),||{
+                let request=session.client.begin_cancellable_lsp_request("textDocument/codeAction",params)?;
+                let cancel=request.canceller();Ok((request,cancel))
+            })?;
+            session.action_cache.lock().map_err(|_|"代码操作缓存不可用")?.clear();
+            admitted
+        };
+        let response=request.wait(Duration::from_secs(8));
+        let mut requests=session.action_requests.lock().map_err(|_|"代码操作请求状态不可用")?;
+        requests.finish(sequence);
+        let response=response?;
+        if !requests.is_current(sequence){return Err("忽略过期的代码操作结果".into());}
+        let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+        if document.version!=version{return Err("忽略旧版本代码操作".into());}
+        self.session(id)?;
+        let result=session.action_cache.lock().map_err(|_|"代码操作缓存不可用")?.remember(&response,version,sequence,session.code_action_resolve,&session.uri,prefix,&document.text);
+        result
+    }
+    pub fn resolve_code_action(&self,id:u64,version:u32,token:u64)->Result<Value>{
+        let session=self.session(id)?;
+        if session.document.lock().map_err(|_|"文档状态不可用")?.version!=version{return Err("代码操作快照已经过期".into());}
+        let original=session.action_cache.lock().map_err(|_|"代码操作缓存不可用")?.get(token,version)?;
+        let action=if original.get("edit").is_some(){original.clone()}else{
+            if !session.code_action_resolve{return Err("当前语言服务不支持代码操作解析".into());}
+            session.client.request("codeAction/resolve",original.clone(),Duration::from_secs(8))?
+        };
+        crate::lsp_actions::validate_resolved(&original,&action)?;
+        self.session(id)?;
+        let document=session.document.lock().map_err(|_|"文档状态不可用")?;
+        if document.version!=version{return Err("忽略过期的代码操作解析".into());}
+        session.action_cache.lock().map_err(|_|"代码操作缓存不可用")?.get(token,version)?;
+        crate::lsp_actions::normalize(&action,&session.uri,document.prefix,&document.text,version)
     }
     pub fn semantic_tokens(&self,id:u64,version:u32)->Result<Value>{
         let session=self.session(id)?;
@@ -247,7 +302,7 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
             "processId":null,"rootUri":root_uri,"initializationOptions":launch.initialization,
             "capabilities":{
                 "general":{"positionEncodings":["utf-16"]},
-                "textDocument":{"implementation":{"dynamicRegistration":false,"linkSupport":true},"rename":{"dynamicRegistration":false,"prepareSupport":true},"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":hover_content_formats()},"completion":completion_profile,"publishDiagnostics":{"versionSupport":true}},
+                "textDocument":{"codeAction":crate::lsp_actions::capabilities(),"implementation":{"dynamicRegistration":false,"linkSupport":true},"rename":{"dynamicRegistration":false,"prepareSupport":true},"semanticTokens":{"dynamicRegistration":false,"requests":{"full":true},"tokenTypes":crate::semantic_tokens::TYPES,"tokenModifiers":crate::semantic_tokens::MODIFIERS,"formats":["relative"],"overlappingTokenSupport":false,"multilineTokenSupport":false,"serverCancelSupport":false,"augmentsSyntaxTokens":true},"hover":{"contentFormat":hover_content_formats()},"completion":completion_profile,"publishDiagnostics":{"versionSupport":true}},
                 "workspace":{"configuration":true,"workspaceFolders":true,"semanticTokens":{"refreshSupport":true}}
             },
             "workspaceFolders":[{"uri":root_uri,"name":"InkLeet"}]
@@ -256,9 +311,11 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         let semantic_legend=crate::semantic_tokens::provider(&initialized["capabilities"]);
         let semantic_tokens=semantic_legend.is_some();
         let implementation=crate::source_navigation::implementation_provider(&initialized["capabilities"]["implementationProvider"]);
+        let code_actions=crate::lsp_actions::provider(&initialized["capabilities"]["codeActionProvider"]);
+        let code_action_resolve=initialized["capabilities"]["codeActionProvider"]["resolveProvider"]==Value::Bool(true);
         let prepare_rename=initialized["capabilities"]["renameProvider"]["prepareProvider"]==Value::Bool(true);
         let completion_trigger_characters=crate::completion_context::triggers(&initialized["capabilities"]["completionProvider"]);
-        let completion_resolve=language=="rust"&&initialized["capabilities"]["completionProvider"]["resolveProvider"]==Value::Bool(true);
+        let completion_resolve=crate::lsp_launch::completion_resolve_enabled(&language)&&initialized["capabilities"]["completionProvider"]["resolveProvider"]==Value::Bool(true);
         let range_provider=&initialized["capabilities"]["documentRangeFormattingProvider"];
         let range_formatting=range_provider==&Value::Bool(true)||range_provider.is_object();
         client.notify("initialized",json!({}))?;
@@ -268,14 +325,14 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         let started_uri=uri.clone();
         crate::snippet_validation::started(&state.root,generation,&language,completion_insert_text_mode);
         let completion_snippets=crate::lsp_launch::snippet_support_enabled(&language);
-        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),sources:Mutex::new(crate::source_navigation::Registry::default()),source_reads:std::sync::atomic::AtomicUsize::new(0),source_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),diagnostics,roots,range_formatting,implementation,prepare_rename,completion_resolve,completion_insert_text_mode,completion_trigger_characters:completion_trigger_characters.clone(),completion_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
+        let session=Arc::new(Session{id:generation,client,uri,language,context,approved_sources:Mutex::new(std::collections::HashSet::new()),document:Mutex::new(Document{text,version:1,prefix}),sources:Mutex::new(crate::source_navigation::Registry::default()),source_reads:std::sync::atomic::AtomicUsize::new(0),source_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),diagnostics,roots,range_formatting,code_actions,code_action_resolve,action_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),action_cache:Mutex::new(crate::lsp_actions::Cache::default()),implementation,prepare_rename,completion_resolve,completion_insert_text_mode,completion_trigger_characters:completion_trigger_characters.clone(),completion_requests:Mutex::new(crate::completion_requests::CompletionRequests::default()),completion_cache:Mutex::new(crate::completion_cache::CompletionCache::default()),semantic_legend,semantic_revision,formatting:AtomicBool::new(false),_workspace:workspace});
         let previous={
             let mut active=state.active.lock().map_err(|_|"语言服务状态不可用")?;
             if state.generation.load(Ordering::SeqCst)!=generation{return Err("忽略已经过期的语言服务启动".into());}
             active.replace(session)
         };
         if let Some(previous)=previous{previous.client.stop();}
-        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens,implementation,prepare_rename,completion_resolve,completion_insert_text_mode,completion_trigger_characters,completion_snippets})
+        Ok(Started{id:generation,version:1,server:format!("{} · 应用独立环境",launch.server),uri:started_uri,semantic_tokens,code_actions,implementation,prepare_rename,completion_resolve,completion_insert_text_mode,completion_trigger_characters,completion_snippets})
     }).await.map_err(|_|"语言服务启动任务中断".to_owned())?
 }
 

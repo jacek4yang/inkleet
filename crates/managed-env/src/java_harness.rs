@@ -36,7 +36,7 @@ fn literal(value:&Value,kind:&str,budget:&mut usize)->Result<String,String>{
 pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),String>{
     if source.len()>2*1024*1024{return Err("Java 源码超过 2 MiB".into());}
     if crate::lsp_scaffold::java_package(source){return Err("本地 Java 暂不支持自定义 package；源码未改动，可使用在线运行".into());}
-    let config=crate::harness::configuration(metadata,input)?;
+    let config=crate::harness::ordinary_configuration(metadata,input)?;
     let name=config["metadata"]["name"].as_str().ok_or("Java 函数名缺失")?;
     let params=config["metadata"]["params"].as_array().ok_or("Java 参数缺失")?;
     let returned=config["metadata"]["return"]["type"].as_str().ok_or("Java 返回类型缺失")?;

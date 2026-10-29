@@ -13,13 +13,31 @@ import subprocess
 import zipfile
 
 REPO = 'jacek4yang/inkleet'
-TAG = 'v0.1.1'
-VERSION = '0.1.1'
-MANIFEST = 'releases/v0.1.1.json'
-NOTES = 'releases/v0.1.1.md'
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+VERSION = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']
+if not isinstance(VERSION, str) or re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', VERSION) is None:
+    raise ValueError('Publisher requires stable numeric application semver')
+TAG = 'v' + VERSION
+MANIFEST = f'releases/{TAG}.json'
+NOTES = f'releases/{TAG}.md'
 PROFILE = 'release; default features; diagnostic snippet features disabled'
+WINDOWS_STAGES = [
+    'current MSI fresh install and real WebView2 save',
+    'fresh uninstall preserves saved notebook',
+    'public v0.1.1 installed, actual source/notes/named solution saved',
+    'upgrade retains v0.1.1 data; real WebView2 reload, archive/restart/restore',
+    'upgraded uninstall preserves full synthetic notebook',
+]
+WINDOWS_UI_ASSERTIONS = {
+    'fresh': ['fresh MSI executable starts; settings opens/closes; source and notes saved through real IPC'],
+    'legacy': ['public hash-verified v0.1.1 saved source, shared notes and named solution via native UI'],
+    'upgraded': ['v0.1.1 source/notes/named ID preserved through MSI upgrade', 'archive cancel and confirm use real storage', 'restart then restore retains unsaved draft without overwriting saved source', 'explicit save persists restored draft'],
+}
+GUID = r'\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}'
 GATES = {
     'ci': ('.github/workflows/ci.yml', {'CI Frontend Regression'}),
+    'editing': ('.github/workflows/editing-lsp.yml', {'Editing LSP (ubuntu-24.04)', 'Editing LSP (windows-2025)', 'Editing LSP (macos-15-intel)'}),
+    'harness': ('.github/workflows/local-features.yml', {'Local harness (ubuntu-24.04)', 'Local harness (windows-2025)', 'Local harness (macos-15-intel)'}),
     'native': ('.github/workflows/native.yml', {'Native Linux Full Validation'}),
     'dap': ('.github/workflows/rust-collections.yml', {'Rust collection DAP (linux-x64)', 'Rust collection DAP (windows-x64)', 'Rust collection DAP (macos-x64)'}),
     'package': ('.github/workflows/preview-installers.yml', {'Packaging Frontend Regression', 'Packaging macOS Intel', 'Packaging Windows x64', 'Packaging Linux x86_64', 'Packaging Required'}),
@@ -49,6 +67,7 @@ def positive(value):
 
 
 def validate_manifest(m):
+    require('publisher_recovery' not in m, 'Publisher recovery exceptions are not allowed')
     require(m.get('schema') == 1 and m.get('repository') == REPO, 'Manifest schema/repository mismatch')
     require(m.get('tag') == TAG and m.get('version') == VERSION and m.get('prerelease') is False, 'Unexpected release identity')
     require(hex_value(m.get('source_commit'), 40) and hex_value(m.get('source_tree'), 40), 'Invalid source identity')
@@ -59,8 +78,6 @@ def validate_manifest(m):
         require(hex_value(gate.get('qualification_commit'), 40), 'Invalid qualification commit')
         require(gate.get('event') == 'push', 'Only exact main push gates qualify')
         require(gate['qualification_commit'] == m['source_commit'], 'Every gate must qualify exact final main source')
-        if name == 'package':
-            require(gate['qualification_commit'] == m['source_commit'] and gate['event'] in ('push', 'workflow_dispatch'), 'Packages must come from exact final main source')
     require(set(m.get('artifacts', {})) == set(PLATFORMS), 'Expected three platform archives')
     filenames = []
     for platform, a in m['artifacts'].items():
@@ -97,6 +114,36 @@ def validate_gate(m, name, run, jobs, qualification_tree):
         require(len(matches) == 1 and matches[0]['run_id'] == run['id'] and matches[0]['conclusion'] == 'success' and matches[0]['status'] == 'completed', 'Required job missing, skipped or unsuccessful: ' + expected)
 
 
+def validate_windows_install(m, metadata, report):
+    require(isinstance(report, dict) and report.get('result') == 'PASS', 'Windows installed MSI acceptance missing or failed')
+    require(report.get('source_commit') == m['source_commit'] and report.get('version') == VERSION and report.get('runner') == 'windows-2025', 'Windows installed source/version/runner mismatch')
+    require(report.get('msi_uncertain') is False and report.get('cleanup_errors') == [], 'Windows installer outcome or cleanup uncertain')
+    require(report.get('stages') == WINDOWS_STAGES, 'Incomplete Windows install/upgrade/uninstall stages')
+    prior_source = 'fbacb2041b83232a30a791965c58d93a7556a4ff'
+    prior = report.get('prior', {})
+    require(prior == {'url': f'https://github.com/{REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi', 'sha256': '1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0', 'bytes': 6885376, 'source_commit': prior_source, 'version': '0.1.1'}, 'Wrong public upgrade baseline')
+    ui = report.get('ui', {})
+    require(isinstance(ui, dict) and set(ui) == {'fresh', 'legacy', 'upgraded'}, 'Windows native phase missing or unexpected')
+    for phase, value in ui.items():
+        require(isinstance(value, dict), 'Invalid Windows native phase record')
+        expected_version = '0.1.1' if phase == 'legacy' else VERSION
+        expected_source = prior_source if phase == 'legacy' else m['source_commit']
+        require(value.get('result') == 'PASS' and value.get('phase') == phase and value.get('normalClose') is True, 'Windows native phase did not complete normally')
+        require(value.get('harnessCommit') == m['source_commit'] and value.get('applicationSourceCommit') == expected_source and value.get('nativeVersion') == expected_version, 'Windows native application/harness identity mismatch')
+        require(value.get('assertions') == WINDOWS_UI_ASSERTIONS[phase], 'Missing Windows native assertions')
+        launches = value.get('launches', [])
+        require(isinstance(launches, list) and len(launches) == (2 if phase == 'upgraded' else 1), 'Missing Windows native restart evidence')
+        for launch in launches:
+            require(positive(launch.get('pid')) and launch.get('version') == expected_version and re.fullmatch(r'https?://tauri\.localhost(?:/.*)?', launch.get('url', '')) and isinstance(launch.get('webviewVersion'), str) and launch['webviewVersion'], 'Invalid installed WebView2 launch evidence')
+    packages = report.get('packages', {})
+    require(isinstance(packages, dict), 'Invalid installed MSI package records')
+    current, old = packages.get('current', {}), packages.get('legacy', {})
+    require(isinstance(current, dict) and isinstance(old, dict), 'Invalid installed MSI identity records')
+    require(current.get('productCode') == metadata['msi'].get('product_code') and current.get('version') == VERSION and old.get('version') == '0.1.1' and current.get('name') == old.get('name') == 'InkLeet', 'Installed MSI identity differs from inspected package')
+    require(all(isinstance(value, str) and re.fullmatch(GUID, value) for value in [current.get('productCode'), old.get('productCode'), current.get('upgradeCode')]), 'Invalid MSI product/upgrade identifiers')
+    require(current.get('productCode') != old.get('productCode') and current.get('upgradeCode') == old.get('upgradeCode') and isinstance(current.get('upgradeCode'), str) and re.fullmatch(GUID, current['upgradeCode']), 'MSI upgrade identity evidence missing')
+
+
 def inspect_archive(m, platform, info, archive):
     a = m['artifacts'][platform]
     require(info['id'] == a['id'] and info['name'] == a['name'] and info['expired'] is False, 'Wrong/expired artifact')
@@ -128,6 +175,9 @@ def inspect_archive(m, platform, info, archive):
             require(metadata.get('file') == a['assets'][0]['name'] and metadata.get('sha256') == a['assets'][0]['sha256'] and metadata.get('bytes') == a['assets'][0]['bytes'], 'DMG metadata differs from frozen asset')
         if platform == 'windows':
             require(metadata['app_pe']['machine'] == 0x8664 and metadata['app_pe']['optional_header_magic'] == 0x20b and metadata['msi']['template'].split(';')[0] == 'x64', 'Missing Windows x64 package evidence')
+            report = metadata.get('installed_msi_acceptance')
+            validate_windows_install(m, metadata, report)
+            require('MSI_INSTALLED_RESULT.json' in names and json.loads(z.read('MSI_INSTALLED_RESULT.json')) == report, 'Windows installed evidence file differs from build metadata')
         result = {}
         for asset in a['assets']:
             data = z.read(asset['name'])
@@ -155,6 +205,11 @@ class GitHub:
         raise ValueError('Pagination exceeded safety bound')
 
     def binary(self, endpoint):
+        # Actions ZIP uses the default API media type and a binary redirect.
+        # Release assets instead require octet-stream content negotiation.
+        if re.fullmatch(r'actions/artifacts/[1-9][0-9]*/zip', endpoint):
+            return self.gh('api', f'repos/{REPO}/{endpoint}')
+        require(re.fullmatch(r'releases/assets/[1-9][0-9]*', endpoint), 'Unexpected binary endpoint')
         return self.gh('api', f'repos/{REPO}/{endpoint}', '-H', 'Accept: application/octet-stream')
 
 
@@ -172,8 +227,19 @@ def verify_assets(release, files, github):
         require(github.binary(f"releases/assets/{a['id']}") == expected, 'Uploaded bytes mismatch')
 
 
+def validate_publisher_comparison(comparison, read_bytes):
+    expected = {MANIFEST, NOTES}
+    files = comparison.get('files', [])
+    require(comparison['status'] == 'ahead' and len(files) == len(expected) and {f['filename'] for f in files} == expected, 'Publisher branch must only add frozen manifest/notes to main')
+    for f in files:
+        require(f['status'] == 'added', 'Frozen release records must be new files')
+        data = read_bytes(f['filename'])
+        blob = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+        require(f.get('sha') == blob, 'Remote publisher blob differs from checkout')
+
+
 def main():
-    require(os.environ.get('GITHUB_REPOSITORY') == REPO and os.environ.get('GITHUB_REF') == 'refs/heads/release/v0.1.1', 'Only reviewed release branch may publish')
+    require(os.environ.get('GITHUB_REPOSITORY') == REPO and os.environ.get('GITHUB_REF') == f'refs/heads/release/{TAG}', 'Only reviewed release branch may publish')
     publisher = os.environ.get('GITHUB_SHA', '')
     require(hex_value(publisher, 40), 'Missing publisher commit')
     root = pathlib.Path(__file__).resolve().parents[1]
@@ -186,8 +252,7 @@ def main():
     require(g.get('git/ref/heads/main')['object']['sha'] == source, 'Final main source moved; inspect before publication')
     require(g.get(f'git/commits/{source}')['tree']['sha'] == m['source_tree'], 'Source tree mismatch')
     comparison = g.get(f'compare/{source}...{publisher}')
-    require(comparison['status'] == 'ahead' and 0 < len(comparison.get('files', [])) <= 2 and {f['filename'] for f in comparison['files']} <= {MANIFEST, NOTES}, 'Publisher branch must only add frozen manifest/notes to main')
-    require(all(f['status'] == 'added' for f in comparison['files']), 'Frozen release records must be new files')
+    validate_publisher_comparison(comparison, lambda path: (root / path).read_bytes())
     # Verify app version directly at source, not at an arbitrary publisher checkout.
     package = g.get(f'contents/package.json?ref={source}')
     import base64
@@ -214,7 +279,7 @@ def main():
         (out / name).write_bytes(data)
     # Every subsequent mutation is one-shot. Failures leave a draft for inspection.
     require(g.get('git/ref/heads/main')['object']['sha'] == source, 'Main changed during verification')
-    g.gh('release', 'create', TAG, '--repo', REPO, '--target', source, '--draft', '--title', 'InkLeet v0.1.1', '--notes-file', str(root / NOTES))
+    g.gh('release', 'create', TAG, '--repo', REPO, '--target', source, '--draft', '--title', f'InkLeet {TAG}', '--notes-file', str(root / NOTES))
     g.gh('release', 'upload', TAG, '--repo', REPO, *[str(out / name) for name in sorted(files)])
     releases = [r for r in g.pages('releases') if r['tag_name'] == TAG]
     require(len(releases) == 1, 'Expected one draft')

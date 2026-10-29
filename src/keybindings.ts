@@ -5,7 +5,7 @@ export const commandChoices=[
  ["workbench.local","打开本地运行面板"],["workbench.environment","管理开发环境"],["workbench.manual","使用手册"],
  ["editor.save","保存当前文档"],["editor.goBack","返回代码位置"],["editor.goForward","前进代码位置"],
  ["editor.undo","撤销"],["editor.redo","重做"],["editor.selectAll","全选"],["editor.rename","重命名符号"],
- ["editor.implementation","转到实现"],["editor.definition","转到定义"],["editor.references","查找引用"],
+ ["editor.codeActions","代码操作"],["editor.implementation","转到实现"],["editor.definition","转到定义"],["editor.references","查找引用"],
  ["editor.signature","参数提示"],["editor.completion","触发补全"],["editor.format","格式化文档"],
  ["debug.toggleBreakpoint","切换断点"],
 ] as const;

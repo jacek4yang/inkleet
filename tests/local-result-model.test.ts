@@ -75,3 +75,14 @@ test("partial selected output retains invocation ordinals",()=>{
  assert.equal(r.rows[0].value.caseNumber,2);assert.equal(r.rows[0].multiple,true);
  assert.equal(r.rows[1].value.caseNumber,1);assert.equal(r.rows[1].missing,true);assert.equal(r.rows[1].multiple,true);
 });
+
+test("policy settings belong to the immutable run, and invalid tolerance is never a match",()=>{
+ const record={documentKey:"test",clientRequestId:"request",snapshot:{code:"",input:"[1]",metadata:JSON.stringify({name:"f",params:[{name:"v",type:"integer[]"}]}),title:"test",language:"rust" as const},cases:[{id:"a",name:"A",input:"[1]",expectation:{mode:"float-json" as const,target:{kind:"return" as const},value:"9007199254740992",absoluteTolerance:"0",relativeTolerance:"0"}}],invocations:[{caseIndex:0,groupIndex:0,caseNumber:1}]};
+ const result={phase:"finished",exitCode:0,timedOut:false,canceled:false,truncated:false,error:"",results:['{"case":1,"ok":true,"value":9007199254740993}']};
+ assert.equal(localResultReport(result,record).mismatched,1);
+ record.cases[0].expectation.absoluteTolerance="1";
+ assert.equal(localResultReport(result,record).matched,1);
+ record.cases[0].expectation.absoluteTolerance="-";
+ const invalid=localResultReport(result,record);assert.equal(invalid.matched,0);assert.equal(invalid.unchecked,1);
+ assert.equal(invalid.rows[0].value.value,"9007199254740993");
+});

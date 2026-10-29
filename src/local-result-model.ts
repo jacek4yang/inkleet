@@ -1,5 +1,5 @@
 import {displayResult,parameterNames,resultCaseNumber,type DisplayResult} from "./test-cases.ts";
-import {compareJson,type Expectation} from "./case-expectations.ts";
+import {compareExpectation,type Expectation} from "./case-expectations.ts";
 import type {RunContext} from "./run-context.ts";
 export type RunOutput={phase:string;exitCode:number|null;timedOut:boolean;canceled:boolean;truncated:boolean;error:string;results:string[]};
 export type Comparison={label:string;state:"match"|"mismatch"|"error"|"unavailable"|"incomplete"};
@@ -30,7 +30,7 @@ export function localResultReport(result:RunOutput,record:RunContext|null):Batch
    else{
     const argument=expectation.target.kind==="argument"?value.argumentsAfterCall?.[expectation.target.index]:null;
     if(expectation.target.kind==="argument"&&(!argument||argument.unavailable))comparison={label:"参数无法比较",state:"unavailable"};
-    else try{const match=compareJson(argument?argument.value:value.value,expectation.value)==="match";comparison={label:match?"符合预期":"与预期不符",state:match?"match":"mismatch"};}
+    else try{const match=compareExpectation(argument?argument.value:value.value,expectation)==="match";comparison={label:match?"符合预期":"与预期不符",state:match?"match":"mismatch"};}
     catch{comparison={label:"结果无法比较",state:"unavailable"};}
    }
   }

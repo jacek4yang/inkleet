@@ -52,3 +52,37 @@ test("execution counting does not inherit comparison node or exponent limits",()
  assert.throws(()=>invocationCount("[".repeat(129)+"0"+"]".repeat(129),1));
  assert.throws(()=>invocationCount("true\n".repeat(101),1));
 });
+
+test("float policy has explicit absolute/relative bounds and preserves large integers",async()=>{
+ const {compareExpectation}=await import("../src/case-expectations.ts");
+ const e=(value:string,absoluteTolerance="0.000001",relativeTolerance="0.000001")=>({mode:"float-json" as const,target:{kind:"return" as const},value,absoluteTolerance,relativeTolerance});
+ assert.equal(compareExpectation('[0.30000000000000004,{"x":1000001}]',e('[0.3,{"x":1000000}]')),"match");
+ assert.equal(compareExpectation("0.000002",e("0","0.000001","0")),"mismatch");
+ assert.equal(compareExpectation("-1.000001",e("-1","0.000001","0")),"match");
+ assert.equal(compareExpectation("9007199254740993",e("9007199254740992","0","0")),"mismatch");
+ assert.equal(compareExpectation("9007199254740993",e("9007199254740992","1","0")),"match");
+ assert.equal(compareExpectation("[1,2]",e("[2,1]","0","0")),"mismatch");
+ assert.equal(compareExpectation('"1"',e("1")),"mismatch");
+ assert.equal(compareExpectation("1e-308",e("0","1e-308","0")),"match");
+ assert.equal(compareExpectation("5e-324",e("0","5e-324","0")),"match");
+ assert.equal(compareExpectation("6e-324",e("0","5e-324","0")),"mismatch");
+ for(const tolerance of ["-1","NaN","Infinity","1e999999","",'"1"'])assert.throws(()=>compareExpectation("1",e("1",tolerance,"0")));
+ for(const value of ["1e309","1".repeat(257),'{'+'"x":1,"x":1}'])assert.throws(()=>compareExpectation(value,e(value)));
+});
+
+test("unordered policy is an exact outer-array multiset, not recursive or guessed",async()=>{
+ const {compareExpectation}=await import("../src/case-expectations.ts");
+ const e=(value:string)=>({mode:"unordered-array" as const,target:{kind:"return" as const},value});
+ assert.equal(compareExpectation('[{"a":1,"b":2},9007199254740993,2,2]',e('[2,9007199254740993,{"b":2,"a":1},2]')),"match");
+ assert.equal(compareExpectation("[1,1,2]",e("[1,2,2]")),"mismatch");
+ assert.equal(compareExpectation("[[1,2],[3]]",e("[[2,1],[3]]")),"mismatch");
+ assert.equal(compareExpectation("[9007199254740993]",e("[9007199254740992]")),"mismatch");
+ assert.throws(()=>compareExpectation("1",e("1")));
+ assert.throws(()=>compareExpectation('[{"a":1,"a":1}]',e('[{"a":1}]')));
+ assert.throws(()=>validateExpectation({mode:"automatic",target:{kind:"return"},value:"1"}));
+});
+
+test("zero-parameter functions use explicit empty-array invocations",()=>{
+ assert.equal(invocationCount("[]\n[]",0),2);
+ for(const input of ["", "[1]", "null", "{}", "[]\n1"])assert.throws(()=>invocationCount(input,0));
+});

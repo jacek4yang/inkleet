@@ -1,7 +1,7 @@
 import {validateExpectation,type Expectation} from "./case-expectations.ts";
 export type LocalCase={id:string;name:string;input:string;expectation?:Expectation|null};
 export function parameterNames(metadata:string):string[]{
- try{const value=JSON.parse(metadata);if(value.systemdesign||!Array.isArray(value.params)||value.params.length>32)return [];
+ try{const value=JSON.parse(metadata);if(value.systemdesign||value.classname){return typeof value.classname==="string"&&value.constructor&&Array.isArray(value.constructor.params)&&Array.isArray(value.methods)?["操作","参数"]:[];}if(!Array.isArray(value.params)||value.params.length>32)return [];
  return value.params.map((p:unknown,i:number)=>{const name=(p as {name?:unknown})?.name;return typeof name==="string"&&name.length<=80?name:"参数 "+(i+1);});}catch{return [];}
 }
 export function seedCases(sample:string,examples:string,names:string[]):LocalCase[]{

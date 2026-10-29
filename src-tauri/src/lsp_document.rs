@@ -60,6 +60,75 @@ pub fn response(kind:&str,value:&mut Value,prefix:u32){
         _=>{}
     }
 }
+
+/// Pyright places lazy autoimports at virtual line zero, before our public
+/// imports. Relocate only a recognized import-only insertion into an authored
+/// module with an unambiguous non-docstring/non-future first statement. This is
+/// not a general clamp from helper code into user code: every other shape fails
+/// the existing prefix/range validation unchanged.
+pub fn completion_imports(language:&str,value:&mut Value,prefix:u32,text:&str){
+    if language!="python3" || prefix==0{return;}
+    fn identifier(s:&str)->bool{
+        let mut chars=s.chars();chars.next().is_some_and(|c|c.is_ascii_alphabetic()||c=='_')&&chars.all(|c|c.is_ascii_alphanumeric()||c=='_')
+    }
+    fn module(s:&str)->bool{!s.is_empty()&&s.split('.').all(identifier)&&s!="__future__"}
+    fn import_only(s:&str)->bool{
+        if s.len()>4096||!s.ends_with('\n'){return false;}
+        let mut count=0;
+        for line in s.lines().filter(|line|!line.is_empty()){
+            let tokens=line.split_whitespace().collect::<Vec<_>>();
+            let valid=match tokens.as_slice(){
+                ["import",name]=>module(name),
+                ["import",name,"as",alias]=>module(name)&&identifier(alias),
+                ["from",name,"import",symbol]=>module(name)&&identifier(symbol),
+                ["from",name,"import",symbol,"as",alias]=>module(name)&&identifier(symbol)&&identifier(alias),
+                _=>false,
+            };
+            if !valid||line.starts_with(char::is_whitespace){return false;}count+=1;
+        }
+        count>0
+    }
+    let anchor=text.lines().enumerate().find(|(_,line)|!line.trim().is_empty()&&!line.trim_start().starts_with('#'));
+    let Some((anchor,first))=anchor else{return;};
+    // Preserve shebang/coding comments, leading comments and blank lines. Do
+    // not guess where a module docstring, decorator or future-import block ends.
+    let first=first.trim_end();
+    let definition=first.starts_with("class ")||first.starts_with("def ")||first.starts_with("async def ");
+    let assignment=first.split_once('=').is_some_and(|(name,tail)|identifier(name.trim())&&!tail.starts_with('='));
+    if first.starts_with(char::is_whitespace)||(!definition&&!assignment){return;}
+    let Some(edits)=value.get_mut("additionalTextEdits").and_then(Value::as_array_mut)else{return;};
+    for edit in edits{
+        if edit.get("newText").and_then(Value::as_str).is_none_or(|s|!import_only(s)){continue;}
+        let zero=|v:&Value|v.get("line").and_then(Value::as_u64)==Some(0)&&v.get("character").and_then(Value::as_u64)==Some(0);
+        if !edit.get("range").is_some_and(|r|zero(&r["start"])&&zero(&r["end"])){continue;}
+        edit["range"]["start"]["line"]=Value::from(prefix as u64+anchor as u64);
+        edit["range"]["end"]["line"]=Value::from(prefix as u64+anchor as u64);
+    }
+}
+
+#[cfg(test)]mod completion_import_tests{
+    use super::*;use serde_json::json;
+    fn item(text:&str)->Value{json!({"label":"PurePath","additionalTextEdits":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":text}]})}
+    #[test]fn python_import_only_insertion_preserves_leading_comments(){
+        for source in ["class Solution:\n    pass\n","def solve(): pass\n","path = PurePa\n","async def solve(): pass\n"]{
+            let text=format!("#!/usr/bin/python\n# coding: utf-8\n\n{source}");let mut value=item("from pathlib import PurePath\n");
+            completion_imports("python3",&mut value,8,&text);
+            assert_eq!(value["additionalTextEdits"][0]["range"]["start"]["line"],11);
+            let mut mapped=json!([value]);response("completion",&mut mapped,8);
+            assert_eq!(mapped[0]["additionalTextEdits"][0]["range"]["start"]["line"],3);
+        }
+    }
+    #[test]fn never_clamps_unknown_helper_edits_or_guesses_python_preamble(){
+        for source in ["\"\"\"module docs\"\"\"\nclass Solution: pass\n","from __future__ import annotations\nclass Solution: pass\n","@decorate\nclass Solution: pass\n","('module docstring')\nclass Solution: pass\n","    path = x\n"]{
+            let mut value=item("from pathlib import PurePath\n");completion_imports("python3",&mut value,8,source);assert_eq!(value["additionalTextEdits"][0]["range"]["start"]["line"],0);
+        }
+        for inserted in ["from __future__ import annotations\n","import pathlib; run()\n","from pathlib import *\n","import pathlib","path=0\n"," from pathlib import PurePath\n"]{
+            let mut value=item(inserted);completion_imports("python3",&mut value,8,"path = x\n");assert_eq!(value["additionalTextEdits"][0]["range"]["start"]["line"],0);
+        }
+        let mut value=item("from pathlib import PurePath\n");value["additionalTextEdits"][0]["range"]["end"]["character"]=json!(1);
+        completion_imports("python3",&mut value,8,"path=x");assert_eq!(value["additionalTextEdits"][0]["range"]["start"]["line"],0);
+    }
+}
 pub fn diagnostics(value:&mut Value,prefix:u32){
     if prefix==0{return;}
     if let Some(items)=value.get_mut("diagnostics").and_then(Value::as_array_mut){

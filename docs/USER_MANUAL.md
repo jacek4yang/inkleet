@@ -1,6 +1,6 @@
 # InkLeet 使用手册
 
-This manual describes development source, not a guarantee for the published v0.1.0 package. The protected main baseline and acceptance limits are distinguished in [STATUS.md](../STATUS.md). Reading-layout and compiler-diagnostics changes described below are branch features, not yet delivered test-package features.
+本手册描述当前 0.1.2 源码。公开安装包以对应 Release 的版本、源码和校验记录为准；测试与平台验收边界见 [STATUS.md](../STATUS.md)。
 
 ## 工作台
 左侧题库与最近题目，中间题面或笔记，右侧代码。顶栏图标提供专注、题库、链接和设置。
@@ -36,6 +36,7 @@ Editor settings include a font selector for installed fonts, with a default Inte
 The toolbar command button opens workbench commands. Ctrl+Shift+P (Command+Shift+P on macOS) also opens them outside the focused editor; inside the editor, its palette includes available workbench actions. Settings support additional custom shortcuts for listed editor and workbench commands, without replacing the existing defaults. Named keybinding presets are not provided.
 
 - F2: rename a symbol in the current solution through LSP; one undo restores the change. Use Preview or Shift+Enter to review edits before applying them. Cross-file edits are not supported.
+- Ctrl+.（macOS Command+.）：请求当前选择的代码操作，先查看完整修改预览，再明确应用；一次撤销恢复原文。仅接受受支持语言服务的当前解答源码编辑，不保存文件或执行命令。
 - F12：转到定义；工具链源码在只读窗口打开。
 - Shift+F12：查找当前解答中的引用。
 - Ctrl+Space：补全；Ctrl+Shift+Space（macOS 为 Command+Shift+Space）：参数提示。
@@ -45,7 +46,7 @@ The toolbar command button opens workbench commands. Ctrl+Shift+P (Command+Shift
 设置 → 编辑器可配置保存时格式化，支持语言覆盖。只有显式保存才自动格式化，停顿、切换焦点均不会触发。格式化或写入失败时保留当前草稿和原有磁盘文件，未保存标记不会消失；格式化结果可撤销。手动格式化只修改编辑器内容，不代替保存。工具尚未安装时需要先安装对应语言环境。
 
 语法着色使用 CodeMirror/Lezer 增量解析；支持的语言服务器额外提供语义分类。语义结果随源码版本隔离，编辑后旧分类立即清除。服务器不支持或暂时失效时保留基础着色。并非所有语言服务器都提供语义标记。
-只读源码窗口支持继续转到定义：F12、Ctrl+左键（macOS 为 Command+左键），Vim 普通模式可使用 gd。Alt+左/右返回或前进；Vim 可使用 Ctrl+O / Ctrl+I。跳转仍取决于当前语言服务器提供的位置及已安装的源码。快速修复和更完整的重构功能尚未接入，不展示空命令。
+只读源码窗口支持继续转到定义：F12、Ctrl+左键（macOS 为 Command+左键），Vim 普通模式可使用 gd。Alt+左/右返回或前进；Vim 可使用 Ctrl+O / Ctrl+I。跳转仍取决于当前语言服务器提供的位置及已安装的源码。代码操作支持的语言服务、快照与当前文件边界见 [编辑能力矩阵](EDITING_SUPPORT.md)；不提供任意跨文件修改或服务器命令执行。
 
 ## Tab 显示宽度
 设置 → 编辑器 → Tab 显示宽度，范围为 1–8，默认 4。保存设置后更新代码、笔记和只读源码窗口中的制表符显示，不自动将已有源码中的空格或制表符互相转换，不改变语言缩进单位和格式化策略。混合缩进时，编辑命令仍会按 CodeMirror 的列计算规则工作。
@@ -75,7 +76,7 @@ Windows Java 使用应用自己的 UTF-8 启动器，不修改系统语言设置
 本地面板从题目提供的官方样例初始化测试用例。用例可增加、改名、删除和切换，按题目与解答保存到本机。已知函数参数显示独立输入框，每个参数填写一个 JSON 值；无法可靠拆分的输入保留文本编辑。调试使用当前选中用例。
 运行结果默认展示实际返回值、标准输出和错误，原始协议内容可通过更多入口展开。运行后修改源码或输入会标记结果过期；不会自动编造期望输出或判定通过。底部面板可拖动改变高度或收起。
 仅运行可信代码。工具目录隔离不是安全沙箱，程序使用当前用户权限执行。
-本地输出不代表力扣判题结论。普通运行限时 10 秒，输出上限 64 KiB。
+本地输出不代表力扣判题结论。普通运行限时 10 秒，标准输出/错误上限 64 KiB；结构化结果文件最多 1 MiB，超过限制不会标记为符合预期。
 调试连续执行限时 30 秒，会话最多 30 分钟。编译预算按语言区分。
 
 先通过代码栏终端图标打开一次本地面板，再使用以下调试快捷键。首次直接 F5 打开面板的流程尚未接入。普通输入框、笔记、弹窗和输入法组合输入不触发全局调试键。
@@ -95,14 +96,23 @@ Windows Java 使用应用自己的 UTF-8 启动器，不修改系统语言设置
 
 ## 保存、笔记与恢复
 原生客户端按题目、语言与命名解答隔离源码。编辑期间只更新恢复草稿，Ctrl+S 或保存图标才写入正式文件；未保存时显示圆点。关闭时等待正在进行的写入，并对尚未保存内容提供保护选项。重启可恢复未保存草稿。不要同时运行多个版本写同一份文件。
+
+### 解答归档与恢复
+
+解答菜单中的「归档解答」需要确认；随后从活动列表移除，切回默认解答。「已归档」中可按原名称和原 ID 恢复。默认解答不能归档，始终保留一个可用入口。
+
+归档不是删除：正式源码、未保存草稿和冲突恢复副本都留在原目录，共享笔记不变。归档会等待已请求的保存和草稿写入；保存失败、磁盘源码或恢复草稿发生变化时会拒绝，先处理冲突再重新确认。恢复后未保存内容仍显示未保存，不会自动覆盖正式源码。
+
+名称及每种语言 128 份的上限包含归档记录，避免恢复时同名覆盖。没有永久删除或自动清空归档功能；需要腾出空间时先导出/备份，关闭应用后自行整理。旧版不识别已归档记录，切勿让不同版本同时写入工作区。归档/恢复报错但状态不确定时，关闭对话框并刷新列表确认，不要盲目重复。
+
 外部编辑器修改笔记后，返回应用会检查更新；也可在设置中手动刷新。
 干净草稿可以更新，脏草稿与外部修改发生冲突时必须先比较。不会静默覆盖。
 保存失败时保留内存草稿，先导出再处理磁盘错误；恢复副本不等于完整版本历史。
 浏览器预览只有内存草稿，刷新前需要导出。
 
 ## 账号与在线评测
-Development source offers a native QR flow and an official-window fallback. For the fallback, complete login in the official window, then return and verify. QR login and restored sessions are validated by the native client before exposing account identity.
-Remember-login is optional and uses the OS credential store, never plaintext files or editor JavaScript. Actual QR/account completion, cross-restart restoration and each platform store remain unaccepted. A locked or unavailable store, or uncertain cleanup, can block login until resolved; cancel/sign-out do not silently ignore credential cleanup errors. See [native login limitations](NATIVE_LOGIN.md).
+当前源码提供原生二维码登录和官方窗口备用流程。 For the fallback, complete login in the official window, then return and verify. QR login and restored sessions are validated by the native client before exposing account identity.
+Remember-login is optional and uses the OS credential store, never plaintext files or editor JavaScript. 真实账号完成、跨重启会话与每个平台存储分别验收；合成凭据探针和浏览器夹具不代表真实账号通过。 A locked or unavailable store, or uncertain cleanup, can block login until resolved; cancel/sign-out do not silently ignore credential cleanup errors. See [native login limitations](NATIVE_LOGIN.md).
 公开题库无需登录。登录后才能使用账户完成状态及在线评测。
 运行或提交才发送当前代码与测试用例；不会上传笔记。正式提交仍需确认。
 网络状态未知时不会自动重发；有评测编号时可继续查询原请求。
@@ -112,12 +122,20 @@ Remember-login is optional and uses the OS credential store, never plaintext fil
 ## 本地用例与批量运行
 
 - 展开“预期结果”，明确选择返回值或调用后参数。留空表示未设置；JSON 的 null 是一个明确的预期值。
-- 比较使用精确 JSON 结构：保留数组顺序，忽略对象键顺序，拒绝重复对象键；等价十进制写法视为相同，不对大整数做浮点转换。不推断无序答案、浮点容差或官方特殊判题规则。
+- 默认精确 JSON 比较保留数组顺序、忽略对象键顺序、拒绝重复对象键；等价十进制写法视为相同，不对大整数做浮点转换。
+- 可明确选择十进制浮点容差：`|实际−预期| ≤ max(绝对误差, 相对误差 × max(|实际|, |预期|))`，递归比较数值且保留数组顺序。超出支持数值范围时显示无法比较，不判为通过。
+- 可明确选择最外层数组无序比较：只忽略最外层顺序，保留重复次数和内层顺序；不是集合去重。不会根据题目猜测任何比较策略，也不声称等价于官方特殊判题。
 - 一个命名用例包含多组函数调用时仍可运行，但暂不套用单个预期值比较。
 - “运行全部用例”一次提交不可变快照，最多 64 个命名用例、共 100 组调用。整批编译一次，共享同一进程、10 秒执行预算和输出上限；不是每个用例独立的时限或沙箱。
 - 运行后编辑代码、名称、输入或预期值不会改写已产生的结果，会标记结果过期。“重跑失败用例”由用户显式触发，使用当前代码和仍存在的对应用例；不会自动重试未知结果。
 - 超时、停止、截断或异常退出时保留已有输出，不标记为符合预期；尚无输出的调用显示“未返回结果”，不声称它从未开始执行。
 - 切换解答后返回，可从仍存活的后台任务恢复运行快照。任务上下文只在本次应用进程内保留，不是长期提交历史。
-- 新版用例记录为版本 2，兼容读取版本 1；旧版遇到不支持的记录会保留原记录，不能把回退到示例误认为原用例已经丢失。
+- 用例记录继续使用版本 2，兼容读取版本 1。0.1.1 等旧版不认识 `float-json` / `unordered-array`；读取含这些策略的记录会保留原记录、回退示例并仅内存编辑。回退前先备份/导出，不能把回退界面误认为原用例已经丢失。
 - 本地“符合预期”不代表通过力扣判题。调试仍使用当前选中的单个用例。
 
+
+### 设计类与零参数输入
+
+Rust/Python 的受限设计类输入是连续两个 JSON 数组：操作名数组（首项为类名），以及与其逐项对应的参数数组。例如 `["Counter","add","get"] [[0],[2],[]]`。首项创建实例，后续仅调用题目元数据列明的方法；一组输出一个结果数组，构造和无返回值操作为 `null`。不同操作序列重新创建实例；它们仍共享同一进程与时间/输出预算。
+
+普通函数零参数调用用 `[]`，每个 `[]` 表示一次调用。支持类型、Rust 方法约定、NestedInteger 和明确拒绝的接口见 [本地测试契约](LOCAL_TEST_POLICIES.md)。不从任意输入推测方法或官方判题策略。

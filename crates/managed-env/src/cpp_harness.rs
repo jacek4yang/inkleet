@@ -58,7 +58,7 @@ pub(crate) fn literal(value:&Value,kind:&str,budget:&mut usize)->Result<String,S
 }
 pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),String>{
     if source.len()>2*1024*1024{return Err("C++ 源码超过 2 MiB".into());}
-    let config=crate::harness::configuration(metadata,input)?;
+    let config=crate::harness::ordinary_configuration(metadata,input)?;
     let raw:Value=serde_json::from_str(metadata).map_err(|_|"题目元数据无效")?;
     let style=raw.get("inkleetFunctionStyle").and_then(Value::as_str).unwrap_or("solution");
     if !matches!(style,"solution"|"free"){return Err("C++ 函数调用形式尚未支持".into());}

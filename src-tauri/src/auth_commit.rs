@@ -1,6 +1,6 @@
 //! A serialized credential transaction with cancellation visible during blocking I/O.
 use std::sync::atomic::{AtomicU64, Ordering};
-pub const RECOVERY_REQUIRED: &str = "STORAGE_RECOVERY_REQUIRED: canceled login could not restore saved credentials; forget this device before restarting";
+pub const RECOVERY_REQUIRED: &str = "STORAGE_RECOVERY_REQUIRED: saved credential state is uncertain; forget this device before logging in or restarting";
 pub trait Store {
     fn read(&self) -> Result<Option<(String, String)>, String>;
     fn write(&self, cookie: &str, csrf: &str) -> Result<(), String>;
@@ -62,5 +62,74 @@ pub fn persist(store: &impl Store, epoch: &AtomicU64, expected: u64, cookie: &st
     }
     #[test] fn rollback_failure_is_recovery_required_for_old_and_new_accounts(){
         for existing in [false,true] {let epoch=AtomicU64::new(1);let store=Broken{epoch:&epoch,writes:Cell::new(0),existing};assert_eq!(persist(&store,&epoch,1,"new","csrf",true).unwrap_err(),RECOVERY_REQUIRED);}
+    }
+}
+
+#[cfg(test)]
+mod failure_fixture_tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+    struct Fake<'a> {
+        epoch: &'a AtomicU64,
+        value: RefCell<Option<(String, String)>>,
+        fail_read: bool,
+        fail_write: bool,
+        fail_delete: bool,
+        cancel_read: bool,
+        writes: Cell<usize>,
+        deletes: Cell<usize>,
+    }
+    impl Store for Fake<'_> {
+        fn read(&self) -> Result<Option<(String, String)>, String> {
+            if self.cancel_read { self.epoch.fetch_add(1, Ordering::SeqCst); }
+            if self.fail_read { Err("synthetic locked store".into()) } else { Ok(self.value.borrow().clone()) }
+        }
+        fn write(&self, cookie: &str, csrf: &str) -> Result<(), String> {
+            self.writes.set(self.writes.get() + 1);
+            // A failed native write may already have changed the store; cleanup must not assume otherwise.
+            *self.value.borrow_mut() = Some((cookie.into(), csrf.into()));
+            if self.fail_write { Err("synthetic partial write".into()) } else { Ok(()) }
+        }
+        fn remove(&self) -> Result<(), String> {
+            self.deletes.set(self.deletes.get() + 1);
+            if self.fail_delete { Err("synthetic delete denied".into()) } else { *self.value.borrow_mut() = None; Ok(()) }
+        }
+    }
+    fn fake(epoch: &AtomicU64) -> Fake<'_> {
+        Fake { epoch, value: RefCell::new(Some(("old-fixture".into(), "old-csrf".into()))), fail_read: false, fail_write: false, fail_delete: false, cancel_read: false, writes: Cell::new(0), deletes: Cell::new(0) }
+    }
+    #[test]
+    fn stale_generation_canceled_read_and_unreadable_store_never_mutate_credentials() {
+        for mode in 0..3 {
+            let epoch = AtomicU64::new(1);
+            let mut store = fake(&epoch);
+            if mode == 0 { epoch.store(2, Ordering::SeqCst); }
+            if mode == 1 { store.cancel_read = true; }
+            if mode == 2 { store.fail_read = true; }
+            assert!(persist(&store, &epoch, 1, "new-fixture", "csrf", true).is_err());
+            assert_eq!(store.writes.get(), 0);
+            assert_eq!(store.deletes.get(), 0);
+            assert_eq!(store.value.borrow().as_ref().unwrap().0, "old-fixture");
+        }
+    }
+    #[test]
+    fn failed_save_with_successful_cleanup_is_explicitly_memory_only() {
+        let epoch = AtomicU64::new(1);
+        let mut store = fake(&epoch);
+        store.fail_write = true;
+        assert!(!persist(&store, &epoch, 1, "new-fixture", "csrf", true).unwrap());
+        assert_eq!(store.writes.get(), 1);
+        assert_eq!(store.deletes.get(), 1);
+        assert!(store.value.borrow().is_none());
+    }
+    #[test]
+    fn failed_cleanup_cannot_report_saved_or_memory_only_success() {
+        for remember in [false, true] {
+            let epoch = AtomicU64::new(1);
+            let mut store = fake(&epoch);
+            store.fail_write = true;
+            store.fail_delete = true;
+            assert_eq!(persist(&store, &epoch, 1, "new-fixture", "csrf", remember).unwrap_err(), RECOVERY_REQUIRED);
+        }
     }
 }

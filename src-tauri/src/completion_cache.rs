@@ -38,6 +38,11 @@ pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
     for key in ["label","filterText","sortText","insertText","insertTextFormat","insertTextMode","textEdit"]{
         if original.get(key)!=resolved.get(key){return Err("补全解析改变了原始替换内容".into());}
     }
+    if let Some(import)=original.pointer("/data/autoImportText").and_then(Value::as_str).filter(|s|!s.trim().is_empty()){
+        if !resolved.get("additionalTextEdits").and_then(Value::as_array).is_some_and(|edits|edits.iter().any(|edit|edit.get("newText").and_then(Value::as_str).is_some_and(|text|text.lines().any(|line|line.trim()==import.trim())))){
+            return Err("语言服务未解析所需 Python 导入，未应用任何修改".into());
+        }
+    }
     if original.pointer("/data/imports").and_then(Value::as_array).is_some_and(|items|!items.is_empty()){
         if !resolved.get("additionalTextEdits").and_then(Value::as_array).is_some_and(|edits|edits.iter().any(|edit|edit.get("newText").and_then(Value::as_str).is_some_and(|s|!s.is_empty())&&!original.get("additionalTextEdits").and_then(Value::as_array).is_some_and(|before|before.contains(edit)))){
             return Err("语言服务未解析所需导入，未应用任何修改，请重新触发补全".into());
@@ -47,6 +52,12 @@ pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
 }
 #[cfg(test)]mod tests{
     use super::*;use serde_json::json;
+    #[test]fn python_autoimport_must_be_resolved_before_symbol_application(){
+        let original=json!({"label":"PurePath","data":{"autoImportText":"from pathlib import PurePath"}});
+        assert!(validate_resolved(&original,&original).is_err());
+        let mut resolved=original.clone();resolved["additionalTextEdits"]=json!([{"newText":"from pathlib import Other\n"}]);assert!(validate_resolved(&original,&resolved).is_err());
+        resolved["additionalTextEdits"]=json!([{"newText":"from pathlib import PurePath\n"}]);assert!(validate_resolved(&original,&resolved).is_ok());
+    }
     #[test]fn original_server_item_is_retained_and_handles_expire(){
         let mut cache=CompletionCache::default();
         let original=json!({"label":"HashMap","data":{"opaque":1},"textEdit":{"range":{"start":{"line":7,"character":2},"end":{"line":7,"character":7}},"newText":"HashMap"}});

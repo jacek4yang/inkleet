@@ -760,3 +760,5 @@ dialog.source-viewer header{flex:none;height:auto;min-height:44px;padding:6px 10
 .login-panel .login-qr{display:block;width:220px;height:220px;max-width:100%;margin:10px auto;background:white;border-radius:4px}
 .login-panel .login-remember{display:flex;align-items:center;gap:6px;font-size:12px;margin:8px 0}
 .login-panel .login-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+
+.solution-name-dialog p{font-size:12px;line-height:1.6;overflow-wrap:anywhere}.solution-full-name{white-space:pre-wrap}.solution-dialog-actions{display:flex;justify-content:flex-end;gap:8px}.solution-archives{list-style:none;padding:0;margin:12px 0;max-height:min(50vh,360px);overflow:auto}.solution-archives li{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--theme-line,#dfe1d9)}.solution-archives li>span{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.solution-archives li>button{flex:none}

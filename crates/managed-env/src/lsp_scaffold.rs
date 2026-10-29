@@ -1,7 +1,7 @@
 //! Fixed virtual definitions for LeetCode's implicit judge types.
 use serde_json::Value;
 #[derive(Clone,Default)]
-pub struct Context { enabled:bool, solution:bool, list:bool, tree:bool }
+pub struct Context { enabled:bool, solution:bool, list:bool, tree:bool, nested:bool }
 impl Context {
     pub fn parse(metadata:Option<&str>)->Result<Self,String>{
         let Some(raw)=metadata else{return Ok(Self::default());};
@@ -9,14 +9,24 @@ impl Context {
         if raw.trim().is_empty(){return Ok(Self::default());}
         let value:Value=serde_json::from_str(raw).map_err(|_|"题目类型信息不是有效 JSON")?;
         if !value.is_object(){return Err("题目类型信息必须是对象".into());}
-        let Some(params)=value.get("params").and_then(Value::as_array)else{return Ok(Self::default());};
+        let design=crate::harness::is_design(&value);
+        let mut design_params=Vec::new();
+        if design{
+            let signatures=std::iter::once(&value["constructor"]).chain(value["methods"].as_array().into_iter().flatten());
+            for signature in signatures{
+                if let Some(params)=signature["params"].as_array(){design_params.extend(params.iter().cloned());}
+                if let Some(returned)=signature.get("return"){design_params.push(returned.clone());}
+            }
+        }
+        let Some(params)=(if design{Some(&design_params)}else{value.get("params").and_then(Value::as_array)})else{return Ok(Self::default());};
         if params.len()>128{return Err("题目参数数量过多".into());}
-        let mut result=Self{enabled:true,solution:value["inkleetFunctionStyle"]!="free",..Self::default()};
+        let mut result=Self{enabled:true,solution:!design&&value["inkleetFunctionStyle"]!="free",..Self::default()};
         for entry in params.iter().chain(value.get("return")){
             if let Some(kind)=entry.get("type").and_then(Value::as_str){
                 for token in kind.split(|c:char|!c.is_ascii_alphanumeric()&&c!='_'){
                     if token=="ListNode"{result.list=true;}
                     if token=="TreeNode"{result.tree=true;}
+                    if token=="NestedInteger"{result.nested=true;}
                 }
             }
         }
@@ -34,6 +44,7 @@ impl Context {
         // These are isolated type-checker declarations, never saved or executed.
         if self.list{prefix.push_str("class ListNode:\n    def __init__(self, val: int = 0, next: Optional['ListNode'] = None):\n        self.val: int = val\n        self.next: Optional['ListNode'] = next\n");}
         if self.tree{prefix.push_str("class TreeNode:\n    def __init__(self, val: int = 0, left: Optional['TreeNode'] = None, right: Optional['TreeNode'] = None):\n        self.val: int = val\n        self.left: Optional['TreeNode'] = left\n        self.right: Optional['TreeNode'] = right\n");}
+        if self.nested{prefix.push_str("class NestedInteger:\n    def __init__(self, value: Optional[int] = None): ...\n    def isInteger(self) -> bool: ...\n    def add(self, elem: 'NestedInteger') -> None: ...\n    def setInteger(self, value: int) -> None: ...\n    def getInteger(self) -> Optional[int]: ...\n    def getList(self) -> List['NestedInteger']: ...\n");}
         let lines=prefix.lines().count() as u32;
         Some((prefix+&body,lines))
     }
@@ -43,12 +54,14 @@ impl Context {
         let tokens=tokens(source);
         let list=self.list&&!declares_for(&tokens,"ListNode",language);
         let tree=self.tree&&!declares_for(&tokens,"TreeNode",language);
+        let nested=self.nested&&!declares_for(&tokens,"NestedInteger",language);
         let mut before=String::new();let mut after=String::new();
         match language{
             "rust"=>{
                 if self.solution&&!declares(&tokens,"Solution"){after.push_str("\npub struct Solution;\n");}
                 if list{after.push('\n');after.push_str(crate::rust_harness::LIST_TYPES);}
                 if tree{after.push('\n');after.push_str(crate::rust_harness::TREE_TYPES);}
+                if nested{after.push('\n');after.push_str(crate::rust_harness::NESTED_TYPES);}
             },
             "java"=>{
                 // Explicit package programs retain their authored import section.

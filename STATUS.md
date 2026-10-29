@@ -1,68 +1,61 @@
-# InkLeet development status
+# InkLeet source and release status
 
-Updated: 2026-10-26 UTC. Goal: a reliable everyday practice IDE, not package delivery alone.
+Updated: 2026-10-29 UTC. Source version: **0.1.2**. Goal: a reliable everyday practice IDE; no Zed-equivalence claim.
 
-## Development and public release are separate
-- Protected `main` baseline is `ac7bd446` after PR #97. [PR #94](https://github.com/jacek4yang/inkleet/pull/94) is merged history, not the current review entry.
-- [PR #97](https://github.com/jacek4yang/inkleet/pull/97), head `b272df54`, merged on 2026-10-26 after its required checks passed.
-- [v0.1.0](https://github.com/jacek4yang/inkleet/releases/tag/v0.1.0) is the published first preview, source `6b5bca312a4307bd69e4b00a8e950658e5868674`.
-- Current development metadata is **0.1.1**, an unpublished test build. No new Release/tag or main merge is implied.
-- Historical 93 PRs are closed as superseded; their branches and evidence remain.
+## Source, evidence and public packages are different
 
-## Current PR #97 test checkpoint
-- CI, configured Native Linux checks and three-platform packaging passed for the candidate at `b272df54`.
-- [Packaging run 40017518859](https://github.com/jacek4yang/inkleet/actions/runs/40017518859) built synthetic merge commit `d99b3965`, not the PR head or protected main itself. Windows/macOS passed in the first attempt; Linux passed in attempt 2.
-- [Linux x86_64 test package](https://github.com/jacek4yang/inkleet/actions/runs/40017518859/artifacts/12622051138).
-- [Windows x64 test packages](https://github.com/jacek4yang/inkleet/actions/runs/40017518859/artifacts/12529054271).
-- [macOS Intel test package](https://github.com/jacek4yang/inkleet/actions/runs/40017518859/artifacts/12529896743).
-- These are unpublished 0.1.1 test artifacts. Passing automation does not establish Windows/macOS interactive GUI acceptance, real-account online judgement, or release approval.
-- The reading-layout and compiler-diagnostics changes in this branch are based on merged PR #97. Their browser and native acceptance remain pending; they are not included in the test artifacts linked above.
+- [Releases](https://github.com/jacek4yang/inkleet/releases) is authoritative for public availability. A repository version or green PR is not a public release.
+- The published v0.1.1 baseline is `fbacb2041b83232a30a791965c58d93a7556a4ff`. Its [frozen notes](releases/v0.1.1.md) and [historical manifest](releases/v0.1.1.json) preserve exact source, gates and installer hashes. Its tag/assets are immutable.
+- A new release is published only from the exact final current `main` after all six source gates pass. The release's `RELEASE_MANIFEST.json` records the final source/tree, run attempts, artifact hashes and publisher identity; `SHA256SUMS` covers all four installers.
+- For new versions, the corresponding `release/v<version>` branch adds only frozen manifest/notes; the v0.1.1 transport-recovery exception remains historical only. The maintained publisher verifies every uploaded byte before publication and downloads it again afterward. It never overwrites an existing tag/release or blindly retries an uncertain mutation.
 
-## Earlier integrated changes
-- Completion browser regression synchronizes with CodeMirror's initial interaction guard and checks code/cursor/focus retention.
-- Judgement acknowledgement is duplicate-guarded and scoped to its login generation; late replies cannot replace a newer login's result.
-- Repeated explicit notes saves retain the last requested snapshot, maintain original file identity and CAS order, and do not save subsequent unrequested edits. Failure blocks queued writes without automatic retry.
-- Pending settings writes/editor reloads retain their modal owner; closing actions cannot discard that owner before completion. Independent operations release independent tokens.
-- Multi-parameter input editing retains literal drafts and focus separately from serialized input. Structured fields must each be one JSON value before run/debug; explicit raw mode supports multiple calls. Metadata refresh invalidates old field structure without rewriting input.
+## Changes in the 0.1.2 source line
 
-- CRLF/lone-CR editor snapshots are normalized while raw on-disk conflict baselines remain intact.
-- Stale references and initial definition results no longer reclaim unrelated focus; owned target-picker and recursive-reader navigation remain functional.
+### Editing
+- Preview-first code actions are owned by language-service session, source version and request token. Only bounded edits to the current authored document are accepted; commands, resources, other files, helper regions and stale responses are rejected. Applying is one undoable transaction and does not save.
+- Rust remains the primary real-adapter editing target. Actual production-launch probes cover lazy HashMap imports and an extract-variable action. Python import resolution has a narrow safe mapping through its virtual helper prefix; gopls direct import edits are tested without inventing resolve support.
+- Official parameter-snippet support is language/platform gated. Linux x86_64 C/C++/Java rollout uses prior real native snippet evidence and is requalified with the final source; Windows/macOS flags are not enabled just because protocol or package checks pass.
+- Browser composition/cancellation tests are synthetic lifecycle tests. Native trusted-input timing while an actual language server runs is an observation, not physical input latency, a real IME test, or long-session/Zed parity.
+- Current capability and evidence matrix: [Editing support](docs/EDITING_SUPPORT.md). Old editor-refactor reports are historical snapshots.
 
-## Historical verified delivery checkpoint
-Application source: `8cb5c18d642e085de02e3c755c88ca5f2e708f0e`. Later workflow/documentation commits do not imply a new application build.
-- [CI](https://github.com/jacek4yang/inkleet/actions/runs/39544655171) and [frontend + three-platform packaging](https://github.com/jacek4yang/inkleet/actions/runs/39544650848) passed on this exact source.
-- [Frontend evidence](https://github.com/jacek4yang/inkleet/actions/runs/39544650848/artifacts/12321740248) was downloaded and source/hash checked. The 22 new initial-definition focus cases passed, including delayed replies/source loads, Notes/settings focus, Escape, caret movement, blur/refocus, synthetic composition, newer-request isolation, target-picker handoff and Ctrl-click. These use mocked LSP IPC, not real IME acceptance.
-- [Full configured Native Linux](https://github.com/jacek4yang/inkleet/actions/runs/39544133055) passed on `4fa569f4854ee9cdb14dc2bd9f784654eacbca70`: 63 PASS files ending RESULT.txt and public CN NOT RUN. Application code is identical to 8cb5c18; the latter changes only the browser test and packaging trigger. The source difference is intentional and not an exact-commit claim.
-- First 4fa frontend runs failed because the new test expected one Escape to close a reader with a selected target. Corrected assertions require first Escape to collapse selection, then second Escape to close; no focus-safety assertion was removed.
+### Local tests and solutions
+- Explicit exact JSON, decimal absolute/relative tolerance, and outer-array multiset comparisons. Duplicates and nested array order are retained; unknown judge policies are never inferred. Incomplete/error/truncated outputs cannot pass.
+- Rust/Python support a bounded metadata-described design-class sequence and NestedInteger subset; zero-argument calls use an explicit input convention. Actual generated drivers are exercised rather than accepting generated-source string checks alone. Unsupported interfaces/languages fail clearly.
+- Confirmed solution archive/restore keeps immutable IDs, source, recovery drafts and conflict copies; shared notes are unchanged. The default solution remains active. Save/checkpoint ordering, changed disk/drafts, delayed replies and refresh/restore ownership are guarded. No permanent delete is exposed.
+- See [Local testing contracts](docs/LOCAL_TEST_POLICIES.md) and [User manual](docs/USER_MANUAL.md).
 
-### Historical test packages
-All four package files and their archive/source metadata were downloaded and hash-verified:
-- [Windows x64 setup EXE and MSI](https://github.com/jacek4yang/inkleet/actions/runs/39544650848/artifacts/12321038359).
-- [macOS Intel x86_64 DMG](https://github.com/jacek4yang/inkleet/actions/runs/39544650848/artifacts/12321297894).
-- [Linux x86_64 tar.gz](https://github.com/jacek4yang/inkleet/actions/runs/39544650848/artifacts/12320893350).
-These are 0.1.1 development artifacts, not a new public Release. Build/architecture/package checks do not establish Windows/macOS GUI or upgrade acceptance.
+### Installed Windows acceptance
+- A mandatory Windows packaging step now exercises unattended MSI fresh install/uninstall and upgrade from the hash-verified public v0.1.1 MSI. It launches the actual installed WebView2 app with real Tauri IPC, saves synthetic source/notes/named solutions, checks archive/restart/restore, and verifies notebook hashes survive upgrade/uninstall.
+- The test refuses pre-existing app data or related installed products, never disables security protections, and cannot substitute Chromium or mocked IPC. Its checked-in existence is not a PASS: the exact Windows job and embedded `MSI_INSTALLED_RESULT.json` must establish success before publication. Physical Windows desktop/IME, interactive MSI/NSIS and real LSP are separate. See [Windows acceptance](docs/WINDOWS_ACCEPTANCE.md).
 
-### Historical real public-site acceptance
-[Installed-client run](https://github.com/jacek4yang/inkleet/actions/runs/39579570256) reused the delivered Linux tar unchanged, with no application rebuild or managed-toolchain reinstall. Application commit is 8cb5c18; harness commit is `ad38c98e1dda62513856688aabf86a633d7b9493`.
-- PASS: real CN sidebar, public search, question and official Rust template loading, source save, normalized question-link opening, duplicate draft preservation, and offline restart/link/cache recovery.
-- The native process completed successfully. Sidebar evidence and local/live result records were separately required; UNVERIFIED is not accepted as PASS.
-- Anonymous official login UI: UNVERIFIED (automation WaitTimeout). A screenshot visibly contains login controls, but the automated check did not complete.
-- Authenticated login, personalized catalogue status, online Run and Submit: NOT RUN.
-- [Downloaded evidence](https://github.com/jacek4yang/inkleet/actions/runs/39579570256/artifacts/12336092461), SHA-256 `76333106335d965bd8ebfa94c5975c67a4c49f397ed8512e72882f6187f9d8cb`, records application and harness identity separately.
+### Login and debugging
+- Native QR and optional secure storage are retained. FAILED is not silently reinterpreted as QR expiry; account/site/session generations guard restored results and cancellation. Pending/failed credential deletion stays latched until confirmed cleanup.
+- Synthetic credential-store tests use a separate test service and unique slots, checking separate-process persistence/replacement/deletion on available CI operating systems. They are not real-account acceptance. No plaintext fallback is added.
+- Actual Rust Map pairing, nested Linux Map visibility, inline raw-action pointer targets and clipping checks are preserved. New Some/None/nested Option fixtures capture bounded actual adapter trees before any new classifier is qualified. Unknown shapes retain raw/generic access; pretty display never invokes debuggee functions.
+- See [Native login](docs/NATIVE_LOGIN.md) and [Rust variable inspection](docs/RUST_VARIABLE_VISUALIZATION.md).
 
-## Login and debugger source changes awaiting acceptance
-- Native QR login, optional OS credential-store restoration, transaction-aware cancellation and explicit sign-out are implemented in this branch. This does not establish successful authentication on a real account. See [native login](docs/NATIVE_LOGIN.md).
-- Variable paging and conservative Rust inspection are implemented, with raw fallback for unsupported shapes. This does not establish full Rust-type or real-debugger acceptance. See [debugger visualization](docs/RUST_VARIABLE_VISUALIZATION.md).
-- Combined local frontend checks: typecheck, 316 domain tests, build and JavaScript syntax passed. Browser and full native acceptance for this batch remain pending; isolated authentication tests are not full application validation.
+## Required final-source qualification
 
-## Remaining acceptance gaps
-- Real-account login, personalized catalogue/pagination, online Run/Submit and real native IME are not fully accepted. Public CN success above is not account acceptance.
-- This development branch adds native QR login and opt-in OS credential-store persistence. Real-account completion, restart restoration and platform store behavior remain NOT RUN; unavailable or uncertain storage fails closed without plaintext fallback. Existing test packages do not contain this new batch. Never retry an uncertain submission automatically.
-- Windows/macOS interactive install, upgrade, uninstall and GUI behavior need separate acceptance. Same application identity does not prove upgrade compatibility.
-- Ventura and long-session performance remain unqualified.
-- Windows/macOS packages remain unsigned; macOS is unnotarized. Never disable OS security protections.
-- Linux packages target Ubuntu 24.04 / Mint 22-style dependencies, not every distribution.
-- Managed language tools are not a security sandbox; execute only trusted code.
-- Android, macOS ARM and full design-class/special-interface support are not claimed.
+| Gate | Required evidence | What it does not prove |
+| --- | --- | --- |
+| CI Frontend Regression | Typecheck, domain/Python tests, build, full Chromium regression | Native IPC or physical IME |
+| Editing LSP ×3 | Actual pinned servers and production launch/mapping/edit guards on Linux/Windows/macOS Intel | Native WebView interaction or editor latency |
+| Local harness ×3 | Actual generated Rust/Python program execution and contract tests | All design classes, languages or official judge policies |
+| Native Linux Full Validation | Actual Linux WebView, owned tools, filesystem/restart, snippet/actions, credential probe | Windows/macOS GUI, physical IME or every Linux distro |
+| Rust collection DAP ×3 | Actual pinned debugger data, production-component replay, pointer/bounds checks | Native Windows/macOS WebView or every Rust type |
+| Packaging Required | Windows x64 EXE+MSI, macOS Intel DMG, Linux x64 tar; version/architecture/hash checks and configured installer tests | Signing, reputation, physical-device/interactive installer acceptance |
 
-[User manual](docs/USER_MANUAL.md) · [First-preview limitations](docs/releases/v0.1.0.md) · [Integration audit](docs/INTEGRATION.md)
+These are requirements, not a blanket PASS declaration. Use the exact release manifest's run IDs and test artifacts to distinguish passed, failed and never-run stages. PR synthetic merge commits are not accepted as final-main package provenance.
+
+## Remaining boundaries
+
+- Windows/macOS physical desktop workflows, interactive install/upgrade/uninstall, native IME, Ventura compatibility and long-session performance are not fully qualified. CI acceptance is limited to its explicit OS, test data and assertions.
+- Windows/macOS binaries are unsigned; macOS is unnotarized. Do not disable OS security protections. No signing credentials are assumed.
+- Real-account QR/fallback completion, remembered-session restart, personalized catalogue, online Run/Submit and logout races need separately authorized account acceptance. Fake fixtures and public CN access are not that evidence. International-site capabilities are limited as documented; no universal CN/international parity claim.
+- Linux packages target Ubuntu 24.04 / Mint 22-style WebKitGTK/GTK dependencies, not every distribution. Managed tools are not a security sandbox; execute trusted code only.
+- Full special-interface/design-class support and universal Rust visualization remain out of scope. Android and macOS ARM are not release attachment targets.
+- Before upgrading, back up solutions/notes/application data and close the old version. Do not run versions concurrently against the same data. New schema fields may be unreadable by older versions; archiving is reversible in this version, not a downgrade promise.
+
+## Historical evidence
+
+The previous [2026-10-26 status](docs/history/status-2026-10-26.md) preserves older PR/source/package records and known limits. Historical successful runs do not substitute for the final release gates above.

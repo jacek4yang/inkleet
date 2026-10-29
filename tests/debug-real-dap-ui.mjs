@@ -18,6 +18,13 @@ for (const request of trace.requests) {
   if (!responses[key] || responses[key].length < request.response.variables.length) responses[key] = request.response.variables;
 }
 assert.ok(result.locals?.length, "capture must include actual locals");
+const optionNames = ["option_some", "option_none", "option_nested_some", "option_nested_none"];
+assert.equal(result.optionQualification?.status, "CAPTURED_NOT_CLASSIFIED", "capture does not imply an unreviewed Option classifier");
+assert.deepEqual(Object.keys(result.optionCapture ?? {}).sort(), [...optionNames].sort());
+assert.equal(result.optionQualification.scalarPayloads.option_some.value, "41");
+assert.equal(result.optionQualification.scalarPayloads.option_nested_some.value, "7");
+assert.equal(trace.requests.some(request => request.command === "evaluate"), false, "pretty inspection must not invoke debuggee functions");
+const isRaw = variable => variable.name === "[raw]" && variable.presentationHint?.attributes?.includes("readOnly") && variable.presentationHint.attributes.includes("virtual");
 const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5175", "--strictPort"], { stdio: "inherit" });
 let browser;
 try {
@@ -75,6 +82,47 @@ try {
     await page.screenshot({ path: path.join(directory, `actual-dap-rendering${label}.png`) });
     await writeFile(path.join(directory, `actual-dap-rendering${label}-bounds.json`), JSON.stringify({ panel, cells: bounds, rawAction }, null, 2));
   }
+  // Replay only actual captured children through the existing generic variant
+  // renderer. Exact text checks prevent a guessed Some/None label or payload.
+  const replayOption = async (node, captured, depth = 0) => {
+    assert.ok(depth < 8, "fixture expansion remains bounded");
+    const variable = captured.variable;
+    const header = node.locator(':scope > .debug-variable');
+    assert.equal(await header.locator(':scope > button:first-child').getAttribute('aria-label'), variable.name);
+    assert.equal(await header.locator(':scope > code').textContent(), variable.value, "generic Option rendering must preserve the adapter value without inference");
+    const logical = (captured.children ?? []).filter(child => !isRaw(child.variable));
+    if (variable.variablesReference > 0 && !captured.repeatedReference) {
+      const toggle = header.locator(':scope > button:first-child');
+      if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+      const children = node.locator(':scope > .debug-tree-children > .debug-tree-node');
+      await node.locator(':scope > .debug-tree-children').waitFor();
+      await node.locator(':scope > .debug-tree-children > [role="status"]').waitFor({ state: 'hidden' });
+      assert.equal(await node.locator(':scope > .debug-tree-children > [role="alert"]').count(), 0, "every replay expansion must have a captured response");
+      assert.equal(await children.count(), logical.length);
+      for (let index = 0; index < logical.length; index++) await replayOption(children.nth(index), logical[index], depth + 1);
+    }
+  };
+  const optionBounds = [];
+  for (const name of optionNames) {
+    const node = root(name);
+    await replayOption(node, result.optionCapture[name]);
+    for (const width of [680, 320]) {
+      await page.locator('main.debug-panel').evaluate((node, width) => { node.style.width = `${width}px`; }, width);
+      await node.scrollIntoViewIfNeeded();
+      const cells = node.locator('.debug-variable > code');
+      const bounds = await cells.evaluateAll(cells => cells.map(cell => {
+        const rect = cell.getBoundingClientRect();
+        return { text: cell.textContent, x: rect.x, y: rect.y, width: rect.width, height: rect.height, scrollWidth: cell.scrollWidth, clientWidth: cell.clientWidth };
+      }));
+      const panel = await page.locator('main.debug-panel').boundingBox();
+      assert.ok(panel);
+      for (const cell of bounds) assert.ok(cell.width > 0 && cell.height > 0 && cell.x >= panel.x && cell.x + cell.width <= panel.x + panel.width && cell.y >= 0 && cell.y + cell.height <= 1000 && cell.scrollWidth <= cell.clientWidth, `actual ${name} value remains visible without clipping at ${width}px: ${cell.text}`);
+      const rawAction = (result.optionCapture[name].children ?? []).some(child => isRaw(child.variable)) ? await checkInlineRawAction(page, node) : null;
+      optionBounds.push({ name, width, cells: bounds, rawAction });
+      await page.screenshot({ path: path.join(directory, `actual-dap-${name}-${width}.png`) });
+    }
+  }
+  await writeFile(path.join(directory, "actual-dap-option-bounds.json"), JSON.stringify(optionBounds, null, 2));
   assert.deepEqual(errors, []);
-  await writeFile(path.join(directory, "UI_RESULT.txt"), "PASS: production VariableNode renders captured native CodeLLDB map keys and values in the same visible row after one expansion, plus empty map, HashSet and Vec. Chromium replay of actual adapter data; not a native WebView interaction test.\n");
+  await writeFile(path.join(directory, "UI_RESULT.txt"), "PASS: production VariableNode renders captured native CodeLLDB map keys and values in the same visible row after one expansion, plus empty map, HashSet and Vec. Captured Some/None/nested Option fixtures retain their exact adapter tree and structural scalar payloads; no Option classifier or None inference is claimed. Chromium replay of actual adapter data; not a native WebView interaction test.\n");
 } finally { await browser?.close(); server.kill(); }

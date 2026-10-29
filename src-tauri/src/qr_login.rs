@@ -35,7 +35,7 @@ pub fn valid_cookie(value: &str) -> bool {
 pub fn client() -> Result<Client, String> {
     Client::builder().https_only(true).redirect(Policy::none())
         .connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(20))
-        .user_agent("InkLeet/0.1.1 (+https://github.com/jacek4yang/inkleet)")
+        .user_agent(concat!("InkLeet/", env!("CARGO_PKG_VERSION"), " (+https://github.com/jacek4yang/inkleet)"))
         .build().map_err(|_| "Cannot initialize QR login transport".into())
 }
 async fn response(mut response: reqwest::Response, cookies: &mut Cookies) -> Result<Vec<u8>, String> {
@@ -107,6 +107,9 @@ fn parse_created(value: &Value) -> Result<(String, String), String> {
 }
 pub async fn poll(client: &Client, cookies: &mut Cookies, id: &str) -> Result<String, String> {
     let value = mutation(client, cookies, "checkQRCodeSignInStatus", CHECK, json!({"scanId":id})).await?;
+    parse_status(&value)
+}
+fn parse_status(value: &Value) -> Result<String, String> {
     let status = value["authSignInByScanWithPhone"]["status"].as_str().ok_or("Missing QR status")?;
     if !matches!(status, "WAITING" | "SUCCEED" | "EXPIRED" | "INVALID" | "FAILED") {
         return Err("QR login protocol changed; use official login".into());
@@ -127,5 +130,42 @@ pub async fn poll(client: &Client, cookies: &mut Cookies, id: &str) -> Result<St
         let make = |link: &str| json!({"authSignInCreateScanData":{"ok":true,"scanId":"fixture","data":json!({"link":link}).to_string()}});
         assert!(parse_created(&make("https://leetcode-cn.com/app?scan_id=fixture&action=login")).is_ok());
         for link in ["https://evil.example/app?scan_id=fixture&action=login", "https://leetcode-cn.com/app?scan_id=other&action=login", "https://leetcode-cn.com/app?scan_id=fixture&action=login&action=other", "http://leetcode-cn.com/app?scan_id=fixture&action=login"] { assert!(parse_created(&make(link)).is_err()); }
+    }
+}
+
+#[cfg(test)]
+mod protocol_fixture_tests {
+    use super::*;
+    #[test]
+    fn preserves_all_terminal_statuses_without_guessing_expiry_or_success() {
+        for status in ["WAITING", "SUCCEED", "EXPIRED", "INVALID", "FAILED"] {
+            assert_eq!(parse_status(&json!({"authSignInByScanWithPhone":{"status":status}})).unwrap(), status);
+        }
+        for value in [json!({}), json!({"authSignInByScanWithPhone":{"status":"SCANNED"}}), json!({"authSignInByScanWithPhone":{"status":true}})] {
+            assert!(parse_status(&value).is_err());
+        }
+    }
+    #[test]
+    fn cookie_rotation_accepts_only_the_expected_pair_and_hides_header_values() {
+        let mut cookies = Cookies { session: "synthetic-old".into(), csrf: "synthetic-old-csrf".into() };
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.append(reqwest::header::SET_COOKIE, "unrelated=ignored; Secure".parse().unwrap());
+        headers.append(reqwest::header::SET_COOKIE, "csrftoken=synthetic-new-csrf; Secure".parse().unwrap());
+        headers.append(reqwest::header::SET_COOKIE, "LEETCODE_SESSION=synthetic-new; Secure".parse().unwrap());
+        cookies.absorb(&headers).unwrap();
+        assert_eq!(cookies.header(), "LEETCODE_SESSION=synthetic-new; csrftoken=synthetic-new-csrf");
+        assert!(crate::session_store::validate(&cookies.header(), &cookies.csrf).is_ok());
+        assert!(sensitive(&cookies.header()).unwrap().is_sensitive());
+        headers.clear();
+        headers.append(reqwest::header::SET_COOKIE, "LEETCODE_SESSION=bad,value; Secure".parse().unwrap());
+        let error = cookies.absorb(&headers).unwrap_err();
+        assert!(!error.contains("bad,value"));
+    }
+    #[test]
+    fn international_and_confused_destinations_never_become_a_qr() {
+        let make = |link: &str| json!({"authSignInCreateScanData":{"ok":true,"scanId":"fixture","data":json!({"link":link}).to_string()}});
+        for link in ["https://leetcode.com/app?scan_id=fixture&action=login", "https://leetcode-cn.com.evil.example/app?scan_id=fixture&action=login", "https://user@leetcode-cn.com/app?scan_id=fixture&action=login", "https://leetcode-cn.com:8443/app?scan_id=fixture&action=login", "https://leetcode-cn.com/app?scan_id=fixture&action=login#extra"] {
+            assert!(parse_created(&make(link)).is_err());
+        }
     }
 }

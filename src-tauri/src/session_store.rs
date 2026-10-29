@@ -123,3 +123,53 @@ mod tests {
         assert!(decode("{\"version\":1,\"cookie\":\"x\",\"csrf\":\"x\",\"password\":\"x\"}").is_err());
     }
 }
+
+// Explicit opt-in integration probe: never uses the production service or slot.
+// The child process validates retrieval after a process boundary, not a mocked store.
+#[cfg(all(test, any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+mod native_tests {
+    use super::*;
+    const TEST_SERVICE: &str = "top.jacek.inkleet.credential-test";
+    const CHILD_TEST: &str = "session_store::native_tests::native_store_child";
+    const FIXTURE_COOKIE: &str = "LEETCODE_SESSION=synthetic-native-probe; csrftoken=synthetic-native-csrf";
+    const FIXTURE_CSRF: &str = "synthetic-native-csrf";
+    struct Cleanup(keyring::Entry);
+    impl Drop for Cleanup { fn drop(&mut self) { let _ = self.0.delete_credential(); } }
+    fn check<T>(result: Result<T, keyring::Error>, action: &str) -> T {
+        result.unwrap_or_else(|_| panic!("Synthetic native credential-store {action} failed (backend details redacted)"))
+    }
+    #[test]
+    #[ignore = "opt-in real OS store probe; uses only an isolated synthetic test slot"]
+    fn native_store_restart_roundtrip() {
+        assert_eq!(std::env::var("INKLEET_TEST_NATIVE_CREDENTIAL_STORE").as_deref(), Ok("1"), "Explicit native credential-store test opt-in is required");
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let slot = format!("synthetic-probe-{}-{unique}", std::process::id());
+        let entry = check(keyring::Entry::new(TEST_SERVICE, &slot), "entry creation");
+        assert!(matches!(entry.get_password(), Err(keyring::Error::NoEntry)), "Unique synthetic test slot must be absent before the probe");
+        let cleanup = Cleanup(entry);
+        let value = encode(FIXTURE_COOKIE, FIXTURE_CSRF).unwrap();
+        check(cleanup.0.set_password(&value), "write");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", CHILD_TEST, "--ignored", "--nocapture"])
+            .env("INKLEET_TEST_CREDENTIAL_SLOT", &slot)
+            .status().expect("Synthetic credential probe child must start");
+        assert!(status.success(), "Synthetic credential process-restart probe failed");
+        let replacement = encode("LEETCODE_SESSION=synthetic-replacement; csrftoken=synthetic-native-csrf", FIXTURE_CSRF).unwrap();
+        check(cleanup.0.set_password(&replacement), "replacement");
+        assert!(decode(&check(cleanup.0.get_password(), "replacement read")).unwrap().cookie.contains("synthetic-replacement"));
+        check(cleanup.0.delete_credential(), "delete");
+        assert!(matches!(cleanup.0.get_password(), Err(keyring::Error::NoEntry)), "Synthetic credential must be absent after deletion");
+        println!("PASS: real native credential store write, separate-process read, replacement and deletion; synthetic slot only, not real-account or GUI acceptance");
+    }
+    #[test]
+    #[ignore = "invoked only by the isolated native credential-store probe"]
+    fn native_store_child() {
+        assert_eq!(std::env::var("INKLEET_TEST_NATIVE_CREDENTIAL_STORE").as_deref(), Ok("1"));
+        let slot = std::env::var("INKLEET_TEST_CREDENTIAL_SLOT").expect("Only the parent probe provides a slot");
+        assert!(slot.starts_with("synthetic-probe-") && slot.len() < 128 && slot.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'));
+        let entry = check(keyring::Entry::new(TEST_SERVICE, &slot), "child entry creation");
+        let restored = decode(&check(entry.get_password(), "child read")).unwrap();
+        assert_eq!(restored.cookie, FIXTURE_COOKIE);
+        assert_eq!(restored.csrf, FIXTURE_CSRF);
+    }
+}

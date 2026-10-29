@@ -38,6 +38,7 @@ jobs:
         run: |
           python3 -m py_compile tests/native_smoke.py tests/native_wait.py tests/test_native_wait.py
           python3 -m unittest discover -s tests -p 'test_native_wait.py' -v
+          python3 -m unittest discover -s tests -p 'test_release_version.py' -v
       - name: Typecheck, domain tests, and build
         run: |
           npm run typecheck
@@ -104,6 +105,14 @@ jobs:
         run: |
           cargo test --locked --manifest-path crates/managed-env/Cargo.toml
           cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+      - name: Verify isolated synthetic Windows credential persistence
+        timeout-minutes: 5
+        shell: bash
+        env:
+          INKLEET_TEST_NATIVE_CREDENTIAL_STORE: '1'
+        run: |
+          set -o pipefail
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc session_store::native_tests::native_store_restart_roundtrip -- --ignored --exact --nocapture | tee evidence/windows-x64/credential-store.txt
       - name: Build unsigned x64 NSIS and MSI installers
         shell: bash
         run: npm run tauri -- build --ci --no-sign --target x86_64-pc-windows-msvc --bundles nsis,msi -- --locked
@@ -112,9 +121,15 @@ jobs:
         run: |
           git diff --exit-code -- package-lock.json src-tauri/Cargo.lock crates/managed-env/Cargo.lock
           if ($LASTEXITCODE -ne 0) { throw 'Dependency lockfiles changed during the build' }
+          ./tests/test-windows-installed-safety.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'MSI lifecycle ownership self-test failed' }
           ./scripts/verify-windows-packages.ps1 -TestOnly
           if ($LASTEXITCODE -ne 0) { throw 'MSI reader self-test failed' }
           ./scripts/verify-windows-packages.ps1
+      - name: Verify actual MSI install, v0.1.1 upgrade and installed WebView2 data recovery
+        timeout-minutes: 15
+        shell: pwsh
+        run: ./scripts/test-windows-installed.ps1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: inkleet-windows-x64-installers-${{ github.sha }}
@@ -305,6 +320,13 @@ jobs:
         run: |
           cargo test --locked --manifest-path crates/managed-env/Cargo.toml --target x86_64-apple-darwin
           cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-apple-darwin
+      - name: Verify isolated synthetic macOS credential persistence
+        timeout-minutes: 5
+        env:
+          INKLEET_TEST_NATIVE_CREDENTIAL_STORE: '1'
+        run: |
+          set -o pipefail
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-apple-darwin session_store::native_tests::native_store_restart_roundtrip -- --ignored --exact --nocapture | tee evidence/macos-intel/credential-store.txt
       - name: Build unsigned Intel test DMG
         run: npm run tauri -- build --ci --no-sign --target x86_64-apple-darwin --bundles dmg -- --locked
       - name: Verify the application inside the DMG

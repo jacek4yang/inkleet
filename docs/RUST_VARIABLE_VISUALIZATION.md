@@ -1,6 +1,6 @@
 # Rust variable inspection
 
-## Implemented display layer (native qualification pending)
+## Implemented display layer
 
 The inspector reads DAP variables only. It does not call `Debug`, `Display`,
 `iter`, `len`, lock a mutex, borrow a cell, upgrade a weak pointer, or interpret
@@ -31,7 +31,31 @@ adapter's generic tree.
   type, with explicit client-truncation labels. An adapter summary is not
   described as the complete underlying value. Text is never rendered as HTML.
 
-## Coverage and acceptance matrix
+## Evidence already established
+
+The [v0.1.1 frozen release record](../releases/v0.1.1.md) identifies exact-main
+runs, not a claim about an unbuilt working tree. That baseline established:
+
+- Actual pinned CodeLLDB on Linux x64, Windows x64 and macOS Intel: numeric-key
+  and String-key HashMap pairs, empty HashMap, small HashSet and ordered Vec.
+- Production-component Chromium replay of those actual transcripts, with same-row
+  key/value association, real pointer hits for the inline raw action and bounds
+  checks. This is not Windows/macOS native WebView acceptance.
+- Linux native WebView Map association and nested Vec-valued Map visibility with
+  scroll/pointer evidence. The three-platform DAP fixture did not establish this
+  nested Map shape on Windows/macOS.
+
+The 0.1.2 source adds bounded actual captures for Some(41), None::<i32>,
+Some(Some(7)) and Some(None::<i32>) to the same three-platform DAP gate. Captures
+are explicitly `CAPTURED_NOT_CLASSIFIED`: generic rendering and scalar children
+are checked before a new Option classifier may be considered. Empty children or
+summary strings never establish None. The prior unaccepted Option patch is not
+silently included. Use the new release manifest's exact runs for final results.
+
+## Presentation and still-required per-type acceptance
+
+This table describes inspectable adapter trees and remaining test cases, not a
+claim that every row has a specialized pretty-printer or complete native support.
 
 | Type family | Presentation | Required native acceptance |
 | --- | --- | --- |
@@ -51,10 +75,10 @@ Graphical tree/list diagrams and universal recognition of user-defined types are
 not implemented. They must not be inferred from a type name alone. Unrecognized
 structures remain inspectable using the generic tree.
 
-Existing native smoke scripts cover small HashMap and HashSet logical children.
-Those scripts are not evidence that this change, large-container paging, every
-listed type, or Windows/macOS has passed. Record actual Rust/CodeLLDB versions,
-platform, screenshots, and assertions for each native qualification run.
+The evidence above does not cover every row, large-container paging shape or
+platform-native interaction. In particular Result, ownership/interior-mutability
+types and arbitrary user enums need their own actual adapter cases. Record pinned
+Rust/CodeLLDB versions, platform, screenshots and assertions for each qualification.
 
 ## Regression requirements
 

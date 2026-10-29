@@ -12,8 +12,8 @@ def verify(root):
         with (root / path).open("rb") as stream:
             return tomllib.load(stream)
     version = js("package.json")["version"]
-    if re.fullmatch(r"0\.1\.1", version) is None:
-        raise ValueError("The current preview requires application version 0.1.1")
+    if re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version) is None:
+        raise ValueError("Application version must be stable numeric semver")
     lock = js("package-lock.json")
     values = {
         "npm lock": lock["version"],

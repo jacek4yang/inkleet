@@ -7,7 +7,7 @@ use crate::leetcode::{Leetcode, Identity};
 pub struct Auth { inner: Mutex<Inner>, epoch: AtomicU64 }
 #[derive(Default)]
 struct Inner { generation: u64, session: Option<Session>, attempt: Option<QrAttempt>, remember: bool, restore_started: bool, storage_recovery_required: bool }
-struct QrAttempt { client: reqwest::Client, cookies: crate::qr_login::Cookies, scan_id: String, seen_waiting: bool, in_flight: bool, initial_failures: u8 }
+struct QrAttempt { client: reqwest::Client, cookies: crate::qr_login::Cookies, scan_id: String, in_flight: bool }
 #[derive(serde::Serialize)]
 pub struct QrReply { pub attempt: u64, pub state: String, pub svg: Option<String>, pub identity: Option<Identity> }
 struct Session { _cookie: String, _csrf: String, identity: Identity }
@@ -30,6 +30,7 @@ pub fn open(app: &AppHandle, remember: bool) -> Result<(), String> {
         let mut inner = state.inner.lock().map_err(|_| "登录状态不可用")?;
         if state.epoch.load(Ordering::SeqCst) != generation { return Err("Login operation superseded".into()); }
         inner.generation = generation;
+        if inner.storage_recovery_required { return Err(crate::auth_commit::RECOVERY_REQUIRED.into()); }
         inner.attempt = None;
         inner.remember = remember;
         inner.restore_started = true;
@@ -91,16 +92,40 @@ pub fn cancel(app: &AppHandle) -> Result<(), String> {
 pub fn status(app: &AppHandle) -> Result<Option<Identity>, String> {
     Ok(app.state::<Auth>().inner.lock().map_err(|_| "登录状态不可用")?.session.as_ref().map(|s| s.identity.clone()))
 }
+impl Auth {
+    fn credentials(&self, account: &str) -> Result<(crate::judge_transport::Credentials, u64), String> {
+        let inner = self.inner.lock().map_err(|_| "登录状态不可用")?;
+        if self.epoch.load(Ordering::SeqCst) != inner.generation { return Err("Login state is changing".into()); }
+        let session = inner.session.as_ref().ok_or("请先登录中国站")?;
+        if session.identity.account != account { return Err("账号已切换，未发送旧账号的代码".into()); }
+        Ok((crate::judge_transport::Credentials { cookie: session._cookie.clone(), csrf: session._csrf.clone() }, inner.generation))
+    }
+    fn current(&self, generation: u64) -> bool {
+        self.inner.lock().is_ok_and(|inner| self.epoch.load(Ordering::SeqCst) == generation && inner.generation == generation && inner.session.is_some())
+    }
+    fn complete_restore(&self, generation: u64, result: Result<Option<(String, String, Identity)>, String>) -> Result<Option<Identity>, String> {
+        let mut inner = self.inner.lock().map_err(|_| "Login state unavailable")?;
+        // Even an absent record or a late network failure belongs to its old generation.
+        // It must not reset the retry latch or replace the result of a newer login/logout.
+        if inner.generation != generation || self.epoch.load(Ordering::SeqCst) != generation {
+            return Err("Login restore canceled".into());
+        }
+        match result {
+            Err(error) => { inner.restore_started = false; Err(error) }
+            Ok(None) => Ok(None),
+            Ok(Some((cookie, csrf, mut identity))) => {
+                identity.persistence = "system-keychain".into();
+                inner.session = Some(Session { _cookie: cookie, _csrf: csrf, identity: identity.clone() });
+                Ok(Some(identity))
+            }
+        }
+    }
+}
 pub fn credentials_for(app: &AppHandle, account: &str) -> Result<(crate::judge_transport::Credentials, u64), String> {
-    let state = app.state::<Auth>();
-    let inner = state.inner.lock().map_err(|_| "登录状态不可用")?;
-    if state.epoch.load(Ordering::SeqCst) != inner.generation { return Err("Login state is changing".into()); }
-    let session = inner.session.as_ref().ok_or("请先登录中国站")?;
-    if session.identity.account != account { return Err("账号已切换，未发送旧账号的代码".into()); }
-    Ok((crate::judge_transport::Credentials { cookie: session._cookie.clone(), csrf: session._csrf.clone() }, inner.generation))
+    app.state::<Auth>().credentials(account)
 }
 pub fn still_current(app: &AppHandle, generation: u64) -> bool {
-    { let state = app.state::<Auth>(); state.epoch.load(Ordering::SeqCst) == generation && state.inner.lock().is_ok_and(|inner| inner.generation == generation && inner.session.is_some()) }
+    app.state::<Auth>().current(generation)
 }
 #[cfg(test)]
 mod tests {
@@ -139,6 +164,7 @@ pub async fn restore(app: AppHandle) -> Result<Option<Identity>, String> {
         let state = app.state::<Auth>();
         let mut inner = state.inner.lock().map_err(|_| "Login state unavailable")?;
         if inner.storage_recovery_required { return Err(crate::auth_commit::RECOVERY_REQUIRED.into()); }
+        if state.epoch.load(Ordering::SeqCst) != inner.generation { return Err("Login state is changing".into()); }
         if let Some(session) = &inner.session { return Ok(Some(session.identity.clone())); }
         if inner.restore_started { return Ok(None); }
         inner.restore_started = true;
@@ -149,24 +175,9 @@ pub async fn restore(app: AppHandle) -> Result<Option<Identity>, String> {
         let Some(stored) = stored else { return Ok::<_, String>(None); };
         // Temporary failures preserve the stored credentials and permit an explicit retry.
         let identity = Leetcode::new()?.identity(&stored.cookie, &stored.csrf).await?;
-        Ok(Some((stored, identity)))
+        Ok(Some((stored.cookie, stored.csrf, identity)))
     }.await;
-    let (stored, mut identity) = match restored {
-        Ok(Some(value)) => value,
-        Ok(None) => return Ok(None),
-        Err(error) => {
-            let state = app.state::<Auth>();
-            let mut inner = state.inner.lock().map_err(|_| "Login state unavailable")?;
-            if inner.generation == generation { inner.restore_started = false; }
-            return Err(error);
-        }
-    };
-    identity.persistence = "system-keychain".into();
-    let state = app.state::<Auth>();
-    let mut inner = state.inner.lock().map_err(|_| "Login state unavailable")?;
-    if inner.generation != generation || state.epoch.load(Ordering::SeqCst) != generation { return Err("Login restore canceled".into()); }
-    inner.session = Some(Session { _cookie: stored.cookie, _csrf: stored.csrf, identity: identity.clone() });
-    Ok(Some(identity))
+    app.state::<Auth>().complete_restore(generation, restored)
 }
 
 pub async fn sign_out(app: AppHandle) -> Result<(), String> {
@@ -176,9 +187,7 @@ pub async fn sign_out(app: AppHandle) -> Result<(), String> {
         let mut inner = state.inner.lock().map_err(|_| "Login state unavailable")?;
         if state.epoch.load(Ordering::SeqCst) != generation { return Err("Login operation superseded".into()); }
         inner.generation = generation;
-        inner.session = None;
-        inner.attempt = None;
-        inner.restore_started = true;
+        begin_forget(&mut inner);
         inner.generation
     };
     // A window-close failure must never prevent logical logout and keychain deletion.
@@ -187,9 +196,7 @@ pub async fn sign_out(app: AppHandle) -> Result<(), String> {
         let state = app.state::<Auth>();
         let mut inner = state.inner.lock().map_err(|_| "Login state unavailable")?;
         if inner.generation != generation || state.epoch.load(Ordering::SeqCst) != generation { return Err("Logout superseded by a newer login".into()); }
-        crate::session_store::delete()?;
-        inner.storage_recovery_required = false;
-        Ok(())
+        finish_forget(&mut inner, crate::session_store::delete())
     }).await.map_err(|_| "Logout storage task interrupted".to_owned())?
 }
 
@@ -213,7 +220,7 @@ pub async fn qr_start(app: AppHandle, remember: bool) -> Result<QrReply, String>
     let state = app.state::<Auth>();
     let mut inner = state.inner.lock().map_err(|_| "Login state unavailable")?;
     if inner.generation != generation || state.epoch.load(Ordering::SeqCst) != generation { return Err("Login attempt canceled".into()); }
-    inner.attempt = Some(QrAttempt { client, cookies, scan_id, seen_waiting: false, in_flight: false, initial_failures: 0 });
+    inner.attempt = Some(QrAttempt { client, cookies, scan_id, in_flight: false });
     Ok(QrReply { attempt: generation, state: "WAITING".into(), svg: Some(svg), identity: None })
 }
 
@@ -235,12 +242,9 @@ pub async fn qr_poll(app: AppHandle, attempt: u64) -> Result<QrReply, String> {
         let qr = inner.attempt.as_mut().ok_or("No active QR login")?;
         qr.in_flight = false;
         qr.cookies = cookies.clone();
-        let mut status = outcome?;
-        if status == "WAITING" { qr.seen_waiting = true; }
-        if status == "FAILED" {
-            qr.initial_failures += 1;
-            status = if qr.seen_waiting { "EXPIRED" } else if qr.initial_failures <= 3 { "WAITING" } else { "FAILED" }.into();
-        }
+        // A server FAILED result is not proof of expiry. Never disguise it as
+        // WAITING or automatically request a replacement QR based on that guess.
+        let status = outcome?;
         if matches!(status.as_str(), "EXPIRED" | "INVALID" | "FAILED") { inner.attempt = None; }
         status
     };
@@ -254,4 +258,126 @@ pub async fn qr_poll(app: AppHandle, attempt: u64) -> Result<QrReply, String> {
         return Ok(QrReply { attempt, state: status, svg: None, identity: Some(identity) });
     }
     Ok(QrReply { attempt, state: status, svg: None, identity: None })
+}
+
+fn begin_forget(inner: &mut Inner) {
+    inner.session = None;
+    inner.attempt = None;
+    inner.restore_started = true;
+    // Latch before releasing the state mutex, not after the blocking delete.
+    // A cancel/new generation can supersede that worker before it runs; the
+    // still-saved account must remain disclosed and block another login.
+    inner.storage_recovery_required = true;
+}
+fn finish_forget(inner: &mut Inner, result: Result<(), String>) -> Result<(), String> {
+    inner.storage_recovery_required = result.is_err();
+    result
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    fn identity(account: &str) -> Identity {
+        Identity { username: format!("Fixture {account}"), account: account.into(), persistence: "memory-only".into() }
+    }
+    fn restored(account: &str) -> Result<Option<(String, String, Identity)>, String> {
+        Ok(Some((format!("synthetic-{account}"), "synthetic-csrf".into(), identity(account))))
+    }
+    fn advance(state: &Auth, generation: u64) {
+        state.epoch.store(generation, Ordering::SeqCst);
+        let mut inner = state.inner.lock().unwrap();
+        inner.generation = generation;
+        inner.restore_started = true;
+    }
+    #[test]
+    fn restore_installs_only_verified_fixture_identity_and_account_bound_credentials() {
+        let state = Auth::default();
+        advance(&state, 1);
+        let value = state.complete_restore(1, restored("account-a")).unwrap().unwrap();
+        assert_eq!(value.account, "account-a");
+        assert_eq!(value.persistence, "system-keychain");
+        assert_eq!(state.credentials("account-a").unwrap().1, 1);
+        assert!(state.credentials("account-b").is_err());
+        assert!(state.current(1));
+        assert!(!state.current(0));
+        // Epoch invalidation takes effect even before logout obtains the state mutex.
+        state.epoch.store(2, Ordering::SeqCst);
+        assert!(state.credentials("account-a").is_err());
+        assert!(!state.current(1));
+    }
+    #[test]
+    fn late_restore_success_empty_and_failure_cannot_replace_new_account_or_retry_latch() {
+        for old in [restored("old-account"), Ok(None), Err("synthetic offline".into())] {
+            let state = Auth::default();
+            advance(&state, 2);
+            state.complete_restore(2, restored("new-account")).unwrap();
+            assert!(state.complete_restore(1, old).is_err());
+            let inner = state.inner.lock().unwrap();
+            assert_eq!(inner.session.as_ref().unwrap().identity.account, "new-account");
+            assert!(inner.restore_started);
+        }
+    }
+    #[test]
+    fn offline_and_expired_restore_leave_anonymous_and_allow_only_explicit_retry() {
+        for message in ["synthetic network unavailable", "SESSION_EXPIRED: fixture expired", "synthetic store locked"] {
+            let state = Auth::default();
+            advance(&state, 1);
+            assert!(state.complete_restore(1, Err(message.into())).is_err());
+            {
+                let inner = state.inner.lock().unwrap();
+                assert!(inner.session.is_none());
+                assert!(!inner.restore_started);
+            }
+            assert!(state.credentials("account-a").is_err());
+            // Fixture supplies a verified result only after an explicit retry.
+            state.complete_restore(1, restored("account-a")).unwrap();
+            assert!(state.current(1));
+        }
+    }
+    #[test]
+    fn logout_superseded_before_delete_keeps_pending_forget_latched() {
+        let state = Auth::default();
+        advance(&state, 1);
+        state.complete_restore(1, restored("account-a")).unwrap();
+        advance(&state, 2);
+        begin_forget(&mut state.inner.lock().unwrap());
+        // The delete worker has not acquired the mutex. Cancellation or a new
+        // attempted login wins generation 3, so that stale worker cannot delete.
+        advance(&state, 3);
+        assert_ne!(state.inner.lock().unwrap().generation, 2);
+        {
+            let inner = state.inner.lock().unwrap();
+            assert!(inner.storage_recovery_required);
+            assert!(inner.session.is_none());
+            assert!(inner.restore_started);
+        }
+        assert!(state.credentials("account-a").is_err());
+        // Only an explicit retry-forget with a confirmed deletion clears it.
+        advance(&state, 4);
+        let mut inner = state.inner.lock().unwrap();
+        begin_forget(&mut inner);
+        assert!(inner.storage_recovery_required);
+        finish_forget(&mut inner, Ok(())).unwrap();
+        assert!(!inner.storage_recovery_required);
+    }
+    #[test]
+    fn logout_blocks_late_restore_and_failed_forget_latches_recovery_until_success() {
+        let state = Auth::default();
+        advance(&state, 1);
+        state.complete_restore(1, restored("account-a")).unwrap();
+        advance(&state, 2);
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.session = None;
+            assert!(finish_forget(&mut inner, Err("synthetic locked store".into())).is_err());
+            assert!(inner.storage_recovery_required);
+        }
+        assert!(state.complete_restore(1, restored("account-a")).is_err());
+        assert!(!state.current(1));
+        assert!(state.credentials("account-a").is_err());
+        let mut inner = state.inner.lock().unwrap();
+        finish_forget(&mut inner, Ok(())).unwrap();
+        assert!(!inner.storage_recovery_required);
+        assert!(inner.session.is_none());
+    }
 }
