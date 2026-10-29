@@ -18,6 +18,8 @@ VERSION = '0.1.1'
 MANIFEST = 'releases/v0.1.1.json'
 NOTES = 'releases/v0.1.1.md'
 PROFILE = 'release; default features; diagnostic snippet features disabled'
+# Fixed scope, not a manifest-controlled arbitrary file allowlist.
+PUBLISHER_RECOVERY_FILES = frozenset({'scripts/publish-verified-release.py', 'tests/test_verified_release.py'})
 GATES = {
     'ci': ('.github/workflows/ci.yml', {'CI Frontend Regression'}),
     'native': ('.github/workflows/native.yml', {'Native Linux Full Validation'}),
@@ -53,6 +55,10 @@ def validate_manifest(m):
     require(m.get('tag') == TAG and m.get('version') == VERSION and m.get('prerelease') is False, 'Unexpected release identity')
     require(hex_value(m.get('source_commit'), 40) and hex_value(m.get('source_tree'), 40), 'Invalid source identity')
     require(hex_value(m.get('notes_sha256'), 64), 'Missing frozen release notes digest')
+    recovery = m.get('publisher_recovery')
+    if recovery is not None:
+        require(isinstance(recovery, dict) and set(recovery) == PUBLISHER_RECOVERY_FILES, 'Unexpected publisher recovery file set')
+        require(all(hex_value(value, 64) for value in recovery.values()), 'Invalid frozen publisher recovery digest')
     require(set(m.get('gates', {})) == set(GATES), 'Missing or unexpected source gates')
     for name, gate in m['gates'].items():
         require(positive(gate.get('run_id')) and positive(gate.get('attempt')), 'Invalid run/attempt')
@@ -155,6 +161,11 @@ class GitHub:
         raise ValueError('Pagination exceeded safety bound')
 
     def binary(self, endpoint):
+        # Actions ZIP uses the JSON API media type then a binary redirect.
+        # Release assets instead require octet-stream content negotiation.
+        if re.fullmatch(r'actions/artifacts/[1-9][0-9]*/zip', endpoint):
+            return self.gh('api', f'repos/{REPO}/{endpoint}')
+        require(re.fullmatch(r'releases/assets/[1-9][0-9]*', endpoint), 'Unexpected binary endpoint')
         return self.gh('api', f'repos/{REPO}/{endpoint}', '-H', 'Accept: application/octet-stream')
 
 
@@ -172,6 +183,24 @@ def verify_assets(release, files, github):
         require(github.binary(f"releases/assets/{a['id']}") == expected, 'Uploaded bytes mismatch')
 
 
+
+def validate_publisher_comparison(m, comparison, read_bytes):
+    recovery = m.get('publisher_recovery', {})
+    # validate_manifest fixes this set to exactly the two publication-only files.
+    require(not recovery or set(recovery) == PUBLISHER_RECOVERY_FILES, 'Unexpected publisher recovery paths')
+    expected = {MANIFEST, NOTES} | set(recovery)
+    files = comparison.get('files', [])
+    require(comparison['status'] == 'ahead' and len(files) == len(expected) and {f['filename'] for f in files} == expected, 'Publisher changes exceed frozen records and reviewed recovery')
+    for f in files:
+        path = f['filename']
+        require(f['status'] == ('modified' if path in recovery else 'added'), 'Unexpected publisher file status')
+        data = read_bytes(path)
+        blob = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+        require(f.get('sha') == blob, 'Remote publisher blob differs from checkout')
+        if path in recovery:
+            require(digest(data) == recovery[path], 'Publisher recovery differs from frozen reviewed bytes')
+
+
 def main():
     require(os.environ.get('GITHUB_REPOSITORY') == REPO and os.environ.get('GITHUB_REF') == 'refs/heads/release/v0.1.1', 'Only reviewed release branch may publish')
     publisher = os.environ.get('GITHUB_SHA', '')
@@ -186,8 +215,7 @@ def main():
     require(g.get('git/ref/heads/main')['object']['sha'] == source, 'Final main source moved; inspect before publication')
     require(g.get(f'git/commits/{source}')['tree']['sha'] == m['source_tree'], 'Source tree mismatch')
     comparison = g.get(f'compare/{source}...{publisher}')
-    require(comparison['status'] == 'ahead' and 0 < len(comparison.get('files', [])) <= 2 and {f['filename'] for f in comparison['files']} <= {MANIFEST, NOTES}, 'Publisher branch must only add frozen manifest/notes to main')
-    require(all(f['status'] == 'added' for f in comparison['files']), 'Frozen release records must be new files')
+    validate_publisher_comparison(m, comparison, lambda path: (root / path).read_bytes())
     # Verify app version directly at source, not at an arbitrary publisher checkout.
     package = g.get(f'contents/package.json?ref={source}')
     import base64

@@ -75,5 +75,9 @@
   "tag": "v0.1.1",
   "version": "0.1.1",
   "prerelease": false,
-  "notes_sha256": "6a3734ea36c5c4a0fc791511f4c5f00b9d338e7f9618c1018c70d84035b041a4"
+  "notes_sha256": "6a3734ea36c5c4a0fc791511f4c5f00b9d338e7f9618c1018c70d84035b041a4",
+  "publisher_recovery": {
+    "scripts/publish-verified-release.py": "e85aee5df77c366b529e078606bd240b9af9903983ddc93cd032301ae1a1a4f2",
+    "tests/test_verified_release.py": "48082ebc05c4c19c88fedc685fb65f8f6d0de2ca7cb3f4c1244803f2a3fd49e3"
+  }
 }

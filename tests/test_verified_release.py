@@ -173,4 +173,65 @@ class PublisherTest(unittest.TestCase):
         fake=type('Fake',(),{'binary':lambda self,path:b'abc'})()
         p.verify_assets({'assets':[{'id':1,'name':'x','size':3}]},{'x':b'abc'},fake)
 
+class PublisherRecoveryTest(unittest.TestCase):
+    def capture_transport(self, endpoint):
+        calls=[]
+        g=p.GitHub();g.gh=lambda *args:calls.append(args) or b'bytes'
+        self.assertEqual(g.binary(endpoint), b'bytes')
+        return calls
+
+    def test_artifact_redirect_uses_default_api_accept(self):
+        self.assertEqual(self.capture_transport('actions/artifacts/12815795589/zip'), [('api', 'repos/'+p.REPO+'/actions/artifacts/12815795589/zip')])
+
+    def test_release_asset_keeps_octet_stream(self):
+        self.assertEqual(self.capture_transport('releases/assets/123'), [('api', 'repos/'+p.REPO+'/releases/assets/123', '-H', 'Accept: application/octet-stream')])
+
+    def test_unknown_binary_routes_fail_without_request(self):
+        for endpoint in ('actions/artifacts/0/zip', 'releases/assets/1?x=2', 'https://evil.test', '../secrets'):
+            g=p.GitHub();g.gh=lambda *args:self.fail('Unexpected network request')
+            with self.assertRaises(ValueError):g.binary(endpoint)
+
+    def comparison(self, recovery=True):
+        m=manifest();data={p.MANIFEST:b'manifest', p.NOTES:b'notes'}
+        if recovery:
+            data.update({name:name.encode() for name in p.PUBLISHER_RECOVERY_FILES})
+            m['publisher_recovery']={name:p.digest(data[name]) for name in p.PUBLISHER_RECOVERY_FILES}
+        files=[]
+        for name,b in data.items():
+            blob=hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+            files.append({'filename':name,'status':'added' if name in (p.MANIFEST,p.NOTES) else 'modified','sha':blob})
+        return m,{'status':'ahead','files':files},data
+
+    def test_exact_frozen_recovery_and_original_records_pass(self):
+        for recovery in (False,True):
+            m,c,d=self.comparison(recovery);p.validate_manifest(m);p.validate_publisher_comparison(m,c,d.__getitem__)
+
+    def test_manifest_cannot_allow_product_or_workflow_files(self):
+        for name in ('src/App.tsx','.github/workflows/publish-verified.yml'):
+            m,c,d=self.comparison();m['publisher_recovery'][name]='a'*64
+            with self.assertRaises(ValueError):p.validate_manifest(m)
+            with self.assertRaises(ValueError):p.validate_publisher_comparison(m,c,d.__getitem__)
+
+    def test_partial_or_invalid_recovery_manifest_fails(self):
+        for value in ({}, {'scripts/publish-verified-release.py':'a'*64}, {name:'bad' for name in p.PUBLISHER_RECOVERY_FILES}):
+            m=manifest();m['publisher_recovery']=value
+            with self.assertRaises(ValueError):p.validate_manifest(m)
+
+    def test_changed_checkout_or_frozen_digest_fails(self):
+        m,c,d=self.comparison();name='scripts/publish-verified-release.py';d[name]+=b'changed'
+        with self.assertRaises(ValueError):p.validate_publisher_comparison(m,c,d.__getitem__)
+        m,c,d=self.comparison();m['publisher_recovery'][name]='0'*64
+        with self.assertRaises(ValueError):p.validate_publisher_comparison(m,c,d.__getitem__)
+
+    def test_missing_extra_duplicate_or_renamed_files_fail(self):
+        for mutation in (lambda c:c['files'].pop(), lambda c:c['files'].append({'filename':'src/App.tsx','status':'modified','sha':'a'*40}), lambda c:c['files'].__setitem__(1,c['files'][0]), lambda c:c['files'][0].update(status='renamed'), lambda c:c.update(status='diverged')):
+            m,c,d=self.comparison();mutation(c)
+            with self.assertRaises(ValueError):p.validate_publisher_comparison(m,c,d.__getitem__)
+
+    def test_recovery_files_must_be_modifications_not_additions(self):
+        m,c,d=self.comparison()
+        for f in c['files']:
+            if f['filename'] in p.PUBLISHER_RECOVERY_FILES:f['status']='added'
+        with self.assertRaises(ValueError):p.validate_publisher_comparison(m,c,d.__getitem__)
+
 if __name__=='__main__':unittest.main()
