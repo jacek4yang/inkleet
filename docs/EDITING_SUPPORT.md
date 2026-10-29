@@ -11,7 +11,7 @@ not a claim of editing parity with Zed or another mature IDE.
 | Go | Enabled | Not enabled | Not forced: pinned gopls does not advertise resolve | Initial server edits; real fmt.Println import probe, including virtual package mapping |
 | C / C++ | Enabled | Not enabled | Not enabled | Existing explicit/compiler header context; missing-header autoimport is not claimed |
 | Java | Enabled | Not enabled | Not enabled | Local method parameter snippets qualified; lazy primary edits and imports remain unqualified |
-| Python | Not enabled | Not enabled | Enabled when Pyright advertises it | Real PurePath lazy import; narrowly validated mapping described below |
+| Python | Not enabled | Not enabled | Enabled when Pyright advertises it | PurePath from previously analyzed pathlib; eager/lazy import mapping below |
 
 Basic member completion, hover, signatures and source navigation remain available
 for all six languages through their installed servers. The table is about advanced
@@ -30,7 +30,18 @@ independently repeat the managed-tool snippet GUI suite.
 
 ### Python autoimport safety
 
-Pyright may place a lazy import at virtual line zero, before InkLeet's implicit
+Coverage is limited to modules Pyright has already analyzed in the session; it is
+not a global cold library index. A fresh `PurePa` fixture returned no raw candidates,
+whereas analyzing `from pathlib import Path` first made the real PurePath proposal
+available. The native fixture records that prerequisite explicitly. The pinned
+[Pyright settings](https://github.com/microsoft/pyright/blob/1.1.414/docs/settings.md)
+list auto-import completions but not Pylance's package-indexing controls. Its
+[completion provider](https://github.com/microsoft/pyright/blob/1.1.414/packages/pyright-internal/src/languageService/completionProvider.ts#L891-L907)
+builds candidates from the program's known source files. Enabling
+an unrelated Pylance option is not claimed as a fix.
+
+
+Pyright may place an eager or lazy import at virtual line zero, before InkLeet's implicit
 public imports. Such an edit is **not generally clamped** to user line zero.
 Only an exact zero-width insertion containing simple `import` / `from … import`
 statements is relocated. The authored module must begin unambiguously with a
@@ -38,6 +49,8 @@ class, function or simple assignment. Leading comments, shebang, coding comments
 and blank lines are preserved. Module docstrings, future imports, decorators,
 unknown preambles, helper replacements and unknown edit forms are refused rather
 than guessed. Missing resolved import edits also refuse the entire completion.
+Both the initial list and the resolved item use this policy. Original server items
+are cached before mapping, so resolve never receives rewritten user coordinates.
 A supported symbol plus its import is one undo transaction.
 
 ## Preview-first code actions
@@ -52,6 +65,9 @@ but equivalent per-language GUI coverage is not claimed.
 
 - Only server-issued tokens for the exact active session/document version work.
 - Edits are confined to the authored source, bounded, Unicode-valid and nonoverlapping.
+  Different file-URI serialization is accepted only when both local regular-file
+  paths canonicalize to the same owned file, never by case folding or basename.
+  Authorities/UNC aliases, queries, fragments and malformed escapes are rejected.
 - Commands, file create/delete/rename, other files, helper code and unreviewed change
   annotations are refused. No workspace command is executed and no file is saved.
 - Every proposal is previewed without ellipsis. Oversized previews are refused,
@@ -66,7 +82,9 @@ but equivalent per-language GUI coverage is not claimed.
   runs the application's edit/cache/mapping guards without needing Tauri libraries.
 - `cargo run --locked --manifest-path crates/managed-env/Cargo.toml --example editing_lsp_probe`
   launches the pinned, application-owned Rust/Go/Python tools using production
-  launch configuration and normalizers. Linux local evidence is recorded in
+  launch configuration and normalizers. Every selected Rust/Go/Python candidate
+  must survive production initial-list mapping before optional resolve; original
+  server items stay unchanged in the resolve cache. Linux local evidence is recorded in
   [the focused report](evidence/editing-lsp-linux-2026-10-29.json).
 - [Real editing language services](../.github/workflows/editing-lsp.yml) runs the
   same probe on Linux x64, Windows x64 and macOS Intel, records exact source SHA,

@@ -99,18 +99,22 @@ fn map_pairs(client: &Client, records: &mut Vec<Value>, map: &Value) -> Result<B
 // Capture only structural variables. Never evaluate a debuggee expression or
 // derive a variant from a summary/empty child list. This bounded tree is evidence
 // for a separate shape review and renderer replay, not a pretty-printer guess.
-fn capture_tree(client: &Client, records: &mut Vec<Value>, variable: &Value, depth: usize,
-    ancestors: &mut Vec<i64>, budget: &mut usize) -> Result<Value, String> {
+fn capture_tree(variable: &Value, depth: usize, ancestors: &mut Vec<i64>, budget: &mut usize,
+    read: &mut impl FnMut(&Value) -> Result<Vec<Value>, String>) -> Result<Value, String> {
     if *budget == 0 { return Err("Option capture node budget exhausted".into()); }
     *budget -= 1;
+    // A synthetic raw node exposes inactive enum layouts as well as the active
+    // value. It is not a second logical payload graph. Record the real node so
+    // the UI can expose its explicit raw action, but do not eagerly traverse it.
+    if is_raw(variable) { return Ok(json!({"variable":variable,"children":[],"rawDeferred":true})); }
     let reference = variable["variablesReference"].as_i64().unwrap_or(0);
     if reference <= 0 { return Ok(json!({"variable":variable,"children":[]})); }
     if depth >= 8 { return Err("Option capture depth limit reached".into()); }
     if ancestors.contains(&reference) { return Ok(json!({"variable":variable,"children":[],"repeatedReference":true})); }
     ancestors.push(reference);
     let mut captured = Vec::new();
-    for child in all_children(client, records, variable)? {
-        captured.push(capture_tree(client, records, &child, depth + 1, ancestors, budget)?);
+    for child in read(variable)? {
+        captured.push(capture_tree(&child, depth + 1, ancestors, budget, read)?);
     }
     ancestors.pop();
     Ok(json!({"variable":variable,"children":captured}))
@@ -169,7 +173,7 @@ fn run_probe(client: &Arc<Client>, rx: &mpsc::Receiver<Value>, arguments: Value,
     let mut options = serde_json::Map::new();
     let mut option_budget = 64;
     for name in ["option_some", "option_none", "option_nested_some", "option_nested_none"] {
-        options.insert(name.into(), capture_tree(client, records, find(name)?, 0, &mut Vec::new(), &mut option_budget)?);
+        options.insert(name.into(), capture_tree(find(name)?, 0, &mut Vec::new(), &mut option_budget, &mut |variable| all_children(client, records, variable))?);
     }
     let mut payloads = serde_json::Map::new();
     for (name, expected) in [("option_some", "41"), ("option_nested_some", "7")] {
@@ -181,9 +185,9 @@ fn run_probe(client: &Arc<Client>, rx: &mpsc::Receiver<Value>, arguments: Value,
     request(client, records, "disconnect", json!({"terminateDebuggee":true}))?;
     Ok(json!({"status":"PASS","numericPairs":numeric,"stringPairs":strings,"setMembers":set,"vectorElements":vector,
         "emptyMap":true,"stoppedLine":line,"locals":locals,"optionCapture":options,
-        "optionQualification":{"status":"CAPTURED_NOT_CLASSIFIED","scalarPayloads":payloads,
+        "optionQualification":{"status":"CAPTURED_NOT_CLASSIFIED","rawTraversal":"DEFERRED","scalarPayloads":payloads,
             "expectedFixture":{"option_some":"Some(41)","option_none":"None::<i32>","option_nested_some":"Some(Some(7))","option_nested_none":"Some(None::<i32>)"},
-            "scope":"Actual bounded structural capture and scalar identity only; no Option classifier, no None inference from missing children or summary"},"scope":"Real pinned adapter and production snapshot launch; not GUI acceptance"}))
+            "scope":"Actual bounded logical-child capture and scalar identity only; synthetic raw subtrees are explicitly deferred, no Option classifier, no None inference from missing children or summary"},"scope":"Real pinned adapter and production snapshot launch; not GUI acceptance"}))
 }
 
 #[tokio::main]
@@ -233,6 +237,48 @@ async fn main() -> Result<(), String> {
 #[cfg(test)]
 mod option_evidence_tests {
     use super::*;
+    #[test]
+    fn actual_three_platform_logical_trees_never_traverse_synthetic_raw_layouts() {
+        for text in [include_str!("../../../tests/fixtures/dap-options-linux.json"), include_str!("../../../tests/fixtures/dap-options-macos.json"), include_str!("../../../tests/fixtures/dap-options-windows.json")] {
+            let fixture: Value = serde_json::from_str(text).unwrap();
+            let mut budget = 64;
+            let mut queried = BTreeSet::new();
+            let mut read = |variable: &Value| {
+                assert!(!is_raw(variable), "raw layout must remain an explicit deferred view");
+                let reference = variable["variablesReference"].as_i64().unwrap().to_string();
+                queried.insert(reference.clone());
+                fixture["responses"][&reference].as_array().cloned().ok_or_else(|| format!("No actual capture for {reference}"))
+            };
+            for root in fixture["roots"].as_array().unwrap() {
+                let tree = capture_tree(root, 0, &mut Vec::new(), &mut budget, &mut read).unwrap();
+                let raw: Vec<_> = tree["children"].as_array().unwrap().iter().filter(|child| is_raw(&child["variable"])).collect();
+                assert_eq!(raw.len(), 1);
+                assert_eq!(raw[0]["rawDeferred"], true);
+                assert!(raw[0]["children"].as_array().unwrap().is_empty());
+                let expected = match root["name"].as_str().unwrap() { "option_some" => Some("41"), "option_nested_some" => Some("7"), "option_none" => None, _ => panic!("Unknown captured root") };
+                if let Some(expected) = expected {
+                    let mut found = Vec::new();
+                    scalar_payloads(&tree, expected, &mut found);
+                    assert_eq!(found.len(), 1, "{} structural payload", fixture["platform"]);
+                }
+                // The None fixture only preserves the adapter result. Empty
+                // logical children do not establish a variant classification.
+            }
+            assert_eq!(queried.len(), 4);
+            assert_eq!(budget, 54, "logical nodes + deferred raw nodes remain bounded");
+        }
+    }
+    #[test]
+    fn logical_depth_node_and_reference_guards_still_fail_closed() {
+        let node = json!({"name":"nested","value":"{...}","variablesReference":1});
+        let mut read = |_: &Value| -> Result<Vec<Value>,String> { panic!("guard must run before any adapter request") };
+        assert!(capture_tree(&node, 8, &mut Vec::new(), &mut 64, &mut read).is_err());
+        assert!(capture_tree(&node, 0, &mut Vec::new(), &mut 0, &mut read).is_err());
+        let repeated = capture_tree(&node, 0, &mut vec![1], &mut 64, &mut read).unwrap();
+        assert_eq!(repeated["repeatedReference"], true);
+        assert!(repeated["children"].as_array().unwrap().is_empty());
+    }
+
     #[test]
     fn payload_evidence_uses_scalar_children_not_summaries_or_raw_duplicates() {
         let mut found = Vec::new();

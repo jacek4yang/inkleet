@@ -965,6 +965,14 @@ try:
         screenshot("python-stdlib-native.png")
         source_navigation_case("def __getitem__(self, key: SupportsIndex","typing.pyi","python")
         click(".source-viewer header button[aria-label=\'返回代码\']")
+        # Pinned open-source Pyright autoimports symbols from analyzed modules,
+        # not a global cold package index. Establish that explicit prerequisite
+        # through genuine pathlib analysis before testing the import application.
+        fill(code,"from pathlib import Path\npath = Path('.')\npath.exi")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End","ctrl+space"],check=True)
+        wait_for(lambda:"exists" in text(".cm-tooltip-autocomplete"),"real Pyright analyzed pathlib prerequisite",seconds=45)
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
         python_import_source="path = PurePa"
         fill(code,python_import_source)
         focus_code_editor()
@@ -982,7 +990,7 @@ try:
         wait_for(lambda:source_text(code)==python_import_source,"one undo removes Python symbol and import")
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
         wait_for(lambda:source_text(code)==python_import_expected,"redo restores Python symbol and import")
-        (evidence/"PYTHON_AUTOIMPORT_NATIVE_RESULT.txt").write_text("PASS: actual private Pyright PurePath completion/resolve, validated import-only insertion mapped outside virtual public imports, exact source and one undo/redo; not arbitrary preamble rewriting.\n")
+        (evidence/"PYTHON_AUTOIMPORT_NATIVE_RESULT.txt").write_text("PASS: actual private Pyright PurePath completion/resolve from previously analyzed pathlib, initial and resolved import-only insertion mapped outside virtual public imports, exact source and one undo/redo; NOT cold/global library indexing or arbitrary preamble rewriting.\n")
         fill(code, "sum([1, 2])")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"signature-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},

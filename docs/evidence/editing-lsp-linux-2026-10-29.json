@@ -76,11 +76,136 @@
     "Windows/macOS native GUI and real OS IME unqualified"
   ],
   "localChecks": {
-    "productionRustModuleTests": 36,
+    "productionRustModuleTests": 37,
     "frontendDomainTests": 324,
     "typescript": "PASS",
     "build": "PASS",
     "nativeGui": "NOT RUN here: missing GTK/WebKit libraries",
     "browserUi": "NOT RUN here: execution sandbox Chromium sockets unavailable"
+  },
+  "qualificationCorrection": "The original direct-resolve probe did not establish initial-list usability. The follow-up now runs original cache capture, initial import mapping, lazy resolve and resolved mapping. PurePath requires previously analyzed pathlib; cold/global library autoimport indexing is not supported by this evidence.",
+  "followupBase": "fca79d81646634a584fa0d68fc382f89c3b4a159",
+  "correctedPythonAutoimportEvidence": {
+    "additionalTextEdits": [
+      {
+        "newText": "from pathlib import PurePath\n",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 0
+          },
+          "start": {
+            "character": 0,
+            "line": 0
+          }
+        }
+      }
+    ],
+    "helperPrefix": 8,
+    "initialMappedCandidate": true,
+    "originalWireItemRetained": true,
+    "platform": "linux-x64",
+    "resolve": true,
+    "previouslyAnalyzedModule": "pathlib"
+  },
+  "correctedPipelineResults": [
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": true,
+      "initialMappedCandidate": true,
+      "label": "HashMap",
+      "language": "rust",
+      "originalWireItemRetained": true,
+      "parameterSnippet": false,
+      "platform": "linux-x64",
+      "resolve": true,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_RUST_ACTION_URI_EVIDENCE",
+      "ownedUri": "file:///tmp/inkleet%20editing%20%E8%AF%AD%E8%A8%80%20wkxkGJ/rust/solution.rs",
+      "ownershipPolicy": "exact-uri-or-same-canonical-regular-file",
+      "platform": "linux-x64",
+      "returnedUris": [
+        "file:///tmp/inkleet%20editing%20%E8%AF%AD%E8%A8%80%20wkxkGJ/rust/solution.rs"
+      ]
+    },
+    {
+      "kind": "EDITING_RUST_ACTION_RESULT",
+      "guiLatencyQualified": false,
+      "platform": "linux-x64",
+      "protocolElapsedMs": 1816,
+      "resolved": true,
+      "sourceAfter": "fn example() {\n    let var_name = 1 + 2;\n    let value = (var_name) * 3;\n    let _ = value;\n}\n",
+      "sourceBefore": "fn example() {\n    let value = (1 + 2) * 3;\n    let _ = value;\n}\n",
+      "sourceOnly": true,
+      "title": "Extract into variable"
+    },
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": true,
+      "initialMappedCandidate": true,
+      "label": "Println",
+      "language": "golang",
+      "originalWireItemRetained": false,
+      "parameterSnippet": true,
+      "platform": "linux-x64",
+      "resolve": false,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": false,
+      "initialMappedCandidate": true,
+      "label": "exists",
+      "language": "python3",
+      "originalWireItemRetained": true,
+      "parameterSnippet": false,
+      "platform": "linux-x64",
+      "resolve": true,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_PYTHON_AUTOIMPORT_RESULT",
+      "additionalTextEdits": [
+        {
+          "newText": "from pathlib import PurePath\n",
+          "range": {
+            "end": {
+              "character": 0,
+              "line": 0
+            },
+            "start": {
+              "character": 0,
+              "line": 0
+            }
+          }
+        }
+      ],
+      "helperPrefix": 8,
+      "initialMappedCandidate": true,
+      "originalWireItemRetained": true,
+      "platform": "linux-x64",
+      "resolve": true
+    }
+  ],
+  "followupGuardTests": 38,
+  "coldPythonBoundary": {
+    "source": "path = PurePa",
+    "authoredPathlibPreviouslyAnalyzed": false,
+    "productionHelperPrefix": 8,
+    "rawCompletionPolls": 120,
+    "rawCandidateCounts": [
+      0
+    ],
+    "observationWindowApproximatelySeconds": 36,
+    "extraSettingsAttempted": {
+      "python.analysis.autoImportCompletions": true,
+      "python.analysis.indexing": true
+    },
+    "conclusion": "No cold candidate. The indexing setting is not consumed by pinned Pyright and is not a production workaround. Subsequent analyzed-module acceptance is a narrower capability."
   }
 }

@@ -1,0 +1,129 @@
+{
+  "provenance": {
+    "runId": 40840560234,
+    "artifactId": 12882378468,
+    "artifactSha256": "ac8f21142c782eb0b8e4562b54ace3a6078e6b80519723099963e14a0a354bfa",
+    "buildCommit": "4f42d07265d29e7f55197c057d4de73e467076df",
+    "pullRequestHead": "fca79d81646634a584fa0d68fc382f89c3b4a159",
+    "scope": "Unmodified Option variables from actual pinned adapter requests. The original full probe failed while over-traversing raw internals before option_nested_none; these excerpts do not claim a full probe or UI pass."
+  },
+  "platform": "macos-x64",
+  "roots": [
+    {
+      "evaluateName": "option_nested_some",
+      "name": "option_nested_some",
+      "presentationHint": {
+        "attributes": [
+          "readOnly"
+        ]
+      },
+      "type": "core::option::Option<core::option::Option<i32>>",
+      "value": "Some(Some(7))",
+      "variablesReference": 1018
+    },
+    {
+      "evaluateName": "option_none",
+      "name": "option_none",
+      "presentationHint": {
+        "attributes": [
+          "readOnly"
+        ]
+      },
+      "type": "core::option::Option<i32>",
+      "value": "None",
+      "variablesReference": 1017
+    },
+    {
+      "evaluateName": "option_some",
+      "name": "option_some",
+      "presentationHint": {
+        "attributes": [
+          "readOnly"
+        ]
+      },
+      "type": "core::option::Option<i32>",
+      "value": "Some(41)",
+      "variablesReference": 1016
+    }
+  ],
+  "responses": {
+    "1018": [
+      {
+        "evaluateName": "option_nested_some.0",
+        "name": "0",
+        "presentationHint": {
+          "attributes": [
+            "readOnly"
+          ]
+        },
+        "type": "core::option::Option<i32>",
+        "value": "Some(7)",
+        "variablesReference": 1048
+      },
+      {
+        "name": "[raw]",
+        "presentationHint": {
+          "attributes": [
+            "readOnly",
+            "virtual"
+          ]
+        },
+        "value": "core::option::Option<core::option::Option<i32>>",
+        "variablesReference": 1049
+      }
+    ],
+    "1048": [
+      {
+        "evaluateName": "option_nested_some.0.0",
+        "name": "0",
+        "type": "int",
+        "value": "7",
+        "variablesReference": 0
+      },
+      {
+        "name": "[raw]",
+        "presentationHint": {
+          "attributes": [
+            "readOnly",
+            "virtual"
+          ]
+        },
+        "value": "core::option::Option<i32>",
+        "variablesReference": 1050
+      }
+    ],
+    "1017": [
+      {
+        "name": "[raw]",
+        "presentationHint": {
+          "attributes": [
+            "readOnly",
+            "virtual"
+          ]
+        },
+        "value": "core::option::Option<i32>",
+        "variablesReference": 1043
+      }
+    ],
+    "1016": [
+      {
+        "evaluateName": "option_some.0",
+        "name": "0",
+        "type": "int",
+        "value": "41",
+        "variablesReference": 0
+      },
+      {
+        "name": "[raw]",
+        "presentationHint": {
+          "attributes": [
+            "readOnly",
+            "virtual"
+          ]
+        },
+        "value": "core::option::Option<i32>",
+        "variablesReference": 1038
+      }
+    ]
+  }
+}

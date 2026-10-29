@@ -20,6 +20,25 @@ fn completion(client:&Client,uri:&str,line:u32,col:u32,label:&str)->Result<Value
         std::thread::sleep(Duration::from_millis(300));
     }
 }
+// Exercise the same initial-list mapping/cache order as Services::request for
+// every selected real candidate, not just a raw wire item sent straight to resolve.
+fn mapped_completion(client:&Client,original:&Value,language:&str,text:&str,prefix:u32,version:u32,can_resolve:bool)->Result<(Value,Value),String>{
+    let mut cache=completion_cache::CompletionCache::default();
+    let mut initial=json!([original.clone()]);
+    if can_resolve{cache.remember(&mut initial,version,u64::from(version));}
+    lsp_document::completion_response(language,&mut initial,prefix,text);
+    if initial.as_array().is_none_or(|items|items.is_empty()){return Err(format!("{language} candidate removed from initial completion list: {original}"));}
+    if !can_resolve{return Ok((original.clone(),initial));}
+    let token=initial.pointer("/0/_inkleetCompletion").and_then(Value::as_u64).ok_or("initial completion lost resolve token")?;
+    let retained=cache.get(token,version)?;
+    if retained!=*original{return Err("initial mapping changed cached server item".into());}
+    let resolved=request(client,"completionItem/resolve",retained)?;
+    completion_cache::validate_resolved(original,&resolved)?;
+    let mut mapped=json!([resolved.clone()]);
+    lsp_document::completion_response(language,&mut mapped,prefix,text);
+    if mapped.as_array().is_none_or(|items|items.is_empty()){return Err(format!("{language} resolved completion touches helper code: {resolved}"));}
+    Ok((resolved,mapped))
+}
 fn apply(text:&str,edits:&Value)->Result<String,String>{inkleet_managed_env::format_edits::apply(text,0,edits)}
 fn probe(manager:&Manager,root:&Path,language:&str)->Result<(),String>{
     let work=root.join(language);std::fs::create_dir(&work).map_err(|e|e.to_string())?;
@@ -45,29 +64,21 @@ fn probe(manager:&Manager,root:&Path,language:&str)->Result<(),String>{
         std::fs::write(work.join(launch.filename),&wrapped).map_err(|e|e.to_string())?;
         client.notify("textDocument/didOpen",json!({"textDocument":{"uri":uri,"languageId":launch.language_id,"version":1,"text":wrapped}}))?;
         let original=completion(&client,&uri,line+prefix,col,label)?;
-        let resolved=if can_resolve{request(&client,"completionItem/resolve",original.clone())?}else{original.clone()};
-        completion_cache::validate_resolved(&original,&resolved)?;
-        let mut mapped=json!([resolved.clone()]);lsp_document::response("completion",&mut mapped,prefix);
-        if mapped.as_array().is_none_or(|items|items.is_empty()){return Err(format!("{language} resolved completion touches helper code"));}
+        let (resolved,mapped)=mapped_completion(&client,&original,language,text,prefix,1,can_resolve)?;
         if language=="rust" || language=="golang" {
             let imports=mapped[0]["additionalTextEdits"].as_array().ok_or("expected actual autoimport edit")?;
             let needle=if language=="rust"{"std::collections::HashMap"}else{"\"fmt\""};
             if !imports.iter().any(|e|e["newText"].as_str().is_some_and(|s|s.contains(needle))){return Err(format!("missing actual {language} autoimport: {resolved}"));}
         }
-        println!("EDITING_COMPLETION_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"language":language,"label":label,"actualAdapter":true,"resolve":can_resolve,"sourceMapping":true,"autoimport":language!="python3","parameterSnippet":original["insertTextFormat"]==2}));
+        println!("EDITING_COMPLETION_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"language":language,"label":label,"actualAdapter":true,"resolve":can_resolve,"sourceMapping":true,"initialMappedCandidate":true,"originalWireItemRetained":can_resolve,"autoimport":language!="python3","parameterSnippet":original["insertTextFormat"]==2}));
         if language=="python3" {
             let text="path = PurePa\n";
             let (wrapped,prefix)=lsp_document::contextual_source(language,text,&context);
             client.notify("textDocument/didChange",json!({"textDocument":{"uri":uri,"version":2},"contentChanges":[{"text":wrapped}]}))?;
             let original=completion(&client,&uri,prefix,13,"PurePath")?;
-            let resolved=request(&client,"completionItem/resolve",original.clone())?;
-            completion_cache::validate_resolved(&original,&resolved)?;
-            let mut resolved=resolved;
-            lsp_document::completion_imports(language,&mut resolved,prefix,text);
-            let mut mapped=json!([resolved.clone()]);lsp_document::response("completion",&mut mapped,prefix);
-            if mapped.as_array().is_none_or(|items|items.is_empty()){return Err(format!("Python autoimport touches helpers: {resolved}"));}
+            let (resolved,mapped)=mapped_completion(&client,&original,language,text,prefix,2,can_resolve)?;
             if !mapped[0]["additionalTextEdits"].as_array().is_some_and(|items|items.iter().any(|e|e["newText"].as_str().is_some_and(|s|s.contains("from pathlib import PurePath")))){return Err(format!("Python autoimport missing: {resolved}"));}
-            println!("EDITING_PYTHON_AUTOIMPORT_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"resolve":true,"helperPrefix":prefix,"additionalTextEdits":mapped[0]["additionalTextEdits"]}));
+            println!("EDITING_PYTHON_AUTOIMPORT_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"resolve":true,"helperPrefix":prefix,"initialMappedCandidate":true,"originalWireItemRetained":true,"additionalTextEdits":mapped[0]["additionalTextEdits"]}));
         }
         if language=="rust" {
             let text="fn example() {\n    let value = (1 + 2) * 3;\n    let _ = value;\n}\n";
@@ -83,7 +94,10 @@ fn probe(manager:&Manager,root:&Path,language:&str)->Result<(),String>{
                     let original=cache.get(item["token"].as_u64().unwrap(),2)?;
                     let resolved=if original.get("edit").is_some(){original.clone()}else{request(&client,"codeAction/resolve",original.clone())?};
                     lsp_actions::validate_resolved(&original,&resolved)?;
-                    let normalized=lsp_actions::normalize(&resolved,&uri,prefix,text,2)?;break(original,normalized);
+                    let normalized=lsp_actions::normalize(&resolved,&uri,prefix,text,2).map_err(|error|format!("{error}; owned fixture URI={uri}; resolved fixture action={resolved}"))?;
+                    let targets=resolved.pointer("/edit/documentChanges").and_then(Value::as_array).map(|changes|changes.iter().filter_map(|change|change.pointer("/textDocument/uri").and_then(Value::as_str)).collect::<Vec<_>>()).unwrap_or_default();
+                    println!("EDITING_RUST_ACTION_URI_EVIDENCE {}",json!({"platform":inkleet_managed_env::platform(),"ownedUri":uri,"returnedUris":targets,"ownershipPolicy":"exact-uri-or-same-canonical-regular-file"}));
+                    break(original,normalized);
                 }
                 if Instant::now()>deadline{return Err(format!("missing safe Rust extract-variable action: {response}"));}
                 std::thread::sleep(Duration::from_millis(300));

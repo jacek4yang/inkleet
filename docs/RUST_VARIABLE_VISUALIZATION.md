@@ -49,7 +49,14 @@ The 0.1.2 source adds bounded actual captures for Some(41), None::<i32>,
 Some(Some(7)) and Some(None::<i32>) to the same three-platform DAP gate. Captures
 are explicitly `CAPTURED_NOT_CLASSIFIED`: generic rendering and scalar children
 are checked before a new Option classifier may be considered. Empty children or
-summary strings never establish None. The prior unaccepted Option patch is not
+summary strings never establish None. The probe recursively captures only logical
+children; synthetic `[raw]` nodes are recorded as `rawDeferred`, not traversed as
+another payload graph. Actual three-platform run 40840560234 showed inactive raw
+variants contain non-payload bytes and duplicate nested layouts beyond the logical
+depth. Its unmodified logical excerpts are regression fixtures with artifact hashes
+and synthetic-merge/build provenance; that failed run is not a complete probe or
+UI pass. Depth, node and repeated-reference guards remain in force for logical reads.
+The prior unaccepted Option patch is not
 silently included. Use the new release manifest's exact runs for final results.
 
 ## Presentation and still-required per-type acceptance

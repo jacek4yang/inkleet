@@ -66,12 +66,20 @@ export async function runCodeActionsUI(testPage){
  await page.evaluate(()=>{const s=window.__codeActionsTest;s.defer=false;s.deferResolve=false;s.updates=[];});
  await editor.focus();
  await editor.evaluate(node=>node.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true,data:'中'})));
- await page.evaluate(()=>window.__codeActionView.dispatch({changes:{from:0,insert:'中'},userEvent:'input.type.compose'}));
+ // This is the public preedit boundary before CodeMirror has processed a
+ // composing DOM mutation. Never set its private inputState in a test.
+ assert.deepEqual(await page.evaluate(()=>({started:window.__codeActionView.compositionStarted,changed:window.__codeActionView.composing})),{started:true,changed:false});
+ await page.evaluate(()=>window.__codeActionView.dispatch({changes:{from:0,insert:'z'},userEvent:'input.type.compose'}));
+ await page.waitForTimeout(250);
+ assert.equal(await page.evaluate(()=>window.__codeActionsTest.updates.length),0,'initial preedit is not sent to LSP');
+ await page.evaluate(()=>window.__codeActionView.dispatch({changes:{from:0,to:1,insert:'中'},userEvent:'input.type.compose'}));
  await page.waitForTimeout(250);
  assert.equal(await page.evaluate(()=>window.__codeActionsTest.updates.length),0,'partial composition not sent to LSP');
+ const committed=await source();
  await editor.evaluate(node=>node.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中'})));
- await page.waitForFunction(()=>window.__codeActionsTest.updates.some(u=>u.text.startsWith('中')));
- cases.push('synthetic-composition-coalesces-document-sync');
+ await page.waitForFunction(()=>window.__codeActionsTest.updates.length===1);
+ assert.deepEqual(await page.evaluate(()=>window.__codeActionsTest.updates.map(u=>u.text)),[committed],'one exact committed snapshot reaches LSP after compositionend');
+ cases.push('synthetic-composition-start-and-preedit-coalesce-document-sync');
  await page.screenshot({path:'evidence/code-actions-fixture.png'});
  await page.close();
  await writeFile('evidence/CODE_ACTIONS_UI_RESULT.json',JSON.stringify({status:'PASS',scope:'real CodeMirror lifecycle with mocked IPC; not actual LSP, native IME or latency acceptance',cases},null,2)+'\n');

@@ -9,7 +9,7 @@ type Actions=(from:number,to:number,doc:Text)=>Promise<{items:unknown;resolve:(t
 export function codeActions(request:Actions,status:(message:string)=>void,captureValidity:()=>()=>boolean){
   let destroyed=false,generation=0,closeActive:(restore?:boolean)=>void=()=>{};
   function open(view:EditorView){
-    if(destroyed||view.composing||!view.hasFocus)return false;
+    if(destroyed||view.compositionStarted||!view.hasFocus)return false;
     closeActive(false);
     const doc=view.state.doc,selection=view.state.selection,sessionCurrent=captureValidity(),ticket=++generation;
     const owner=view.dom.ownerDocument,panel=owner.createElement("dialog");panel.className="lsp-code-actions";panel.setAttribute("aria-label","代码操作");
@@ -24,7 +24,7 @@ export function codeActions(request:Actions,status:(message:string)=>void,captur
     const cancel=owner.createElement("button");cancel.type="button";cancel.textContent="取消";
     panel.append(heading,list,preview,message,cancel);owner.body.append(panel);
     let closed=false,pending=false,proposed:SourceChange[]|null=null;
-    const current=()=>!closed&&!destroyed&&ticket===generation&&sessionCurrent()&&view.state.doc===doc&&view.state.selection.eq(selection)&&!view.composing;
+    const current=()=>!closed&&!destroyed&&ticket===generation&&sessionCurrent()&&view.state.doc===doc&&view.state.selection.eq(selection)&&!view.compositionStarted;
     function close(restore=true){
       if(closed)return;
       restore=restore&&panel.contains(owner.activeElement);closed=true;proposed=null;panel.close();panel.remove();

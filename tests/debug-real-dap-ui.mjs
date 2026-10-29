@@ -20,6 +20,7 @@ for (const request of trace.requests) {
 assert.ok(result.locals?.length, "capture must include actual locals");
 const optionNames = ["option_some", "option_none", "option_nested_some", "option_nested_none"];
 assert.equal(result.optionQualification?.status, "CAPTURED_NOT_CLASSIFIED", "capture does not imply an unreviewed Option classifier");
+assert.equal(result.optionQualification.rawTraversal, "DEFERRED", "raw storage graphs are not logical payload evidence");
 assert.deepEqual(Object.keys(result.optionCapture ?? {}).sort(), [...optionNames].sort());
 assert.equal(result.optionQualification.scalarPayloads.option_some.value, "41");
 assert.equal(result.optionQualification.scalarPayloads.option_nested_some.value, "7");

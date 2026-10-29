@@ -87,7 +87,7 @@ impl Services {
             // Keep issuer validation and cache publication in the same critical
             // section, preventing a superseded response from publishing tokens.
             if session.completion_resolve{session.completion_cache.lock().map_err(|_|"补全缓存不可用")?.remember(&mut response,version,sequence);}
-            crate::lsp_document::response(kind,&mut response,prefix);
+            crate::lsp_document::completion_response(&session.language,&mut response,prefix,&document.text);
             crate::snippet_validation::completion(&self.root,id,version,sequence,&session.language,session.completion_insert_text_mode,json!({"line":line,"character":character,"prefix":prefix}),&response);
             return Ok(response);
         }
@@ -139,10 +139,8 @@ impl Services {
         self.session(id)?;
         let document=session.document.lock().map_err(|_|"文档状态不可用")?;
         if document.version!=version{return Err("忽略过期的补全解析".into());}
-        let mut resolved=resolved;
-        crate::lsp_document::completion_imports(&session.language,&mut resolved,document.prefix,&document.text);
         let mut response=Value::Array(vec![resolved]);
-        crate::lsp_document::response("completion",&mut response,document.prefix);
+        crate::lsp_document::completion_response(&session.language,&mut response,document.prefix,&document.text);
         let result=response.as_array_mut().and_then(|items|items.pop()).ok_or_else(||"补全导入涉及语言环境辅助代码，未应用任何修改".to_owned())?;
         crate::snippet_validation::resolved(&self.root,id,version,token,session.completion_insert_text_mode,&result);
         Ok(result)
