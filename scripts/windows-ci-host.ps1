@@ -1,6 +1,7 @@
 # Same-user least-privilege CI child, or read-only owned-process diagnostics.
 param([Parameter(Mandatory=$true)][string]$Config, [int]$InspectPid=0, [int]$NodePid=0, [int]$TeardownPid=0, [string]$OwnedPids="", [int]$Port=0)
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'windows-ci-node.ps1')
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') { throw 'Disposable hosted Windows CI only' }
 if (-not ('InkLeetCiToken' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'windows-ci-token.cs') }
 $configValue=Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
@@ -61,7 +62,8 @@ if ($InspectPid -gt 0) {
     return
 }
 if ($InspectPid -ne 0 -or $NodePid -ne 0 -or $TeardownPid -ne 0 -or $OwnedPids -ne "" -or $Port -ne 0 -or $configValue.phase -notin @('prepare','fresh','legacy','upgraded')) {throw 'Invalid standard-host request'}
-$node=(Get-Command node -CommandType Application).Source
+$node=Resolve-InkLeetCiNode
+if ($configValue.nodeExecutable -isnot [string] -or $configValue.nodeExecutable -cne $node) {throw 'Configured Node must equal the single resolved executable path'}
 $script=Join-Path $root $(if ($configValue.phase -eq 'prepare') {'tests/windows-installed-prepare.mjs'} else {'tests/windows-installed-ui.mjs'})
 foreach($path in @($node,$script,$Config)) {if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {throw "Missing exact launcher input $path"}}
 $recordPath=Join-Path $configValue.evidence ($configValue.phase + '-host.json')

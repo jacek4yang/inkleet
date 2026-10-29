@@ -2,6 +2,7 @@
 # Never changes SmartScreen/AV/policies, credentials, or globally scoped env vars.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'windows-ci-node.ps1')
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
     throw 'Installed-app acceptance is restricted to a disposable GitHub-hosted Windows runner'
 }
@@ -115,7 +116,7 @@ function Assert-InstalledPayload([string] $Stage, [string] $Built) {
 function Standard-Node([string] $Phase, $Configuration) {
     $Configuration.userSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $Configuration.powershell=(Get-Process -Id $PID).Path
-    $Configuration.nodeExecutable=(Get-Command node -CommandType Application).Source
+    $Configuration.nodeExecutable=Resolve-InkLeetCiNode
     $Configuration.tokenInspector=Join-Path $root 'scripts/windows-ci-host.ps1'
     $configPath=Join-Path $evidence "$Phase-config.json"
     $Configuration | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8NoBOM $configPath
