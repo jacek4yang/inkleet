@@ -40,8 +40,22 @@ function Msi-Info([string] $Path) {
     try { [void]$view.Execute(); if ($null -eq $view.Fetch()) { throw 'The MSI has no explicit INSTALLDIR test location' } }
     finally { [void]$view.Close() }
     $info = [ordered]@{path=$Path; productCode=(Msi-Property $database 'ProductCode'); upgradeCode=(Msi-Property $database 'UpgradeCode'); version=(Msi-Property $database 'ProductVersion'); name=(Msi-Property $database 'ProductName')}
-    if ($info.name -cne 'InkLeet' -or $info.productCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$' -or $info.upgradeCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') { throw 'Unexpected MSI identity' }
+    if ($info.name -cne 'InkLeet' -or $info.productCode -notmatch '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$' -or $info.upgradeCode -notmatch '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$') { throw 'Unexpected MSI identity' }
     return $info
+}
+function Read-MsiStringList($List) {
+    if ($null -eq $List) { throw 'Missing MSI StringList response' }
+    # PowerShell's synthetic scalar .Count can be 1 on an opaque COM wrapper.
+    # Ask IDispatch for the actual StringList.Count, not the wrapper count.
+    $count = $List.GetType().InvokeMember('Count', 'GetProperty', $null, $List, @())
+    if ($count -isnot [int] -or $count -lt 0 -or $count -gt 128) { throw 'Invalid MSI StringList count' }
+    $items = [System.Collections.Generic.List[string]]::new()
+    for ($index = 0; $index -lt $count; $index++) {
+        $value = $List.GetType().InvokeMember('Item', 'GetProperty', $null, $List, @($index))
+        if ($value -isnot [string] -or $value -notmatch '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$') { throw 'Invalid related MSI product identifier' }
+        $items.Add($value)
+    }
+    return ,$items.ToArray()
 }
 function Product-Installed([string] $Code) {
     # Windows Installer state 5 = INSTALLSTATE_DEFAULT, not just package metadata.
@@ -110,8 +124,10 @@ try {
     if ($packages.Count -ne 1) { throw 'Expected exactly one current MSI package' }
     $current = Msi-Info $packages[0].FullName
     if ($current.version -ne $version -or (Product-Installed $current.productCode)) { throw 'Current MSI version/state mismatch' }
-    $related = $installer.GetType().InvokeMember('RelatedProducts', 'GetProperty', $null, $installer, @($current.upgradeCode))
-    if ($related.Count -ne 0) { throw 'Refusing any pre-existing installed or advertised related InkLeet product' }
+    $relatedList = $installer.GetType().InvokeMember('RelatedProducts', 'GetProperty', $null, $installer, @($current.upgradeCode))
+    $related = Read-MsiStringList $relatedList
+    $report.preflight = [ordered]@{related_product_codes=$related}
+    if ($related.Length -ne 0) { throw ('Refusing pre-existing installed or advertised related InkLeet product(s): ' + ($related -join ', ')) }
     $manifest = Get-Content -Raw 'releases/v0.1.1.json' | ConvertFrom-Json
     if ($manifest.repository -ne 'jacek4yang/inkleet' -or $manifest.tag -ne 'v0.1.1' -or $manifest.source_commit -ne 'fbacb2041b83232a30a791965c58d93a7556a4ff') { throw 'Unexpected prior-release provenance' }
     $assets = @($manifest.artifacts.windows.assets | Where-Object { $_.name -match '^[A-Za-z0-9._-]+\.msi$' })

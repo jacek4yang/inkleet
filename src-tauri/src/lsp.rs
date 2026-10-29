@@ -142,6 +142,7 @@ impl Services {
         let mut response=Value::Array(vec![resolved]);
         crate::lsp_document::completion_response(&session.language,&mut response,document.prefix,&document.text);
         let result=response.as_array_mut().and_then(|items|items.pop()).ok_or_else(||"补全导入涉及语言环境辅助代码，未应用任何修改".to_owned())?;
+        crate::lsp_document::validate_completion_import(&session.language,&original,&result,&document.text)?;
         crate::snippet_validation::resolved(&self.root,id,version,token,session.completion_insert_text_mode,&result);
         Ok(result)
     }

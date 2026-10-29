@@ -4,12 +4,35 @@ Set-StrictMode -Version Latest
 $tokens=$null; $errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/test-windows-installed.ps1'),[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
-foreach ($name in @('Install-Owned','Cleanup-OwnedProducts')) {
+foreach ($name in @('Read-MsiStringList','Install-Owned','Cleanup-OwnedProducts')) {
     $found=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true))
     if ($found.Count -ne 1) { throw "Missing exact implementation function $name" }
     . ([scriptblock]::Create($found[0].Extent.Text))
 }
 function Assert($Condition,[string] $Message) { if (-not $Condition) { throw $Message } }
+# Exercise the exact IDispatch property names through .NET reflection; this is
+# a reader contract test, not a claim that COM/MSI ran on Linux.
+Add-Type -TypeDefinition @'
+public sealed class MsiStringListFixture {
+    private readonly string[] values;
+    public MsiStringListFixture(string[] values) { this.values = values; }
+    public int Count { get { return this.values.Length; } }
+    public string this[int index] { get { return this.values[index]; } }
+}
+'@
+$empty=Read-MsiStringList ([MsiStringListFixture]::new([string[]]@()))
+Assert ($empty -is [string[]] -and $empty.Length -eq 0) 'Empty StringList must stay an empty typed array, not scalar wrapper Count'
+$codeA='{11111111-1111-1111-1111-111111111111}'; $codeB='{22222222-2222-2222-2222-222222222222}'
+$single=Read-MsiStringList ([MsiStringListFixture]::new([string[]]@($codeA)))
+Assert ($single -is [string[]] -and $single.Length -eq 1 -and $single[0] -eq $codeA) 'Singleton related product must remain detectable'
+$multiple=Read-MsiStringList ([MsiStringListFixture]::new([string[]]@($codeA,$codeB)))
+Assert ($multiple.Length -eq 2 -and $multiple[1] -eq $codeB) 'Every related product must be retained'
+$rejected=$false
+try { Read-MsiStringList ([MsiStringListFixture]::new([string[]]@('not-a-product'))) | Out-Null } catch { $rejected=$true }
+Assert $rejected 'Malformed related product must fail closed'
+$rejected=$false
+try { Read-MsiStringList ([MsiStringListFixture]::new([string[]]@('{' + ('-' * 36) + '}'))) | Out-Null } catch { $rejected=$true }
+Assert $rejected 'Right-length but malformed GUID shape must fail closed'
 $ownedProducts=[ordered]@{}; $script:msiUncertain=$false
 $report=@{cleanup_errors=[System.Collections.Generic.List[string]]::new()}
 $calls=[System.Collections.Generic.List[string]]::new(); $installed=@{}

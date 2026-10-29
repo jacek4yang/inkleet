@@ -37,6 +37,7 @@ fn mapped_completion(client:&Client,original:&Value,language:&str,text:&str,pref
     let mut mapped=json!([resolved.clone()]);
     lsp_document::completion_response(language,&mut mapped,prefix,text);
     if mapped.as_array().is_none_or(|items|items.is_empty()){return Err(format!("{language} resolved completion touches helper code: {resolved}"));}
+    lsp_document::validate_completion_import(language,original,&mapped[0],text)?;
     Ok((resolved,mapped))
 }
 fn apply(text:&str,edits:&Value)->Result<String,String>{inkleet_managed_env::format_edits::apply(text,0,edits)}
@@ -72,13 +73,18 @@ fn probe(manager:&Manager,root:&Path,language:&str)->Result<(),String>{
         }
         println!("EDITING_COMPLETION_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"language":language,"label":label,"actualAdapter":true,"resolve":can_resolve,"sourceMapping":true,"initialMappedCandidate":true,"originalWireItemRetained":can_resolve,"autoimport":language!="python3","parameterSnippet":original["insertTextFormat"]==2}));
         if language=="python3" {
-            let text="path = PurePa\n";
+            let text="from pathlib import Path\npath = PurePa";
             let (wrapped,prefix)=lsp_document::contextual_source(language,text,&context);
             client.notify("textDocument/didChange",json!({"textDocument":{"uri":uri,"version":2},"contentChanges":[{"text":wrapped}]}))?;
-            let original=completion(&client,&uri,prefix,13,"PurePath")?;
+            // Keep an authored module reference and allow background analysis to settle.
+            // Pyright discards previously imported but now unreferenced libraries;
+            // an immediate post-change request would only test a transient cache.
+            std::thread::sleep(Duration::from_secs(1));
+            let original=completion(&client,&uri,prefix+1,13,"PurePath")?;
             let (resolved,mapped)=mapped_completion(&client,&original,language,text,prefix,2,can_resolve)?;
-            if !mapped[0]["additionalTextEdits"].as_array().is_some_and(|items|items.iter().any(|e|e["newText"].as_str().is_some_and(|s|s.contains("from pathlib import PurePath")))){return Err(format!("Python autoimport missing: {resolved}"));}
-            println!("EDITING_PYTHON_AUTOIMPORT_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"resolve":true,"helperPrefix":prefix,"initialMappedCandidate":true,"originalWireItemRetained":true,"additionalTextEdits":mapped[0]["additionalTextEdits"]}));
+            let imported=apply(text,&mapped[0]["additionalTextEdits"])?;
+            if imported!="from pathlib import Path, PurePath\npath = PurePa"{return Err(format!("Python import augmentation mismatch: {resolved}; {imported}"));}
+            println!("EDITING_PYTHON_AUTOIMPORT_RESULT {}",json!({"platform":inkleet_managed_env::platform(),"resolve":true,"helperPrefix":prefix,"currentlyReferencedModule":"pathlib","settleDelayMs":1000,"initialMappedCandidate":true,"originalWireItemRetained":true,"additionalTextEdits":mapped[0]["additionalTextEdits"]}));
         }
         if language=="rust" {
             let text="fn example() {\n    let value = (1 + 2) * 3;\n    let _ = value;\n}\n";

@@ -965,32 +965,33 @@ try:
         screenshot("python-stdlib-native.png")
         source_navigation_case("def __getitem__(self, key: SupportsIndex","typing.pyi","python")
         click(".source-viewer header button[aria-label=\'返回代码\']")
-        # Pinned open-source Pyright autoimports symbols from analyzed modules,
-        # not a global cold package index. Establish that explicit prerequisite
-        # through genuine pathlib analysis before testing the import application.
+        # Pinned Pyright only offers this import from a currently referenced
+        # module, not a global index or a durable previously-imported cache.
+        # Keep the authored Path import, including after background analysis.
         fill(code,"from pathlib import Path\npath = Path('.')\npath.exi")
         focus_code_editor()
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End","ctrl+space"],check=True)
         wait_for(lambda:"exists" in text(".cm-tooltip-autocomplete"),"real Pyright analyzed pathlib prerequisite",seconds=45)
         subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
-        python_import_source="path = PurePa"
+        python_import_source="from pathlib import Path\npath = PurePa"
         fill(code,python_import_source)
+        time.sleep(1)  # Deliberately settle; never race stale module retention.
         focus_code_editor()
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End","ctrl+space"],check=True)
-        wait_for(lambda:"PurePath" in text(".cm-tooltip-autocomplete"),"real Pyright lazy autoimport candidate",seconds=45)
+        wait_for(lambda:"PurePath" in text(".cm-tooltip-autocomplete"),"real Pyright stable authored-import augmentation candidate",seconds=45)
         time.sleep(.3)
         options=cmd("POST","/elements",{"using":"css selector","value":".cm-tooltip-autocomplete li"})
         option=next(node[EID] for node in options if cmd("GET",f"/element/{node[EID]}/text").lstrip().startswith("PurePath"))
         cmd("POST",f"/element/{option}/click",{})
-        python_import_expected="from pathlib import PurePath\npath = PurePath"
-        wait_for(lambda:source_text(code)==python_import_expected,"Pyright resolve adds the exact safe authored-source import")
+        python_import_expected="from pathlib import Path, PurePath\npath = PurePath"
+        wait_for(lambda:source_text(code)==python_import_expected,"Pyright resolve augments the exact authored import")
         screenshot("python-autoimport-native.png")
         focus_code_editor()
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
         wait_for(lambda:source_text(code)==python_import_source,"one undo removes Python symbol and import")
         subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
         wait_for(lambda:source_text(code)==python_import_expected,"redo restores Python symbol and import")
-        (evidence/"PYTHON_AUTOIMPORT_NATIVE_RESULT.txt").write_text("PASS: actual private Pyright PurePath completion/resolve from previously analyzed pathlib, initial and resolved import-only insertion mapped outside virtual public imports, exact source and one undo/redo; NOT cold/global library indexing or arbitrary preamble rewriting.\n")
+        (evidence/"PYTHON_AUTOIMPORT_NATIVE_RESULT.txt").write_text("PASS: actual private Pyright PurePath completion/resolve while authored from-pathlib-import-Path remains referenced after settling; exact Path, PurePath augmentation and one undo/redo. NOT cold/global indexing, a durable removed-import cache, or native qualification of helper-line-zero import relocation.\n")
         fill(code, "sum([1, 2])")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"signature-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
@@ -1562,6 +1563,7 @@ try:
                     buttons=cmd("POST","/elements",{"using":"css selector","value":".lsp-code-action-list button"})
                     return next((node[EID] for node in buttons if "extract" in cmd("GET",f"/element/{node[EID]}/text").lower() and "variable" in cmd("GET",f"/element/{node[EID]}/text").lower()),None)
                 action_button=wait_for(extract_action,"actual rust-analyzer extract-variable action",seconds=45)
+                screenshot("rust-code-action-menu-native.png")
                 click_native_node(action_button)
                 wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":".lsp-code-actions section:not([hidden])"}),"resolved Rust action preview")
                 assert source_text(code)==action_source,"code action preview never modifies source"

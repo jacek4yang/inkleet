@@ -11,7 +11,7 @@ not a claim of editing parity with Zed or another mature IDE.
 | Go | Enabled | Not enabled | Not forced: pinned gopls does not advertise resolve | Initial server edits; real fmt.Println import probe, including virtual package mapping |
 | C / C++ | Enabled | Not enabled | Not enabled | Existing explicit/compiler header context; missing-header autoimport is not claimed |
 | Java | Enabled | Not enabled | Not enabled | Local method parameter snippets qualified; lazy primary edits and imports remain unqualified |
-| Python | Not enabled | Not enabled | Enabled when Pyright advertises it | PurePath from previously analyzed pathlib; eager/lazy import mapping below |
+| Python | Not enabled | Not enabled | Enabled when Pyright advertises it | PurePath import augmentation from currently referenced pathlib; safety below |
 
 Basic member completion, hover, signatures and source navigation remain available
 for all six languages through their installed servers. The table is about advanced
@@ -30,16 +30,22 @@ independently repeat the managed-tool snippet GUI suite.
 
 ### Python autoimport safety
 
-Coverage is limited to modules Pyright has already analyzed in the session; it is
-not a global cold library index. A fresh `PurePa` fixture returned no raw candidates,
-whereas analyzing `from pathlib import Path` first made the real PurePath proposal
-available. The native fixture records that prerequisite explicitly. The pinned
-[Pyright settings](https://github.com/microsoft/pyright/blob/1.1.414/docs/settings.md)
+Coverage is limited to **currently referenced** modules, not a global cold
+library index or a durable history of previously imported modules. A fresh
+`PurePa` fixture returned no raw candidates. Removing the only pathlib import
+can briefly retain candidates, but they disappear after background analysis
+(300 ms in the focused experiment). Earlier immediate-after-change protocol
+results therefore did not establish stable native usability.
+
+The stable fixture retains `from pathlib import Path`, waits for analysis to
+settle, then completes `path = PurePa`. Pyright augments the authored import to
+`from pathlib import Path, PurePath`; exact source and one-step undo/redo are the
+native acceptance criteria. It does not rely on a hidden import or racing cleanup.
+The pinned [Pyright settings](https://github.com/microsoft/pyright/blob/1.1.414/docs/settings.md)
 list auto-import completions but not Pylance's package-indexing controls. Its
 [completion provider](https://github.com/microsoft/pyright/blob/1.1.414/packages/pyright-internal/src/languageService/completionProvider.ts#L891-L907)
-builds candidates from the program's known source files. Enabling
-an unrelated Pylance option is not claimed as a fix.
-
+builds candidates from the program's known source files. An unrelated Pylance
+option is not claimed as a fix.
 
 Pyright may place an eager or lazy import at virtual line zero, before InkLeet's implicit
 public imports. Such an edit is **not generally clamped** to user line zero.
@@ -48,10 +54,17 @@ statements is relocated. The authored module must begin unambiguously with a
 class, function or simple assignment. Leading comments, shebang, coding comments
 and blank lines are preserved. Module docstrings, future imports, decorators,
 unknown preambles, helper replacements and unknown edit forms are refused rather
-than guessed. Missing resolved import edits also refuse the entire completion.
+than guessed. Missing resolved import edits also refuse the entire completion. After mapping,
+the bounded additions are checked against the exact authored snapshot: the
+required module and unaliased symbol must exist in a simple leading import block.
+A genuine `, PurePath` augmentation is accepted; strings, comments, aliases,
+wrong modules, missing edits and invalid/overlapping ranges cannot prove an import.
+Unknown import grammars remain unsupported rather than guessed.
 Both the initial list and the resolved item use this policy. Original server items
 are cached before mapping, so resolve never receives rewritten user coordinates.
-A supported symbol plus its import is one undo transaction.
+A supported symbol plus its import is one undo transaction. Helper-line-zero
+relocation has bounded mapper and captured-adapter coverage; the stable native
+fixture above covers authored-import augmentation, **not** helper relocation.
 
 ## Preview-first code actions
 
