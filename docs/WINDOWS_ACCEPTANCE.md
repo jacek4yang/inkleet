@@ -6,7 +6,7 @@ The `Packaging Windows x64` job includes `scripts/test-windows-installed.ps1` as
 
 On a disposable GitHub-hosted `windows-2025` runner, it refuses pre-existing InkLeet app-data/cache directories, a running InkLeet process or any installed/advertised product with the same upgrade code. It verifies the prior public v0.1.1 MSI's exact byte count and SHA-256 against `releases/v0.1.1.json`, and checks product/version/upgrade-code identity before installing anything.
 
-1. Installs the current MSI into an explicit test-owned directory. Checks Windows Installer registration and compares the installed executable's SHA-256 to the exact just-built payload.
+1. Installs the current MSI into an explicit test-owned directory. Checks Windows Installer registration and compares every installed executable byte to the exact just-built payload with only Tauri's single `__TAURI_BUNDLE_TYPE_VAR_UNK` → `__TAURI_BUNDLE_TYPE_VAR_MSI` substitution. Tauri patches that runtime marker for MSI bundling, then restores the unbundled build output. Missing/duplicate markers or any other byte difference fail; raw, expected and installed SHA-256/size/path diagnostics are retained.
 2. Launches that installed executable with the real Windows WebView2 runtime. Saves authored source and notes through visible app controls and real Tauri IPC, opens/closes Settings, takes a screenshot, and requests normal app closure.
 3. Uninstalls the current MSI and verifies the executable/registration are gone while the complete synthetic notebook hashes are unchanged.
 4. Installs public v0.1.1. Its actual UI writes source, notes and a named solution; then it closes normally.
@@ -14,6 +14,8 @@ On a disposable GitHub-hosted `windows-2025` runner, it refuses pre-existing Ink
 6. Uninstalls the upgraded app and again checks unchanged notebook hashes. Evidence and synthetic data stay available for diagnosis until the disposable runner is discarded.
 
 The app-data and cache directories are the real Windows known-folder locations. No claim is made that changing `APPDATA` can redirect Tauri storage. A test ownership marker is required before the UI probe reads the fixture. All notebook/code/note contents are authored fixtures; no account login, submission, personal files or managed language tools are involved.
+
+The payload rule follows [Tauri's `patch_binary`/restore implementation](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.0/crates/tauri-bundler/src/bundle.rs) and the pinned `tauri-utils` 2.10.1 runtime marker (Cargo.lock). The first real Windows run's bundling log explicitly reported the MSI patch. Expected bytes exist only in memory (`expected_path: null`, explicit `expected_origin`); build output, MSI and installed files are never rewritten by this check. `fresh-payload.json` and `upgraded-payload.json` retain raw/expected/installed sizes and SHA-256, original absolute paths and the unique marker offset/count/length. Failed comparisons retain first differing byte offsets.
 
 ## Automation and security boundary
 

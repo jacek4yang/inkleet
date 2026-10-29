@@ -20,6 +20,7 @@ $report = [ordered]@{
     result = 'FAIL'; source_commit = $commit; version = $version; runner = 'windows-2025'
     stages = [System.Collections.Generic.List[string]]::new()
     ui = [ordered]@{}
+    payloads = [ordered]@{}
     cleanup_errors = [System.Collections.Generic.List[string]]::new()
     scope = 'Unattended MSI fresh install, verified v0.1.1 upgrade, uninstall and real installed WebView2 synthetic-data UI. No mocked IPC.'
     not_verified = @('interactive MSI/NSIS installer', 'physical desktop/IME', 'SmartScreen reputation', 'signing', 'real account or online judge', 'managed LSP/tool installation')
@@ -103,6 +104,14 @@ function Assert-Preserved([string] $Before, [string] $Stage) {
     if ((Notebook-Hashes) -cne $Before) { throw "$Stage changed or removed saved notebook data" }
     $Before | Set-Content -Encoding utf8NoBOM (Join-Path $evidence "$Stage-preserved-notebook.json")
 }
+function Assert-InstalledPayload([string] $Stage, [string] $Built) {
+    $installed = Installed-Binary
+    $payloadReport = Join-Path $evidence "$Stage-payload.json"
+    & node tests/windows-msi-payload.mjs $Built $installed $payloadReport
+    if (Test-Path -LiteralPath $payloadReport) { $report.payloads[$Stage] = Get-Content -Raw $payloadReport | ConvertFrom-Json }
+    if ($LASTEXITCODE -ne 0) { throw "$Stage exact MSI payload verification failed; see hashes, byte sizes and paths" }
+    if ($report.payloads[$Stage].result -ne 'PASS') { throw 'Missing successful payload proof' }
+}
 function Ui-Probe([string] $Phase, [string] $ExpectedVersion, [string] $ApplicationSource) {
     $binary = Installed-Binary
     $config = [ordered]@{phase=$Phase; binary=$binary; installDir=$installDir; appData=$appData; appCache=$appCache; evidence=$evidence; temporary=$temporary; version=$ExpectedVersion; harnessCommit=$commit; applicationSourceCommit=$ApplicationSource}
@@ -150,7 +159,7 @@ try {
     Install-Owned $current 'fresh-install'
     if (-not (Product-Installed $current.productCode)) { throw 'Fresh MSI did not register the product' }
     $built = 'src-tauri/target/x86_64-pc-windows-msvc/release/inkleet.exe'
-    if ((Get-FileHash $built).Hash -ne (Get-FileHash (Installed-Binary)).Hash) { throw 'Fresh installed payload differs from this exact build' }
+    Assert-InstalledPayload 'fresh' $built
     Ui-Probe 'fresh' $version $commit; $report.stages.Add('current MSI fresh install and real WebView2 save')
     $before = Notebook-Hashes
     Run-Msi '/x' $current.productCode 'fresh-uninstall'
@@ -163,7 +172,7 @@ try {
     Install-Owned $current 'upgrade'
     if (-not (Product-Installed $current.productCode) -or (Product-Installed $legacy.productCode)) { throw 'Upgrade did not replace the prior registered product' }
     Assert-Preserved $before 'upgrade'
-    if ((Get-FileHash $built).Hash -ne (Get-FileHash (Installed-Binary)).Hash) { throw 'Upgraded payload differs from this exact build' }
+    Assert-InstalledPayload 'upgraded' $built
     Ui-Probe 'upgraded' $version $commit; $report.stages.Add('upgrade retains v0.1.1 data; real WebView2 reload, archive/restart/restore')
     $before = Notebook-Hashes
     Run-Msi '/x' $current.productCode 'upgraded-uninstall'

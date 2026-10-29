@@ -34,6 +34,8 @@ WINDOWS_UI_ASSERTIONS = {
     'upgraded': ['v0.1.1 source/notes/named ID preserved through MSI upgrade', 'archive cancel and confirm use real storage', 'restart then restore retains unsaved draft without overwriting saved source', 'explicit save persists restored draft'],
 }
 GUID = r'\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}'
+WINDOWS_PAYLOAD_RULE = 'tauri-single-bundle-marker-UNK-to-MSI'
+WINDOWS_PAYLOAD_ORIGIN = 'In-memory copy of built_path with the exact single Tauri UNK-to-MSI marker substitution; no files modified'
 GATES = {
     'ci': ('.github/workflows/ci.yml', {'CI Frontend Regression'}),
     'editing': ('.github/workflows/editing-lsp.yml', {'Editing LSP (ubuntu-24.04)', 'Editing LSP (windows-2025)', 'Editing LSP (macos-15-intel)'}),
@@ -119,6 +121,20 @@ def validate_windows_install(m, metadata, report):
     require(report.get('source_commit') == m['source_commit'] and report.get('version') == VERSION and report.get('runner') == 'windows-2025', 'Windows installed source/version/runner mismatch')
     require(report.get('msi_uncertain') is False and report.get('cleanup_errors') == [], 'Windows installer outcome or cleanup uncertain')
     require(report.get('stages') == WINDOWS_STAGES, 'Incomplete Windows install/upgrade/uninstall stages')
+    payloads = report.get('payloads', {})
+    require(isinstance(payloads, dict) and set(payloads) == {'fresh', 'upgraded'}, 'Missing exact installed MSI payload proofs')
+    for value in payloads.values():
+        require(isinstance(value, dict) and value.get('result') == 'PASS' and value.get('rule') == WINDOWS_PAYLOAD_RULE, 'Invalid installed MSI payload proof')
+        require(all(hex_value(value.get(key), 64) for key in ('built_sha256', 'expected_sha256', 'installed_sha256')), 'Invalid installed payload hashes')
+        require(value['expected_sha256'] == value['installed_sha256'] and value['built_sha256'] != value['expected_sha256'], 'Installed executable differs from exact MSI-patched build')
+        size = value.get('built_bytes')
+        require(positive(size) and 27 <= size < 200 * 1024 * 1024 and size == value.get('expected_bytes') == value.get('installed_bytes') == metadata.get('app_pe', {}).get('bytes'), 'Installed executable byte counts differ')
+        offset = value.get('marker_offset')
+        require(type(offset) is int and 0 <= offset <= size - 27 and type(value.get('marker_count')) is int and value['marker_count'] == 1 and type(value.get('marker_bytes')) is int and value['marker_bytes'] == 27, 'Invalid or nonunique MSI bundle marker proof')
+        require(all(isinstance(value.get(key), str) and value[key] and len(value[key]) <= 4096 for key in ('built_path', 'installed_path')), 'Missing installed payload paths')
+        require('expected_path' in value and value['expected_path'] is None and value.get('expected_origin') == WINDOWS_PAYLOAD_ORIGIN, 'Expected payload was not the exact in-memory marker copy')
+    for key in ('built_sha256', 'expected_sha256', 'installed_sha256', 'built_bytes', 'marker_offset', 'built_path', 'installed_path'):
+        require(payloads['fresh'][key] == payloads['upgraded'][key], 'Fresh and upgraded payload identities differ')
     prior_source = 'fbacb2041b83232a30a791965c58d93a7556a4ff'
     prior = report.get('prior', {})
     require(prior == {'url': f'https://github.com/{REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi', 'sha256': '1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0', 'bytes': 6885376, 'source_commit': prior_source, 'version': '0.1.1'}, 'Wrong public upgrade baseline')

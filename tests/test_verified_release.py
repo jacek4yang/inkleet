@@ -36,13 +36,14 @@ def windows_acceptance():
     for phase in ('fresh','legacy','upgraded'):
         version='0.1.1' if phase=='legacy' else p.VERSION
         ui[phase]={'result':'PASS','phase':phase,'harnessCommit':SOURCE,'applicationSourceCommit':prior_source if phase=='legacy' else SOURCE,'nativeVersion':version,'normalClose':True,'assertions':list(p.WINDOWS_UI_ASSERTIONS[phase]),'launches':[{'pid':10+i,'version':version,'url':'http://tauri.localhost/','webviewVersion':'WebView2/test'} for i in range(2 if phase=='upgraded' else 1)]}
-    return {'result':'PASS','source_commit':SOURCE,'version':p.VERSION,'runner':'windows-2025','msi_uncertain':False,'cleanup_errors':[],'stages':list(p.WINDOWS_STAGES),'prior':{'url':f'https://github.com/{p.REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi','sha256':'1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0','bytes':6885376,'source_commit':prior_source,'version':'0.1.1'},'ui':ui,'packages':{'current':{'productCode':code,'upgradeCode':upgrade,'version':p.VERSION,'name':'InkLeet'},'legacy':{'productCode':old,'upgradeCode':upgrade,'version':'0.1.1','name':'InkLeet'}}}
+    payload={'result':'PASS','rule':p.WINDOWS_PAYLOAD_RULE,'built_sha256':'d'*64,'expected_sha256':'e'*64,'installed_sha256':'e'*64,'built_bytes':128,'expected_bytes':128,'installed_bytes':128,'marker_offset':16,'marker_count':1,'marker_bytes':27,'built_path':r'C:\build\inkleet.exe','installed_path':r'C:\owned\inkleet.exe','expected_path':None,'expected_origin':p.WINDOWS_PAYLOAD_ORIGIN}
+    return {'payloads':{'fresh':copy.deepcopy(payload),'upgraded':copy.deepcopy(payload)},'result':'PASS','source_commit':SOURCE,'version':p.VERSION,'runner':'windows-2025','msi_uncertain':False,'cleanup_errors':[],'stages':list(p.WINDOWS_STAGES),'prior':{'url':f'https://github.com/{p.REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi','sha256':'1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0','bytes':6885376,'source_commit':prior_source,'version':'0.1.1'},'ui':ui,'packages':{'current':{'productCode':code,'upgradeCode':upgrade,'version':p.VERSION,'name':'InkLeet'},'legacy':{'productCode':old,'upgradeCode':upgrade,'version':'0.1.1','name':'InkLeet'}}}
 
 
 def archive(m, platform='windows', extra=None, metadata_changes=None, source=SOURCE):
     a=m['artifacts'][platform]
     metadata={'commit':SOURCE,'target':p.PLATFORMS[platform][1],'version':p.VERSION,'build_profile':p.PROFILE,'workflow_run':f"https://github.com/{p.REPO}/actions/runs/{m['gates']['package']['run_id']}",'developer_id_signed':False,'notarized':False}
-    metadata.update({'mach_o_files':[{'architectures':['x86_64']}],'file':a['assets'][0]['name'],'sha256':a['assets'][0]['sha256'],'bytes':a['assets'][0]['bytes'],'app_pe':{'machine':0x8664,'optional_header_magic':0x20b},'msi':{'template':'x64;1033','product_code':'{11111111-1111-1111-1111-111111111111}'}})
+    metadata.update({'mach_o_files':[{'architectures':['x86_64']}],'file':a['assets'][0]['name'],'sha256':a['assets'][0]['sha256'],'bytes':a['assets'][0]['bytes'],'app_pe':{'machine':0x8664,'optional_header_magic':0x20b,'bytes':128},'msi':{'template':'x64;1033','product_code':'{11111111-1111-1111-1111-111111111111}'}})
     if platform=='windows':metadata['installed_msi_acceptance']=windows_acceptance()
     metadata.update(metadata_changes or {})
     stream=io.BytesIO()
@@ -191,12 +192,14 @@ class PublisherTest(unittest.TestCase):
         p.verify_assets({'assets':[{'id':1,'name':'x','size':3}]},{'x':b'abc'},fake)
 
 class WindowsAcceptanceTest(unittest.TestCase):
-    def metadata(self):return {'msi':{'product_code':'{11111111-1111-1111-1111-111111111111}'}}
+    def metadata(self):return {'app_pe':{'bytes':128},'msi':{'product_code':'{11111111-1111-1111-1111-111111111111}'}}
     def test_valid_installed_native_evidence(self):p.validate_windows_install(manifest(),self.metadata(),windows_acceptance())
     def test_expected_stage_and_assertion_labels_match_actual_producers(self):
         root=pathlib.Path(__file__).parents[1]
         ps=(root/'scripts/test-windows-installed.ps1').read_text()
         js=(root/'tests/windows-installed-ui.mjs').read_text()
+        payload=(root/'tests/windows-msi-payload.mjs').read_text()
+        self.assertIn(p.WINDOWS_PAYLOAD_RULE,payload); self.assertIn(p.WINDOWS_PAYLOAD_ORIGIN,payload)
         for label in p.WINDOWS_STAGES:self.assertIn(label,ps)
         for labels in p.WINDOWS_UI_ASSERTIONS.values():
             for label in labels:self.assertIn(label,js)
@@ -204,6 +207,23 @@ class WindowsAcceptanceTest(unittest.TestCase):
         for mutate in (lambda r:r.update(stages=['a','b','c','d','e']),lambda r:r['ui']['upgraded'].update(assertions=['executed']),lambda r:r['packages']['current'].update(upgradeCode='{------------------------------------}'),lambda r:r['packages']['legacy'].update(productCode=None)):
             report=windows_acceptance();mutate(report)
             with self.assertRaises(ValueError):p.validate_windows_install(manifest(),self.metadata(),report)
+    def test_exact_payload_proofs_required(self):
+        for payloads in ({}, {'fresh':windows_acceptance()['payloads']['fresh']}, None):
+            report=windows_acceptance();report['payloads']=payloads
+            with self.assertRaises(ValueError):p.validate_windows_install(manifest(),self.metadata(),report)
+    def test_payload_marker_hash_size_and_origin_fail_closed(self):
+        changes=[{'result':'FAIL'},{'rule':'normalize-PE'},{'built_sha256':'bad'},{'built_sha256':'e'*64},{'installed_sha256':'f'*64},{'expected_bytes':127},{'installed_bytes':129},{'built_bytes':True},{'marker_count':2},{'marker_count':True},{'marker_offset':-1},{'marker_offset':102},{'marker_offset':True},{'marker_bytes':25},{'built_path':''},{'installed_path':None},{'expected_path':'rewritten.exe'},{'expected_origin':'normalized arbitrary bytes'}]
+        for change in changes:
+            with self.subTest(change=change):
+                report=windows_acceptance();report['payloads']['fresh'].update(change)
+                with self.assertRaises(ValueError):p.validate_windows_install(manifest(),self.metadata(),report)
+        report=windows_acceptance();report['payloads']['fresh'].pop('expected_path')
+        with self.assertRaises(ValueError):p.validate_windows_install(manifest(),self.metadata(),report)
+    def test_fresh_upgrade_and_inspected_payload_size_must_match(self):
+        report=windows_acceptance();report['payloads']['upgraded']['built_sha256']='f'*64
+        with self.assertRaises(ValueError):p.validate_windows_install(manifest(),self.metadata(),report)
+        metadata=self.metadata();metadata['app_pe']['bytes']=129
+        with self.assertRaises(ValueError):p.validate_windows_install(manifest(),metadata,windows_acceptance())
     def test_missing_failed_or_uncertain_installation_fails(self):
         for change in ({'result':'FAIL'},{'result':'SKIP'},{'source_commit':'c'*40},{'version':'0.1.0'},{'runner':'other'},{'msi_uncertain':True},{'cleanup_errors':['error']},{'stages':[]}):
             report=windows_acceptance();report.update(change)
