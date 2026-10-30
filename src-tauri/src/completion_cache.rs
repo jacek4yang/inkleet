@@ -33,6 +33,9 @@ impl CompletionCache{
         self.items.get(&id).cloned().ok_or_else(||"补全候选已经过期，请重新触发补全".into())
     }
 }
+// Primary identity validation precedes coordinate mapping. Python import hints
+// additionally require lsp_document::validate_completion_import on the mapped
+// edits and exact authored snapshot; an inserted substring is not import proof.
 pub fn validate_resolved(original:&Value,resolved:&Value)->Result<(),String>{
     if !resolved.is_object(){return Err("补全解析结果无效".into());}
     for key in ["label","filterText","sortText","insertText","insertTextFormat","insertTextMode","textEdit"]{

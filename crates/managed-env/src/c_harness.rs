@@ -36,7 +36,7 @@ fn convert(name:&str,kind:&str,size:&str,columns:&str)->Result<String,String>{
 }
 pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),String>{
     if source.len()>2*1024*1024{return Err("C 源码超过 2 MiB".into());}
-    let config=crate::harness::configuration(metadata,input)?;
+    let config=crate::harness::ordinary_configuration(metadata,input)?;
     let name=config["metadata"]["name"].as_str().ok_or("C 函数名缺失")?;
     let params=config["metadata"]["params"].as_array().ok_or("C 参数缺失")?;
     let returned=config["metadata"]["return"]["type"].as_str().ok_or("C 驱动需要明确返回类型")?;

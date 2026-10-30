@@ -7,9 +7,9 @@ type Result<T>=std::result::Result<T,String>;
 pub(crate) fn snippet_validation_enabled()->bool{
     cfg!(all(feature="native-snippet-validation",debug_assertions,target_os="linux"))
 }
-// Roll out only on the language/platform combination covered by real WebView tests.
-// native-snippet-validation controls diagnostics only. The separate clang experiment
-// is explicitly debug-only until its own native acceptance is qualified.
+// Linux x86_64 rollout follows actual pinned-server/native WebView acceptance.
+// Validation features retain trace instrumentation only; they never enable a
+// capability absent from a release build on the same qualified platform.
 pub(crate) fn clang_snippet_validation_enabled()->bool{
     cfg!(all(feature="native-clang-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64"))
 }
@@ -17,15 +17,14 @@ pub(crate) fn java_snippet_validation_enabled()->bool{
     cfg!(all(feature="native-java-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64"))
 }
 pub(crate) fn snippet_support_enabled(language:&str)->bool{
-    (cfg!(all(target_os="linux",target_arch="x86_64"))&&matches!(language,"golang"|"rust"))
-        ||(clang_snippet_validation_enabled()&&matches!(language,"c"|"cpp"))
-        ||(java_snippet_validation_enabled()&&language=="java")
+    cfg!(all(target_os="linux",target_arch="x86_64"))&&matches!(language,"golang"|"rust"|"c"|"cpp"|"java")
 }
+pub(crate) fn completion_resolve_enabled(language:&str)->bool{matches!(language,"rust"|"python3")}
 pub(crate) fn completion_capabilities(language:&str)->Value{
     let enabled=snippet_support_enabled(language);
     let mut item=json!({"snippetSupport":enabled});
     if enabled{item["insertTextModeSupport"]=json!({"valueSet":[1]});}
-    if language=="rust"{item["resolveSupport"]=json!({"properties":["documentation","additionalTextEdits"]});}
+    if completion_resolve_enabled(language){item["resolveSupport"]=json!({"properties":["documentation","additionalTextEdits"]});}
     let mut profile=json!({"contextSupport":true,"completionItem":item});
     if enabled{profile["insertTextMode"]=json!(1);}
     profile
@@ -143,21 +142,19 @@ mod snippet_validation_tests{
         if !cfg!(feature="native-snippet-validation"){assert!(!snippet_validation_enabled());}
     }
     #[test]
-    fn clang_experiment_is_explicit_debug_linux_x86_64_only(){
+    fn clang_trace_is_explicit_debug_linux_x86_64_only(){
         assert_eq!(clang_snippet_validation_enabled(),cfg!(all(feature="native-clang-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64")));
         if !cfg!(feature="native-clang-snippet-validation"){assert!(!clang_snippet_validation_enabled());}
     }
     #[test]
-    fn java_experiment_is_explicit_debug_linux_x86_64_only(){
+    fn java_trace_is_explicit_debug_linux_x86_64_only(){
         assert_eq!(java_snippet_validation_enabled(),cfg!(all(feature="native-java-snippet-validation",debug_assertions,target_os="linux",target_arch="x86_64")));
         if !cfg!(feature="native-java-snippet-validation"){assert!(!java_snippet_validation_enabled());}
     }
     #[test]
     fn rollout_is_language_and_platform_scoped(){
-        for language in ["rust","golang"]{assert_eq!(snippet_support_enabled(language),cfg!(all(target_os="linux",target_arch="x86_64")));}
+        for language in ["rust","golang","c","cpp","java"]{assert_eq!(snippet_support_enabled(language),cfg!(all(target_os="linux",target_arch="x86_64")));}
         for language in ["python3","unknown"]{assert!(!snippet_support_enabled(language));}
-        for language in ["c","cpp"]{assert_eq!(snippet_support_enabled(language),clang_snippet_validation_enabled());}
-        assert_eq!(snippet_support_enabled("java"),java_snippet_validation_enabled());
     }
     #[test]
     fn completion_profile_preserves_resolve_and_indentation_scope(){
@@ -173,9 +170,14 @@ mod snippet_validation_tests{
             assert_eq!(profile["completionItem"]["snippetSupport"],json!(snippet_support_enabled(language)));
             if !snippet_support_enabled(language){assert!(profile.get("insertTextMode").is_none());}
             else{assert_eq!(profile["insertTextMode"],json!(1));assert_eq!(profile["completionItem"]["insertTextModeSupport"]["valueSet"],json!([1]));}
-            assert!(profile["completionItem"].get("resolveSupport").is_none());
+            assert_eq!(profile["completionItem"].get("resolveSupport").is_some(),completion_resolve_enabled(language));
             assert!(profile["completionItem"].get("insertReplaceSupport").is_none());
         }
+    }
+    #[test]
+    fn resolve_rollout_requires_qualified_adapter_and_negotiated_provider(){
+        for language in ["rust","python3"]{assert!(completion_resolve_enabled(language));assert_eq!(completion_capabilities(language)["completionItem"]["resolveSupport"]["properties"],json!(["documentation","additionalTextEdits"]));}
+        for language in ["golang","c","cpp","java","unknown"]{assert!(!completion_resolve_enabled(language));}
     }
     #[test]
     fn completion_default_matches_profile_and_rejects_invalid_modes(){

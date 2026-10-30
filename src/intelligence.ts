@@ -25,6 +25,7 @@ let formatQueue:Promise<unknown>=Promise.resolve();let queuedFormats=0;
 import { DocumentSyncQueue } from "./document-sync-queue";
 import { findReferences } from "./references";
 import { renameSymbol } from "./rename";
+import { codeActions } from "./code-actions";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from "@codemirror/view";
 import { EditorSelection, Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
@@ -33,7 +34,7 @@ import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
-type Started = { id: number; version: number; server: string; uri: string; implementation?: boolean; semanticTokens?: boolean; prepareRename?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
+type Started = { id: number; version: number; server: string; uri: string; codeActions?: boolean; implementation?: boolean; semanticTokens?: boolean; prepareRename?: boolean; completionResolve?: boolean; completionSnippets?: boolean; completionTriggerCharacters?: string[]; completionInsertTextMode?:1|2 };
 let connectionQueue: Promise<void> = Promise.resolve();
 const object = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 function offset(doc: Text, position: unknown): number | null {
@@ -84,7 +85,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   }
   async function semantic(){
     if(semanticBusy||closed||!view||!session?.semanticTokens)return;
-    if(view.composing){semanticTimer=setTimeout(()=>{void semantic();},300);return;}
+    if(view.compositionStarted){semanticTimer=setTimeout(()=>{void semantic();},300);return;}
     semanticBusy=true;semanticPending=false;
     const target=view,doc=target.state.doc,generation=semanticGeneration,id=session.id;
     try{
@@ -92,7 +93,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       if(closed||view!==target||session?.id!==id||target.state.doc!==doc||generation!==semanticGeneration)return;
       const askedVersion=version;
       const result=await invoke<{version:number;tokens:unknown}>("language_semantic_tokens",{id,version:askedVersion});
-      if(closed||view!==target||session?.id!==id||version!==askedVersion||result.version!==askedVersion||target.state.doc!==doc||generation!==semanticGeneration||target.composing)return;
+      if(closed||view!==target||session?.id!==id||version!==askedVersion||result.version!==askedVersion||target.state.doc!==doc||generation!==semanticGeneration||target.compositionStarted)return;
       const spans=decodeSemanticSpans(doc,result.tokens);
       target.dispatch({effects:setSemanticTokens.of(spans)});
       if(!spans.length)retrySemantic();
@@ -115,9 +116,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   let version = 1, sent: Text | null = null;
   const synchronization = new DocumentSyncQueue();
   let changeTimer: ReturnType<typeof setTimeout> | undefined, pollTimer: ReturnType<typeof setTimeout> | undefined;
+  // CodeMirror's `composing` stays false until its first composing DOM
+  // mutation. The public `compositionStarted` flag owns the entire preedit
+  // interval, including transactions before that mutation has been processed.
   function flush() {
     return synchronization.run(async () => {
-      while (!closed && view && session && sent !== view.state.doc) {
+      while (!closed && view && session && !view.compositionStarted && sent !== view.state.doc) {
         const doc = view.state.doc, nextVersion = ++version;
         await invoke("update_language_document", { id: session.id, version: nextVersion, text: snapshotText(doc) });
         sent = doc;
@@ -130,7 +134,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     if (!session || closed || !view || !stillCurrent()) return null;
     const owner=view,id=session.id;
     await flush();
-    if (closed || session?.id!==id || view!==owner || owner.state.doc!==doc || !stillCurrent()) return null;
+    if (closed || session?.id!==id || view!==owner || owner.compositionStarted || owner.state.doc!==doc || sent!==doc || !stillCurrent()) return null;
     const line = doc.lineAt(pos), askedVersion = version;
     if(kind==="completion"&&completionSequence>=Number.MAX_SAFE_INTEGER)throw Error("补全请求序号已耗尽，请重新连接语言服务");
     const sequence=kind==="completion"?++completionSequence:null;
@@ -146,7 +150,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   function invalidateCompletionApplication(){snippetPreparation.cancel();return ++completionApplyGeneration;}
   let incomplete:IncompleteContext|null=null,typing:{doc:Text;pos:number}|null=null,completionRequestGeneration=0;
   function invokeCompletion(target:EditorView){
-    if(closed||view!==target||!session||target.composing)return false;
+    if(closed||view!==target||!session||target.compositionStarted)return false;
     incomplete=null;typing=null;++completionRequestGeneration;completionOwner.cancelActive();
     // Reset CodeMirror's active source query as well as our request generation.
     // Starting again alone can leave a stale pending query with no replacement.
@@ -244,7 +248,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
 
           apply(target) {
             const ticket=invalidateCompletionApplication(),state=target.state,uri=session?.uri;
-            const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.eq(contextSelection)&&target.state.selection.eq(state.selection)&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.composing&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
+            const current=()=>!closed&&view===target&&target.state.doc===doc&&target.state.selection.eq(contextSelection)&&target.state.selection.eq(state.selection)&&target.state.selection.ranges.length===1&&target.hasFocus&&!target.compositionStarted&&session?.id===id&&version===askedVersion&&ticket===completionApplyGeneration;
             if(!current())return;
             void (async()=>{
               const resolved=await resolveItem();
@@ -291,11 +295,11 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     } catch { return null; }
   }
   async function signatureHelp() {
-    if (!view || closed || view.composing) return;
+    if (!view || closed || view.compositionStarted) return;
     const target = view, doc = target.state.doc, pos = target.state.selection.main.head, generation = ++signatureGeneration;
     try {
       const result = await request("signatureHelp", pos, doc);
-      if (closed || generation !== signatureGeneration || view !== target || target.state.doc !== doc || target.state.selection.main.head !== pos || target.composing) return;
+      if (closed || generation !== signatureGeneration || view !== target || target.state.doc !== doc || target.state.selection.main.head !== pos || target.compositionStarted) return;
       if (!object(result) || !Array.isArray(result.signatures) || !result.signatures.length) {
         target.dispatch({ effects: signatureEffect.of(null) }); return;
       }
@@ -309,7 +313,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       const span=activeParameterSpan(label,current);
       const parameterDocs=await renderDocumentation(object(current)?current.documentation:null,false,documentationLifetime.signal,{title:"参数文档",beforeOpen:beforeReader});
       const documentation=await renderDocumentation(signature.documentation,false,documentationLifetime.signal,{title:"函数文档",beforeOpen:beforeReader});
-      if(closed||generation!==signatureGeneration||view!==target||target.state.doc!==doc||target.state.selection.main.head!==pos||target.composing)return;
+      if(closed||generation!==signatureGeneration||view!==target||target.state.doc!==doc||target.state.selection.main.head!==pos||target.compositionStarted)return;
       target.dispatch({ effects: signatureEffect.of({ pos, above: true, create() {
         const dom = document.createElement("div"); dom.className = "lsp-signature"; dom.setAttribute("role", "status");
         const heading = document.createElement("div"); heading.className = "lsp-signature-label"; if(span){heading.append(label.slice(0,span.from));const active=document.createElement("mark");active.className="lsp-active-parameter";active.textContent=label.slice(span.from,span.to);heading.append(active,label.slice(span.to));}else heading.textContent=label;
@@ -337,12 +341,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   }
   async function keyboardDocumentation(target:EditorView){
     const normal=()=>{const mode=getCM(target)?.state.vim;return !!mode&&!mode.insertMode&&!mode.visualMode;};
-    if(closed||view!==target||!session||!target.hasFocus||target.composing||!normal())return;
+    if(closed||view!==target||!session||!target.hasFocus||target.compositionStarted||!normal())return;
     invalidateNavigation();
     const doc=target.state.doc,selection=target.state.selection,id=session.id,generation=navigationGeneration;
     const abort=new AbortController();navigationAbort=abort;
     const owner=target.dom.ownerDocument,win=owner.defaultView;
-    const current=()=>!closed&&!abort.signal.aborted&&view===target&&session?.id===id&&target.state.doc===doc&&target.state.selection.eq(selection)&&generation===navigationGeneration&&target.hasFocus&&!target.composing&&normal();
+    const current=()=>!closed&&!abort.signal.aborted&&view===target&&session?.id===id&&target.state.doc===doc&&target.state.selection.eq(selection)&&generation===navigationGeneration&&target.hasFocus&&!target.compositionStarted&&normal();
     const cancel=()=>{abort.abort();if(view===target&&session?.id===id&&generation===navigationGeneration)status("");};
     const focus=(event:FocusEvent)=>{if(!(event.target instanceof Node)||!target.contentDOM.contains(event.target))cancel();};
     const key=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!event.isComposing)cancel();};
@@ -361,7 +365,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     finally{cleanup();}
   }
   async function definition(pos: number,kind:NavigationKind="definition") {
-    if(!view||!session||!view.hasFocus||view.composing)return;
+    if(!view||!session||!view.hasFocus||view.compositionStarted)return;
     if(kind==="implementation"&&session.implementation!==true){status("当前语言服务不支持转到实现");return;}
     invalidateNavigation();
     const target=view,doc=target.state.doc,id=session.id,generation=navigationGeneration;
@@ -374,7 +378,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     let picker:HTMLDialogElement|null=null;
     const owns=(node:EventTarget|null)=>node instanceof Node&&(target.contentDOM.contains(node)||!!picker?.contains(node));
     const pending=()=>valid()&&generation===navigationGeneration&&!abort.signal.aborted;
-    const focused=()=>pending()&&!target.composing&&document.hasFocus()&&owns(document.activeElement);
+    const focused=()=>pending()&&!target.compositionStarted&&document.hasFocus()&&owns(document.activeElement);
     const cancel=()=>abort.abort();
     const focusIn=(event:FocusEvent)=>{if(!owns(event.target))cancel();};
     const focusOut=(event:FocusEvent)=>{
@@ -468,10 +472,12 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
   async function poll() {
     if (!session || !view || closed) return;
     try {
+      if(view.compositionStarted)return;
       await flush();
+      if(closed||!session||!view||view.compositionStarted||sent!==view.state.doc)return;
       const id = session.id, askedVersion = version, doc = view.state.doc;
       const result = await invoke<{ version: number; diagnostics: unknown[]; semanticRevision?:number }>("language_diagnostics", { id });
-      if (!closed && session?.id === id && askedVersion === version && result.version === version && view.state.doc === doc) {
+      if (!closed && session?.id === id && askedVersion === version && result.version === version && view.state.doc === doc && !view.compositionStarted) {
         if(Number.isSafeInteger(result.semanticRevision)&&result.semanticRevision!==semanticRevision){semanticRevision=result.semanticRevision!;scheduleSemantic();}
         const diagnostics: Diagnostic[] = [];
         for (const item of (Array.isArray(result.diagnostics) ? result.diagnostics : []).slice(0, 200)) {
@@ -487,10 +493,34 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     } catch (e) { if (!closed) status(String(e)); }
     finally { if (!closed) pollTimer = setTimeout(poll, 1000); }
   }
+  let actionSequence=0;
+  const actions=codeActions(async(from,to,doc)=>{
+    if(closed||!view||!session?.codeActions)return null;
+    const owner=view,id=session.id;
+    await flush();
+    if(closed||view!==owner||session?.id!==id||owner.state.doc!==doc||sent!==doc||owner.compositionStarted)return null;
+    if(actionSequence>=Number.MAX_SAFE_INTEGER)throw Error("代码操作序号已耗尽，请重新连接语言服务");
+    const askedVersion=version,start=doc.lineAt(from),end=doc.lineAt(to);
+    const items=await invoke("language_code_actions",{id,version:askedVersion,sequence:++actionSequence,startLine:start.number-1,startCharacter:from-start.from,endLine:end.number-1,endCharacter:to-end.from});
+    const current=()=>!closed&&view===owner&&session?.id===id&&version===askedVersion&&owner.state.doc===doc&&!owner.compositionStarted;
+    if(!current())return null;
+    return {items,resolve:async(token:number)=>{
+      if(!current())throw Error("代码操作快照已过期");
+      const result=await invoke("language_code_action_resolve",{id,version:askedVersion,token});
+      if(!current())throw Error("忽略过期的代码操作结果");
+      return result;
+    }};
+  },status,()=>{const id=session?.id;return()=>!closed&&id!==undefined&&session?.id===id;});
+  const openActions=(target:EditorView)=>{
+    if(closed||!session?.codeActions)return false;
+    if(target.state.field(snippetSessionState,false)){status("请先保存参数修改并按 Esc 结束参数补全，再请求代码操作");return true;}
+    return actions.open(target);
+  };
   const references = findReferences((pos, doc) => request("references", pos, doc), status, !commandsOwned);
   const rename = renameSymbol((pos, doc, name) => request("rename", pos, doc, name), status, !commandsOwned, () => { const id=session?.id; return () => !closed && id!==undefined && session?.id===id; }, (pos,doc) => session?.prepareRename ? request("prepareRename",pos,doc) : Promise.resolve({supported:false}));
   const extensions: Extension[] = [
     vimNavigation({definition:target=>{void definition(target.state.selection.main.head);return true;},documentation:target=>{void keyboardDocumentation(target);}}),
+    ...actions.extensions,
     ...references.extensions,
     ...rename.extensions,
     signatureField,
@@ -501,13 +531,19 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     Prec.highest(keymap.of(completionKeymap.map(binding=>binding.run===startCompletion?{...binding,run:invokeCompletion}:binding))),
     keymap.of([{key:"Alt-Enter",run:target=>popup.openDocs(target)},{key:"Alt-PageDown",run:target=>popup.scrollDocs(target,1)},{key:"Alt-PageUp",run:target=>popup.scrollDocs(target,-1)}]),
     hoverTooltip(hover, { hoverTime: 350 }),
-    keymap.of([...(commandsOwned?[]:[{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } },{key:"Mod-F12",run(target:EditorView){void definition(target.state.selection.main.head,"implementation");return true;}}]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
+    keymap.of([...(commandsOwned?[]:[{key:"Mod-.",run:openActions},{ key: "Mod-Shift-Space", run() { void signatureHelp(); return true; } },{ key: "F12", run(target:EditorView) { void definition(target.state.selection.main.head); return true; } },{key:"Mod-F12",run(target:EditorView){void definition(target.state.selection.main.head,"implementation");return true;}}]), { key: "Escape", run(target) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); if (!target.state.field(signatureField)) return false; target.dispatch({ effects: signatureEffect.of(null) }); return true; } }]),
     EditorView.domEventObservers({
       keydown(event){if(event.key==="Escape"&&!event.isComposing){invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;}},
       compositionstart(_event,target){
         invalidateCompletionApplication();++completionRequestGeneration;completionOwner.cancelActive();incomplete=null;typing=null;
         // Retire the pre-composition scheduled source before native bookkeeping.
         closeCompletion(target);
+      },
+      compositionend(){
+        // Native composition state settles after the DOM event. Flush the final
+        // document once; never send partial IME text or paint its stale diagnostics.
+        clearTimeout(changeTimer);
+        changeTimer=setTimeout(()=>{void flush().catch(e=>{if(!closed)status(String(e));});scheduleSemantic();},30);
       },
       blur(event,target){
         if(popup.containsFocus(target,event.relatedTarget))return;
@@ -529,13 +565,13 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
         ++completionRequestGeneration;completionOwner.cancelActive();
         const changes:{from:number;to:number;text:string}[]=[];
         update.changes.iterChanges((from,to,_fromB,_toB,inserted)=>{if(changes.length<2)changes.push({from,to,text:inserted.length<=256?inserted.toString():""});});
-        incomplete=update.view.composing?null:advanceIncomplete(incomplete,update.startState.doc,update.state.doc,changes);
+        incomplete=update.view.compositionStarted?null:advanceIncomplete(incomplete,update.startState.doc,update.state.doc,changes);
         const inserted=changes.length===1?changes[0]:null;
-        typing=!update.view.composing&&inserted&&inserted.from===inserted.to&&inserted.text&&update.transactions.some(transaction=>transaction.isUserEvent("input.type"))&&update.state.selection.main.empty&&update.state.selection.main.head===inserted.from+inserted.text.length?{doc:update.state.doc,pos:update.state.selection.main.head}:null;
+        typing=!update.view.compositionStarted&&inserted&&inserted.from===inserted.to&&inserted.text&&update.transactions.some(transaction=>transaction.isUserEvent("input.type"))&&update.state.selection.main.empty&&update.state.selection.main.head===inserted.from+inserted.text.length?{doc:update.state.doc,pos:update.state.selection.main.head}:null;
       }else if(update.selectionSet){incomplete=null;typing=null;++completionRequestGeneration;completionOwner.cancelActive();}
 
       if (update.docChanged || update.selectionSet) { invalidateCompletionApplication(); ++signatureGeneration; clearTimeout(signatureTimer); }
-      if (update.docChanged && !closed && !update.view.composing && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
+      if (update.docChanged && !closed && !update.view.compositionStarted && /[(,]$/.test(update.state.doc.sliceString(Math.max(0, update.state.selection.main.head - 1), update.state.selection.main.head))) signatureTimer = setTimeout(() => { void signatureHelp(); }, 180);
       if (update.docChanged && !closed) {
         scheduleSemantic();
         clearTimeout(changeTimer);
@@ -547,8 +583,9 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
     extensions,
     available:()=>!closed&&session!==null,
     cancelNavigation:()=>invalidateNavigation(),
+    codeActionsAvailable:()=>!closed&&session?.codeActions===true,
     implementationAvailable:()=>!closed&&session?.implementation===true,
-    commands:{implementation:(target:EditorView)=>{void definition(target.state.selection.main.head,"implementation");return true;},completion:invokeCompletion,rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
+    commands:{codeActions:openActions,implementation:(target:EditorView)=>{void definition(target.state.selection.main.head,"implementation");return true;},completion:invokeCompletion,rename:(target:EditorView)=>rename.open(target),references:(target:EditorView)=>{void references.open(target);return true;},definition:(target:EditorView)=>{void definition(target.state.selection.main.head);return true;},signature:()=>{void signatureHelp();return true;}},
     async format(text:string):Promise<string>{
       if(queuedFormats>=8)throw Error("格式化请求过多，请稍后保存");
       ++queuedFormats;
@@ -587,7 +624,7 @@ export function languageIntelligence(language: "python3" | "java" | "golang" | "
       } catch (e) { if (!closed) status(String(e)); }
     },
     destroy() {
-      invalidateNavigation(true);documentationLifetime.abort();snippetPreparation.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
+      invalidateNavigation(true);documentationLifetime.abort();snippetPreparation.destroy();actions.destroy();references.destroy(); rename.destroy(); incomplete=null;typing=null; ++completionRequestGeneration;completionOwner.cancelActive(); invalidateCompletionApplication(); closed = true; ++semanticGeneration; semanticPending=false; clearTimeout(semanticTimer); ++signatureGeneration; clearTimeout(signatureTimer); clearTimeout(changeTimer); clearTimeout(pollTimer);
       if (session) void invoke("stop_language_service", { id: session.id }).catch(() => {});
       appliedDiagnostics=null;session = null; view = null;
     },

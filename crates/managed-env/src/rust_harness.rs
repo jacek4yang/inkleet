@@ -4,7 +4,7 @@ use std::{fs,path::Path};
 const SUPPORT:&str=include_str!("rust_harness_support.rs");
 fn rust_type(kind:&str)->Result<String,String>{
     if let Some(inner)=kind.strip_suffix("[]"){return Ok(format!("Vec<{}>",rust_type(inner)?));}
-    Ok(match kind{"integer"=>"i32","long"=>"i64","double"=>"f64","boolean"=>"bool","string"=>"String","character"=>"char","void"=>"()","ListNode"=>"Option<Box<ListNode>>","TreeNode"=>"Option<std::rc::Rc<std::cell::RefCell<TreeNode>>>",_=>return Err("此 Rust 类型尚未支持".into())}.into())
+    Ok(match kind{"integer"=>"i32","long"=>"i64","double"=>"f64","boolean"=>"bool","string"=>"String","character"=>"char","void"=>"()","NestedInteger"=>"NestedInteger","ListNode"=>"Option<Box<ListNode>>","TreeNode"=>"Option<std::rc::Rc<std::cell::RefCell<TreeNode>>>",_=>return Err("此 Rust 类型尚未支持".into())}.into())
 }
 fn escaped(value:&str)->String{value.chars().map(|c|format!("\\u{{{:x}}}",c as u32)).collect()}
 fn literal(value:&Value,kind:&str,budget:&mut usize)->Result<String,String>{
@@ -20,6 +20,11 @@ fn literal(value:&Value,kind:&str,budget:&mut usize)->Result<String,String>{
         "boolean"=>value.as_bool().ok_or("Rust boolean 必须为布尔值")?.to_string(),
         "string"=>format!("String::from(\"{}\")",escaped(value.as_str().ok_or("Rust string 必须为字符串")?)),
         "character"=>{let s=value.as_str().ok_or("Rust character 必须为单个字符")?;if s.chars().count()!=1{return Err("Rust character 必须为单个 Unicode 字符".into());}format!("'{}'",escaped(s))},
+        "NestedInteger"=>{
+            if let Some(values)=value.as_array(){
+                format!("NestedInteger::List(vec![{}])",values.iter().map(|v|literal(v,"NestedInteger",budget)).collect::<Result<Vec<_>,_>>()?.join(","))
+            }else{format!("NestedInteger::Int({})",literal(value,"integer",budget)?)}
+        },
         "ListNode"|"TreeNode"=>{
             if value.is_null(){return Ok("None".into());}
             let nodes=value.as_array().ok_or("Rust 节点必须为 JSON 数组")?;
@@ -53,6 +58,7 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     let config=crate::harness::configuration(metadata,input)?;
     let meta:Value=serde_json::from_str(metadata).map_err(|_|"Rust 元数据无效")?;
     if meta.get("inkleetRustSignatureError").is_some(){return Err("官方 Rust 函数签名暂无法解析，请使用力扣运行".into());}
+    if crate::harness::is_design(&config["metadata"]){return prepare_design(root,source,&meta,&config);}
     let base=config["metadata"]["name"].as_str().ok_or("Rust 函数名缺失")?;
     let name=meta["inkleetRustName"].as_str().map(str::to_owned).unwrap_or_else(||snake(base));
     if !identifier(&name){return Err("Rust 函数名无效".into());}
@@ -65,14 +71,14 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     }else{vec!["move".to_owned();params.len()]};
     let free=meta["inkleetFunctionStyle"].as_str()==Some("free");
     let types=params.iter().filter_map(|p|p["type"].as_str()).chain(std::iter::once(returned)).collect::<Vec<_>>();
-    let list=types.iter().any(|t|t.contains("ListNode"));let tree=types.iter().any(|t|t.contains("TreeNode"));
+    let list=types.iter().any(|t|t.contains("ListNode"));let tree=types.iter().any(|t|t.contains("TreeNode"));let nested=types.iter().any(|t|t.contains("NestedInteger"));
     let mut driver=String::from("#![allow(dead_code,unused_mut,unused_variables)]\n");
     // Share the same bounded declaration policy as the language server.
     // Explicit imports remain only in the owner's exact solution.rs snapshot.
     let (_,helpers)=crate::lsp_scaffold::Context::parse(Some(metadata))?.fragments("rust",source);
     driver+=&helpers;
     driver+="include!(\"solution.rs\");\nmod inkleet_harness{\n";driver+=SUPPORT;
-    if list{driver+=LIST_SUPPORT;}if tree{driver+=TREE_SUPPORT;}driver+="}\n";
+    if list{driver+=LIST_SUPPORT;}if tree{driver+=TREE_SUPPORT;}if nested{driver+=NESTED_SUPPORT;}driver+="}\n";
     driver+="fn main()->Result<(),String>{use inkleet_harness::Json as _;let mut output=std::fs::File::create(\"results.jsonl\").map_err(|e|e.to_string())?;let mut total=0;\n";
     for (index,case) in config["cases"].as_array().ok_or("Rust 用例缺失")?.iter().enumerate(){
         let values=case.as_array().ok_or("Rust 用例无效")?;let mut budget=10000;
@@ -102,6 +108,62 @@ pub fn prepare(root:&Path,source:&str,metadata:&str,input:&str)->Result<(),Strin
     fs::write(root.join("solution.rs"),source).map_err(|_|"无法写入 Rust 源码快照")?;
     fs::write(root.join("harness.rs"),driver).map_err(|_|"无法写入 Rust 驱动")?;
     Ok(())
+}
+fn prepare_design(root:&Path,source:&str,original:&Value,config:&Value)->Result<(),String>{
+    let metadata=&config["metadata"];
+    let classname=metadata["classname"].as_str().ok_or("Rust 设计类名称缺失")?;
+    let methods=metadata["methods"].as_array().ok_or("Rust 设计类方法缺失")?;
+    let constructor=&metadata["constructor"];
+    let mut types=Vec::new();
+    for signature in std::iter::once(constructor).chain(methods){
+        for param in signature["params"].as_array().ok_or("Rust 设计类参数缺失")?{types.push(param.clone());}
+        if let Some(returned)=signature.get("return"){types.push(returned.clone());}
+    }
+    let scaffold=serde_json::json!({"params":types,"inkleetFunctionStyle":"free"}).to_string();
+    let (_,helpers)=crate::lsp_scaffold::Context::parse(Some(&scaffold))?.fragments("rust",source);
+    let list=types.iter().any(|p|p["type"].as_str().is_some_and(|s|s.contains("ListNode")));
+    let tree=types.iter().any(|p|p["type"].as_str().is_some_and(|s|s.contains("TreeNode")));
+    let nested=types.iter().any(|p|p["type"].as_str().is_some_and(|s|s.contains("NestedInteger")));
+    let mut driver=String::from("#![allow(dead_code,unused_mut,unused_variables)]\n");driver+=&helpers;
+    driver+="include!(\"solution.rs\");\nmod inkleet_harness{\n";driver+=SUPPORT;
+    if list{driver+=LIST_SUPPORT;}if tree{driver+=TREE_SUPPORT;}if nested{driver+=NESTED_SUPPORT;}driver+="}\n";
+    driver+="fn main()->Result<(),String>{use inkleet_harness::Json as _;let mut output=std::fs::File::create(\"results.jsonl\").map_err(|e|e.to_string())?;let mut total=0;\n";
+    for (case_index,case) in config["cases"].as_array().ok_or("Rust 设计类用例缺失")?.iter().enumerate(){
+        let operations=case[0].as_array().ok_or("Rust 设计类操作缺失")?;
+        let arguments=case[1].as_array().ok_or("Rust 设计类参数缺失")?;let mut budget=10000;
+        driver+="{let outcome=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||->Result<String,String>{\n";
+        driver+=&format!("let mut w=inkleet_harness::Writer::new();w.push(\"{{\\\"case\\\":{},\\\"ok\\\":true,\\\"value\\\":[null\")?;\n",case_index+1);
+        for (operation_index,(operation,values)) in operations.iter().zip(arguments).enumerate(){
+            let operation=operation.as_str().ok_or("Rust 设计类操作名称无效")?;
+            let signature=if operation_index==0{constructor}else{methods.iter().find(|m|m["name"].as_str()==Some(operation)).ok_or("Rust 设计类方法未声明")?};
+            let params=signature["params"].as_array().ok_or("Rust 设计类参数缺失")?;
+            let override_signature=&original["inkleetRustDesignMethods"][operation];
+            let name=if operation_index==0{"new".to_owned()}else{snake(operation)};
+            if override_signature.get("name").is_some_and(|v|v.as_str()!=Some(name.as_str())){return Err("Rust 设计类方法映射与声明操作不一致".into());}
+            if !identifier(&name){return Err("Rust 设计类方法名称无效".into());}
+            let modes=if let Some(modes)=override_signature.get("modes"){
+                modes.as_array().filter(|m|m.len()==params.len()).ok_or("Rust 设计类参数传递方式数量不匹配")?.iter().map(|v|v.as_str().filter(|v|matches!(*v,"move"|"ref"|"mut")).ok_or("Rust 设计类参数传递方式无效")).collect::<Result<Vec<_>,_>>()?
+            }else{vec!["move";params.len()]};
+            if operation_index>0{driver+="{\n";}
+            let mut args=Vec::new();
+            for (i,param) in params.iter().enumerate(){
+                let kind=param["type"].as_str().ok_or("Rust 设计类参数类型缺失")?;
+                driver+=&format!("let mut arg{i}:{}={};\n",rust_type(kind)?,literal(&values[i],kind,&mut budget)?);
+                args.push(format!("{}arg{i}",match modes[i]{"ref"=>"& ","mut"=>"&mut ",_=>""}));
+            }
+            if operation_index==0{driver+=&format!("let mut instance:{classname}={classname}::r#{name}({});\n",args.join(","));}
+            else{
+                let returned=signature["return"]["type"].as_str().ok_or("Rust 设计类返回类型缺失")?;
+                driver+=&format!("let value:{}=instance.r#{name}({});w.push(\",\")?;value.json(&mut w)?;}}\n",rust_type(returned)?,args.join(","));
+            }
+        }
+        driver+="w.push(\"]}\")?;Ok(w.text)}));\n";
+        driver+=&format!("inkleet_harness::emit({},outcome,&mut output,&mut total)?;}}\n",case_index+1);
+        if driver.len()>8*1024*1024{return Err("生成 Rust 设计类驱动超过 8 MiB".into());}
+    }
+    driver+="Ok(())}\n";
+    fs::write(root.join("solution.rs"),source).map_err(|_|"无法写入 Rust 源码快照")?;
+    fs::write(root.join("harness.rs"),driver).map_err(|_|"无法写入 Rust 设计类驱动")?;Ok(())
 }
 #[cfg(test)]mod tests{
     use super::*;
@@ -183,4 +245,27 @@ impl Json for std::rc::Rc<std::cell::RefCell<crate::TreeNode>>{fn json(&self,w:&
   assert!(crate::lsp_scaffold::Context::parse(Some(metadata)).unwrap().fragments("rust",&source).1.is_empty());
   assert_eq!(fs::read_to_string(root.path().join("solution.rs")).unwrap(),source);
  }
+}
+
+pub const NESTED_TYPES:&str=r#"#[derive(Debug, PartialEq, Eq)]
+pub enum NestedInteger { Int(i32), List(Vec<NestedInteger>) }
+"#;
+const NESTED_SUPPORT:&str=r#"
+impl Json for crate::NestedInteger{fn json(&self,w:&mut Writer)->Result<(),String>{
+    w.node()?;match self{crate::NestedInteger::Int(value)=>value.json(w),crate::NestedInteger::List(values)=>values.json(w)}
+}}
+"#;
+
+#[cfg(test)]mod design_contract_tests{
+    use super::*;
+    #[test]fn design_method_aliases_cannot_call_an_unrelated_source_method(){
+        let root=tempfile::tempdir().unwrap();
+        let metadata=serde_json::json!({"systemdesign":true,"classname":"Counter","constructor":{"params":[]},"methods":[{"name":"getValue","params":[],"return":{"type":"integer"}}],"inkleetRustDesignMethods":{"getValue":{"name":"unrelated","modes":[]}}});
+        assert!(prepare(root.path(),"",&metadata.to_string(),r#"["Counter","getValue"] [[],[]]"#).unwrap_err().contains("映射"));
+        assert!(!root.path().join("solution.rs").exists());
+    }
+    #[test]fn nested_integer_input_rejects_wrong_leaves_and_out_of_range_values(){
+        for value in [serde_json::json!(null),serde_json::json!(true),serde_json::json!(1.5),serde_json::json!(2147483648_i64),serde_json::json!([1,{"x":2}])]{assert!(literal(&value,"NestedInteger",&mut 10000).is_err());}
+        assert!(literal(&serde_json::json!([1,[2]]),"NestedInteger",&mut 2).is_err());
+    }
 }

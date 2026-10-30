@@ -16,3 +16,17 @@ test("metadata rejects mismatched official signatures rather than guessing",()=>
   assert.ok(JSON.parse(localMetadata(meta,"rust","impl Solution { pub fn f(a:i32,b:i32){} }")).inkleetRustSignatureError);
   assert.equal(localMetadata(meta,"golang","invalid"),meta);
 });
+
+test("design Rust signatures use official constructor and receiver modes",async()=>{
+ const {rustDesignSignatures}=await import("../src/local-metadata.ts");
+ const meta={systemdesign:true,classname:"Ledger",constructor:{params:[{name:"value",type:"integer[]"}]},methods:[{name:"appendValues",params:[{name:"value",type:"integer[]"}],return:{type:"void"}},{name:"getURLValue",params:[],return:{type:"integer"}}]};
+ const template="struct Ledger {} impl Ledger { fn new(value: Vec<i32>) -> Self { todo!() } fn append_values(&mut self, value: &Vec<i32>) {} fn get_url_value(&self)->i32{0} }";
+ const signatures=rustDesignSignatures(template,meta);
+ assert.deepEqual(signatures,{Ledger:{name:"new",modes:["move"]},appendValues:{name:"append_values",modes:["ref"]},getURLValue:{name:"get_url_value",modes:[]}});
+ const enriched=JSON.parse(localMetadata(JSON.stringify(meta),"rust",template));
+ assert.deepEqual(enriched.inkleetRustDesignMethods,signatures);
+ for(const invalid of [template.replace("&self","self"),template.replace("value: &Vec<i32>",""),template.replace("fn new","fn create"),template.replace("impl Ledger","impl Other")]){
+  assert.throws(()=>rustDesignSignatures(invalid,meta));
+  assert.ok(JSON.parse(localMetadata(JSON.stringify(meta),"rust",invalid)).inkleetRustSignatureError);
+ }
+});

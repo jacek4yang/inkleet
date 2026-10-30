@@ -1,5 +1,9 @@
 # Completion parity engineering report
 
+> Historical design/implementation snapshot, not the current capability matrix.
+> Current supported behavior and evidence boundaries: [Editing support](../EDITING_SUPPORT.md).
+
+
 Date: 2026-10-14. Application baseline: 7df1072351de74c253d12e588959a16bed358b8d (PR19).
 This is an implementation and acceptance plan, not a declaration of IDE parity.
 

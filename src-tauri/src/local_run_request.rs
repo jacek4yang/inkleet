@@ -17,7 +17,18 @@ pub struct Request{
 #[serde(rename_all="camelCase")]
 pub struct Case{pub id:String,pub name:String,pub input:String,#[serde(default)]pub expectation:Option<Expectation>}
 #[derive(Clone,Deserialize,Serialize,PartialEq)]
-pub struct Expectation{pub mode:String,pub target:Target,pub value:String}
+#[serde(rename_all="camelCase")]
+pub struct Expectation{pub mode:String,pub target:Target,pub value:String,
+    #[serde(default,skip_serializing_if="Option::is_none")]pub absolute_tolerance:Option<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")]pub relative_tolerance:Option<String>}
+fn valid_tolerance(value:&Option<String>)->bool{
+    let Some(text)=value else{return false;};
+    if text.len()>64{return false;}
+    let Ok(value)=serde_json::from_str::<serde_json::Value>(text) else{return false;};
+    let token=value.to_string();
+    let negative=token.starts_with('-')&&token.split(['e','E']).next().is_some_and(|s|s.bytes().any(|b|matches!(b,b'1'..=b'9')));
+    !negative&&value.as_f64().is_some_and(|n|n.is_finite()&&n>=0.0)
+}
 #[derive(Clone,Copy,Deserialize,Serialize,PartialEq)]
 #[serde(tag="kind",rename_all="camelCase")]
 pub enum Target{Return,Argument{index:usize}}
@@ -53,7 +64,7 @@ impl Request{
             total=total.saturating_add(case.input.len()).saturating_add(case.expectation.as_ref().map_or(0,|e|e.value.len()));
             if total>2*1024*1024{return Err("测试用例超过总大小限制".into());}
             if let Some(expected)=&case.expectation{
-                if expected.mode!="exact-json"||expected.value.len()>65536{return Err("预期结果配置无效".into());}
+                if !matches!(expected.mode.as_str(),"exact-json"|"float-json"|"unordered-array")||expected.value.len()>65536||(expected.mode=="float-json"&&(!valid_tolerance(&expected.absolute_tolerance)||!valid_tolerance(&expected.relative_tolerance))){return Err("预期结果配置无效".into());}
                 // The renderer owns the bounded, precision-safe comparison. The backend
                 // retains the exact expected text; it never converts it through f64.
                 if let Target::Argument{index}=expected.target{if index>=32{return Err("预期参数索引无效".into());}}
@@ -97,9 +108,27 @@ mod tests{
     }
     #[test]fn legacy_request_and_exact_expected_text_are_retained(){
         let record=request(None).prepare().unwrap();assert_eq!(record.invocations.len(),1);
-        let mut c=case("a","[1]");c.expectation=Some(Expectation{mode:"exact-json".into(),target:Target::Return,value:"900719925474099312345".into()});
+        let mut c=case("a","[1]");c.expectation=Some(Expectation{mode:"exact-json".into(),target:Target::Return,value:"900719925474099312345".into(),absolute_tolerance:None,relative_tolerance:None});
         assert_eq!(request(Some(vec![c])).prepare().unwrap().cases[0].expectation.as_ref().unwrap().value,"900719925474099312345");
         let parsed:Request=serde_json::from_value(serde_json::json!({"code":"x","input":"[1]","metadata":META,"title":"x","language":"python3"})).unwrap();
         assert!(parsed.prepare().unwrap().document_key.is_none());
     }
+    #[test]fn explicit_policy_settings_are_retained_and_unknown_policies_rejected(){
+        let mut c=case("a","[1]");
+        c.expectation=Some(Expectation{mode:"float-json".into(),target:Target::Return,value:"1.0000001".into(),absolute_tolerance:Some("1e-6".into()),relative_tolerance:Some("0".into())});
+        let record=request(Some(vec![c.clone()])).prepare().unwrap();
+        assert!(record.cases[0].expectation==c.expectation);
+        for (mode,absolute) in [("automatic","1"),("float-json","-1"),("float-json","NaN"),("float-json","1e99999")]{
+            let mut invalid=c.clone();let expected=invalid.expectation.as_mut().unwrap();expected.mode=mode.into();expected.absolute_tolerance=Some(absolute.into());
+            assert!(request(Some(vec![invalid])).prepare().is_err());
+        }
+    }
+    #[test]fn design_batch_maps_sequences_and_never_offers_post_call_argument_targets(){
+        let mut r=request(Some(vec![case("a",r#"["Counter","get"] [[],[]]"#),case("b",r#"["Counter","get"] [[],[]]"#)]));
+        r.snapshot.metadata=serde_json::json!({"systemdesign":true,"classname":"Counter","constructor":{"params":[]},"methods":[{"name":"get","params":[],"return":{"type":"integer"}}]}).to_string();
+        let record=r.clone().prepare().unwrap();assert_eq!(record.invocations.len(),2);assert_eq!(record.invocations[1].case_index,1);
+        r.cases.as_mut().unwrap()[0].expectation=Some(Expectation{mode:"exact-json".into(),target:Target::Argument{index:0},value:"[]".into(),absolute_tolerance:None,relative_tolerance:None});
+        assert!(r.prepare().is_err());
+    }
+
 }

@@ -1,0 +1,14 @@
+.lsp-code-actions{width:min(560px,86vw);max-height:78vh;padding:14px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);box-shadow:0 8px 30px #0002;overflow:auto}
+.lsp-code-actions::backdrop{background:#0002}
+.lsp-code-actions h2{font-size:14px;margin:0 0 10px}
+.lsp-code-actions h3{font-size:12px;font-weight:500;white-space:pre-wrap;overflow-wrap:anywhere}
+.lsp-code-actions p{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0}
+.lsp-code-actions button{min-height:26px;padding:4px 8px;font-size:12px;margin-right:6px}
+.lsp-code-action-list:not([hidden]){display:flex;flex-direction:column;gap:4px;max-height:45vh;overflow:auto}
+.lsp-code-action-list button{text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}
+.lsp-code-action-changes{max-height:45vh;overflow:auto;margin-bottom:10px;border-block:1px solid var(--line)}
+.lsp-code-action-change{display:grid;grid-template-columns:48px minmax(0,1fr) minmax(0,1fr);gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px}
+.lsp-code-action-change>span{color:var(--muted);text-align:right}
+.lsp-code-action-change pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-family:var(--font-mono)}
+.lsp-code-action-change pre[aria-label="原文本"]{color:#9b5555}
+.lsp-code-action-change pre[aria-label="新文本"]{color:#387451}

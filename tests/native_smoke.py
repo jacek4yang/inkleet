@@ -3,6 +3,7 @@ import base64, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.
 from native_wait import NativeDiagnostics, Polling, operation_label, read_only_command
 from native_window_close import check_clean_close
 from native_capture import CAPTURE_SNAPSHOT, reveal_capture
+from native_lsp_ready import latest_started, ready_java_session
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
@@ -579,7 +580,7 @@ def native_snippet_case(group,code):
             observation["final"]=final
             screenshot(group+"-snippet-native.png")
         persist_observations()
-    scope="debug-only "+group+" capability experiment" if group in ("c","cpp","java") else "Linux x86_64 default capability with debug-only evidence tracing"
+    scope="Linux x86_64 default capability with debug-only evidence tracing"
     (evidence/(group.upper()+"_SNIPPET_NATIVE_RESULT.txt")).write_text("PASS: real Linux WebView and application-owned language server format2 item, worker application, selected argument replacement, Tab final caret, isolated undo/redo. "+scope+"; not release-binary or cross-platform qualification.\n")
 
 
@@ -746,6 +747,49 @@ try:
     click('select[aria-label="解答"] option[value="default"]')
     wait_for(lambda:source_text(code)==marker,"legacy default remains intact after restart")
     (evidence/"NAMED_SOLUTIONS_NATIVE_RESULT.txt").write_text("PASS: real UI duplicate and rename, immutable ID, independent plain-text persistence, restart restoration, unchanged legacy default. No simulated IPC.\n")
+
+    # Reversible archive uses real Tauri IPC and disk metadata. Never delete the
+    # immutable solution directory: saved code and unsaved draft stay separate.
+    click(f'select[aria-label="解答"] option[value="{first_id}"]')
+    wait_for(lambda:source_text(code)=="// named solution","archive source loaded")
+    archived_draft="// unsaved draft preserved by archive"
+    fill(code,archived_draft)
+    click(".solution-menu>summary")
+    archive_button=cmd("POST","/element",{"using":"xpath","value":"//details[contains(@class,'solution-menu')]/div/button[text()='归档解答']"})
+    cmd("POST",f"/element/{archive_button[EID]}/click",{})
+    cancel=cmd("POST","/element",{"using":"xpath","value":"//dialog[@aria-label='归档解答']//button[text()='取消']"})
+    cmd("POST",f"/element/{cancel[EID]}/click",{})
+    assert not json.loads(named_source.with_name("name.json").read_text()).get("archived",False)
+    assert source_text(code)==archived_draft
+    click(".solution-menu>summary")
+    archive_button=cmd("POST","/element",{"using":"xpath","value":"//details[contains(@class,'solution-menu')]/div/button[text()='归档解答']"})
+    cmd("POST",f"/element/{archive_button[EID]}/click",{})
+    confirm=cmd("POST","/element",{"using":"xpath","value":"//dialog[@aria-label='归档解答']//button[text()='确认归档']"})
+    cmd("POST",f"/element/{confirm[EID]}/click",{})
+    wait_for(lambda:json.loads(named_source.with_name("name.json").read_text()).get("archived") is True,"archive metadata committed")
+    wait_for(lambda:source_text(code)==marker,"archive returns to retained default")
+    assert named_source.read_text()=="// named solution"
+    named_recovery=named_source.parent/".inkleet-drafts"/"solution.rs.json"
+    assert json.loads(named_recovery.read_text())["text"]==archived_draft
+    stop();start()
+    wait_for(lambda:source_text(code)==marker,"default survives archived restart")
+    assert not cmd("POST","/elements",{"using":"css selector","value":f'select[aria-label="解答"] option[value="{first_id}"]'})
+    click(".solution-menu>summary")
+    archived_button=cmd("POST","/element",{"using":"xpath","value":"//details[contains(@class,'solution-menu')]/div/button[starts-with(text(),'已归档')]"})
+    wait_for(lambda:not cmd("GET",f"/element/{archived_button[EID]}/property/disabled"),"archive listing ready after restart")
+    cmd("POST",f"/element/{archived_button[EID]}/click",{})
+    screenshot("solution-archive-native.png")
+    click('button[aria-label="恢复解答「优化版」"]')
+    wait_for(lambda:source_text(code)==archived_draft,"restored solution recovers unsaved draft after restart")
+    assert cmd("GET",f"/element/{element('select[aria-label=\"解答\"]')}/property/value")==first_id
+    assert not json.loads(named_source.with_name("name.json").read_text()).get("archived",False)
+    assert named_source.read_text()=="// named solution"
+    assert element('[aria-label="源码未保存"]')
+    fill(code,"// named solution");save_editor(code)
+    wait_for(lambda:json.loads(named_recovery.read_text())["text"]=="// named solution","archive test resets its named draft through explicit save")
+    click('select[aria-label="解答"] option[value="default"]')
+    wait_for(lambda:source_text(code)==marker,"default unchanged by archive and restore")
+    (evidence/"SOLUTION_ARCHIVE_NATIVE_RESULT.txt").write_text("PASS: real native confirmation/cancel, immutable directory and saved source preservation, separate unsaved draft, archive hidden from active list after process restart, same-ID restore with draft/dirty marker, default remains active. No mocked IPC.\n")
 
     click('nav[aria-label="工作区"] button:last-child')
     note = '[aria-label="Markdown 笔记"]'
@@ -922,6 +966,33 @@ try:
         screenshot("python-stdlib-native.png")
         source_navigation_case("def __getitem__(self, key: SupportsIndex","typing.pyi","python")
         click(".source-viewer header button[aria-label=\'返回代码\']")
+        # Pinned Pyright only offers this import from a currently referenced
+        # module, not a global index or a durable previously-imported cache.
+        # Keep the authored Path import, including after background analysis.
+        fill(code,"from pathlib import Path\npath = Path('.')\npath.exi")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End","ctrl+space"],check=True)
+        wait_for(lambda:"exists" in text(".cm-tooltip-autocomplete"),"real Pyright analyzed pathlib prerequisite",seconds=45)
+        subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
+        python_import_source="from pathlib import Path\npath = PurePa"
+        fill(code,python_import_source)
+        time.sleep(1)  # Deliberately settle; never race stale module retention.
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+End","ctrl+space"],check=True)
+        wait_for(lambda:"PurePath" in text(".cm-tooltip-autocomplete"),"real Pyright stable authored-import augmentation candidate",seconds=45)
+        time.sleep(.3)
+        options=cmd("POST","/elements",{"using":"css selector","value":".cm-tooltip-autocomplete li"})
+        option=next(node[EID] for node in options if cmd("GET",f"/element/{node[EID]}/text").lstrip().startswith("PurePath"))
+        cmd("POST",f"/element/{option}/click",{})
+        python_import_expected="from pathlib import Path, PurePath\npath = PurePath"
+        wait_for(lambda:source_text(code)==python_import_expected,"Pyright resolve augments the exact authored import")
+        screenshot("python-autoimport-native.png")
+        focus_code_editor()
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+        wait_for(lambda:source_text(code)==python_import_source,"one undo removes Python symbol and import")
+        subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
+        wait_for(lambda:source_text(code)==python_import_expected,"redo restores Python symbol and import")
+        (evidence/"PYTHON_AUTOIMPORT_NATIVE_RESULT.txt").write_text("PASS: actual private Pyright PurePath completion/resolve while authored from-pathlib-import-Path remains referenced after settling; exact Path, PurePath augmentation and one undo/redo. NOT cold/global indexing, a durable removed-import cache, or native qualification of helper-line-zero import relocation.\n")
         fill(code, "sum([1, 2])")
         cmd("POST","/actions",{"actions":[{"type":"key","id":"signature-keyboard","actions":[
             {"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"},
@@ -1199,8 +1270,19 @@ try:
         wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["jdk","jdtls","java-debug"]), "verified private JDK and JDTLS installed", seconds=300)
         screenshot("java-environment-native.png")
         click(".environments header button")
+        java_trace_enabled=os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1"
+        before_java_id=latest_started(snippet_trace()) if java_trace_enabled else 0
         click('select[aria-label="编程语言"] option[value="java"]')
-        wait_for(lambda: "JDT LS 已连接" in text(".lsp-status"), "real private Java language server connected", seconds=100)
+        # Pinned JDT LS 1.61.0 emits language/status ServiceReady after its
+        # initialize reply. An actual same-session notice, not a sleep/retry,
+        # gates this ready-server completion scenario within the existing 100s.
+        # https://github.com/eclipse-jdtls/eclipse.jdt.ls/blob/v1.61.0/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/JDTLanguageServer.java#L276-L348
+        def java_ready():
+            if "JDT LS 已连接" not in text(".lsp-status"): return None
+            return ready_java_session(snippet_trace(),before_java_id) if java_trace_enabled else True
+        java_ready_id=wait_for(java_ready, "real private Java language server connected and service ready", seconds=100)
+        if java_trace_enabled:
+            (evidence/"JAVA_SERVICE_READY_NATIVE.json").write_text(json.dumps({"session":java_ready_id,"status":"ServiceReady","scope":"Ready-server completion only; not cold-start latency or completed-indexing proof","records":snippet_trace()},ensure_ascii=False,indent=2))
         java_doc="class Solution { void test() { java.util.ArrayList<String> values = new java.util.ArrayList<>(); values. } }"
         fill(code,java_doc)
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"}]
@@ -1479,6 +1561,53 @@ try:
                 subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
                 wait_for(lambda:text(code)==accepted_hash,"redo restores exact completion and import")
                 (evidence/"RUST_AUTOIMPORT_NATIVE_RESULT.txt").write_text("PASS: actual typing HashM triggers private rust-analyzer candidate, resolve inserts HashMap with one std import, one undo removes both and redo restores both.\n")
+            if group=="rust":
+                action_source="fn example() {\n    let value = (1 + 2) * 3;\n    let _ = value;\n}\n"
+                fill(code,action_source)
+                focus_code_editor()
+                # Home is indentation-aware in CodeMirror. Move from document
+                # start by the authored ASCII offset, then verify the real selection.
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home",*(["Right"]*action_source.index("1 + 2")),*(["shift+Right"]*5)],check=True)
+                wait_for(lambda:cmd("POST","/execute/sync",{"script":"return String(window.getSelection())","args":[]})=="1 + 2","native extraction owns exact expression selection")
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+period"],check=True)
+                wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":"dialog.lsp-code-actions[open]"}),"native Rust code-action menu")
+                def extract_action():
+                    buttons=cmd("POST","/elements",{"using":"css selector","value":".lsp-code-action-list button"})
+                    return next((node[EID] for node in buttons if "extract" in cmd("GET",f"/element/{node[EID]}/text").lower() and "variable" in cmd("GET",f"/element/{node[EID]}/text").lower()),None)
+                action_button=wait_for(extract_action,"actual rust-analyzer extract-variable action",seconds=45)
+                screenshot("rust-code-action-menu-native.png")
+                click_native_node(action_button)
+                wait_for(lambda:cmd("POST","/elements",{"using":"css selector","value":".lsp-code-actions section:not([hidden])"}),"resolved Rust action preview")
+                assert source_text(code)==action_source,"code action preview never modifies source"
+                assert "1 + 2" in text('.lsp-code-action-changes'),"native preview renders actual extraction edits"
+                screenshot("rust-code-action-preview-native.png")
+                click('.lsp-code-actions section:not([hidden]) button:first-of-type')
+                wait_for(lambda:not cmd("POST","/elements",{"using":"css selector","value":"dialog.lsp-code-actions"}),"code action explicitly applied")
+                extracted=source_text(code)
+                assert extracted!=action_source and "let var_name = 1 + 2;" in extracted and "(var_name) * 3" in extracted,"exact real Rust extraction result"
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+z"],check=True)
+                wait_for(lambda:source_text(code)==action_source,"one undo restores code action snapshot")
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+shift+z"],check=True)
+                wait_for(lambda:source_text(code)==extracted,"redo restores entire code action")
+                (evidence/"RUST_CODE_ACTION_NATIVE_RESULT.txt").write_text("PASS: real private rust-analyzer extract-variable request/resolve, native selection and Ctrl+period, full source preview before explicit pointer confirmation, one undo/redo. Only current-document edits; not arbitrary command or cross-file execution.\n")
+                responsive_source="fn example() {\n    \n}"
+                fill(code,responsive_source)
+                focus_code_editor()
+                subprocess.run(["xdotool","key","--clearmodifiers","ctrl+Home","Down","End"],check=True)
+                cmd("POST","/execute/sync",{"script":"""
+                    const editor=document.querySelector('[aria-label="代码编辑器"]');
+                    const samples=[],events=[];const callback=e=>{if(!e.isTrusted)return;const t=performance.now();events.push({type:e.inputType,composing:e.isComposing});requestAnimationFrame(()=>samples.push(performance.now()-t));};
+                    editor.addEventListener('beforeinput',callback,true);window.__nativeInputObservation={samples,events,stop:()=>editor.removeEventListener('beforeinput',callback,true)};
+                ""","args":[]})
+                typed="let mut values = Vec::<i32>::new(); values.push(7);"
+                subprocess.run(["xdotool","type","--clearmodifiers","--delay","25",typed],check=True)
+                wait_for(lambda:source_text(code)==responsive_source.replace("    ","    "+typed),"native typing preserves every Rust character under real LSP")
+                timing=cmd("POST","/execute/sync",{"script":"const s=window.__nativeInputObservation;s.stop();return {samples:s.samples,events:s.events};","args":[]})
+                assert len(timing["samples"])>=20 and len(timing["events"])>=20,"enough trusted native input observations"
+                samples=sorted(timing["samples"])
+                timing.update({"scope":"Linux native WebKit beforeinput to next animation frame, actual rust-analyzer active; not physical input latency, OS IME, Zed comparison or long-session acceptance","p50Ms":samples[len(samples)//2],"p95Ms":samples[min(len(samples)-1,int(len(samples)*.95))],"maxMs":max(samples),"typedCharacters":len(typed),"exactSource":True})
+                (evidence/"RUST_NATIVE_INPUT_OBSERVATION.json").write_text(json.dumps(timing,ensure_ascii=False,indent=2)+"\n")
+                subprocess.run(["xdotool","key","--clearmodifiers","Escape"],check=True)
             if group in ("golang","cpp","c","rust"):
                 local_solution="func solve(values []int) int {\n total:=0\n for _,value:=range values { total+=value }\n return total\n}"
                 if group=="cpp": local_solution="int solve(vector<int>& values) {\n int total=0;\n for(int value:values){total+=value;}\n return total;\n}"

@@ -1,0 +1,46 @@
+name: Local runner feature contracts
+on:
+  pull_request:
+    paths: ['crates/managed-env/**', 'src/local-metadata.ts', '.github/workflows/local-features.yml']
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: local-features-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  executed-harness:
+    name: Local harness (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: crates/managed-env
+      - name: Execute Rust and Python design-class and type fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/BUILD_COMMIT.txt
+          rustc --version > evidence/TOOL_VERSIONS.txt
+          python --version >> evidence/TOOL_VERSIONS.txt
+          export INKLEET_PROBE_PYTHON=python
+          cargo test --locked --manifest-path crates/managed-env/Cargo.toml --lib 2>&1 | tee evidence/unit.txt
+          cargo run --locked --manifest-path crates/managed-env/Cargo.toml --example local_features_probe 2>&1 | tee evidence/executed-harness.txt
+          printf 'Actual generated drivers and authored fixtures, using runner Rust/Python. Not native GUI, managed-tool installation, or real LeetCode judge acceptance.\n' > evidence/VERIFICATION.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: local-features-${{ matrix.os }}
+          path: evidence/
+          retention-days: 7

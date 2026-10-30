@@ -1,5 +1,9 @@
 # Lithe-IDEA 固定源码对照与复用计划
 
+> Historical design/implementation snapshot, not the current capability matrix.
+> Current supported behavior and evidence boundaries: [Editing support](../EDITING_SUPPORT.md).
+
+
 日期：2026-10-14。源码检查不是运行验收；下列上游缺陷为静态观察，不声称复现了上游运行行为。
 
 ## 固定输入与架构边界

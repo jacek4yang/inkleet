@@ -40,6 +40,33 @@ fn record(root:&Path,value:Value){
     })();
     if let Err(error)=result{eprintln!("Native snippet validation trace unavailable: {error}");}
 }
+// Diagnostic-only protocol evidence. Never retain server messages, paths or source.
+fn java_status(event:&Value)->Option<&str>{
+    if event.get("method").and_then(Value::as_str)!=Some("language/status"){return None;}
+    let status=event.pointer("/params/type")?.as_str()?;
+    matches!(status,"Starting"|"Started"|"ServiceReady"|"Error").then_some(status)
+}
+pub(crate) fn server_event(root:&Path,id:u64,language:&str,event:&Value){
+    if !crate::lsp_launch::snippet_validation_enabled()||language!="java"{return;}
+    if let Some(status)=java_status(event){record(root,json!({"kind":"server_status","id":id,"language":language,"status":status}));}
+}
+fn request_error(error:&str)->&'static str{
+    match error{
+        "语言服务请求超时或连接中断"=>"timeout_or_disconnected",
+        "补全请求已取消"=>"cancelled",
+        "语言服务连接已关闭"|"语言服务已退出"=>"connection_closed",
+        _=>"server_error",
+    }
+}
+pub(crate) fn request_started(root:&Path,id:u64,version:u32,sequence:u64,language:&str){
+    if !crate::lsp_launch::snippet_validation_enabled(){return;}
+    record(root,json!({"kind":"request_start","id":id,"version":version,"sequence":sequence,"language":language,"method":"completion"}));
+}
+pub(crate) fn request_finished(root:&Path,id:u64,version:u32,sequence:u64,language:&str,result:&Result<Value,String>,elapsed_ms:u128,alive:bool){
+    if !crate::lsp_launch::snippet_validation_enabled(){return;}
+    record(root,json!({"kind":"request_end","id":id,"version":version,"sequence":sequence,"language":language,"method":"completion",
+        "outcome":result.as_ref().map(|_|"response").unwrap_or_else(|error|request_error(error)),"elapsed_ms":elapsed_ms.min(600_000) as u64,"connection_alive":alive}));
+}
 pub(crate) fn started(root:&Path,id:u64,language:&str,default_mode:u8){
     if !crate::lsp_launch::snippet_validation_enabled(){return;}
     record(root,json!({"kind":"start","id":id,"language":language,"defaultMode":default_mode,"snippets":crate::lsp_launch::snippet_support_enabled(language)}));
@@ -59,6 +86,32 @@ pub(crate) fn resolved(root:&Path,id:u64,version:u32,token:u64,default_mode:u8,r
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn java_status_trace_is_exact_and_message_free(){
+        let event=json!({"method":"language/status","params":{"type":"ServiceReady","message":"private source/path must not be copied"}});
+        assert_eq!(java_status(&event),Some("ServiceReady"));
+        for status in ["Starting","Started","Error"]{assert_eq!(java_status(&json!({"method":"language/status","params":{"type":status}})),Some(status));}
+        for event in [json!({"method":"window/logMessage","params":{"type":"ServiceReady"}}),json!({"method":"language/status","params":{"type":"Ready"}}),json!({"method":"language/status","params":{"type":3}})]{assert!(java_status(&event).is_none());}
+        assert_eq!(request_error("语言服务请求超时或连接中断"),"timeout_or_disconnected");
+        assert_eq!(request_error("补全请求已取消"),"cancelled");
+        assert_eq!(request_error("语言服务连接已关闭"),"connection_closed");
+        assert_eq!(request_error("private server text /path/source.java"),"server_error");
+    }
+    #[test]fn early_server_status_and_request_outcome_are_opt_in_and_bounded(){
+        let root=tempfile::tempdir().unwrap();
+        server_event(root.path(),999,"java",&json!({"method":"language/status","params":{"type":"ServiceReady","message":"private message"}}));
+        started(root.path(),999,"java",1);
+        request_started(root.path(),999,2,3,"java");
+        request_finished(root.path(),999,2,3,"java",&Err("private error".into()),u128::MAX,false);
+        let file=root.path().join("native-snippet-validation.json");
+        if crate::lsp_launch::snippet_validation_enabled(){
+            let records:Value=serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+            let records=records.as_array().unwrap();assert!(records.len()<=32);
+            assert!(records.iter().any(|r|r["id"]==json!(999)&&r["kind"]==json!("server_status")&&r["status"]==json!("ServiceReady")));
+            let end=records.iter().find(|r|r["id"]==json!(999)&&r["kind"]==json!("request_end")).unwrap();
+            assert_eq!(end["outcome"],json!("server_error"));assert_eq!(end["elapsed_ms"],json!(600_000));assert_eq!(end["connection_alive"],json!(false));
+            assert!(!serde_json::to_string(&records).unwrap().contains("private"));
+        }else{assert!(!file.exists());}
+    }
     #[test]fn trace_is_allowlisted_and_bounded(){
         assert!(item(&json!({"label":"unrelated","insertText":"secret"}),1).is_none());
         let value=item(&json!({"label":"push","insertTextFormat":2,"insertText":"x".repeat(10000),"data":{"private":"not copied"}}),1).unwrap();

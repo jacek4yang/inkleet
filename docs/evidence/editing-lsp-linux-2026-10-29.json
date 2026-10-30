@@ -1,0 +1,368 @@
+{
+  "observedAt": "2026-10-29 UTC",
+  "baseline": "fbacb2041b83232a30a791965c58d93a7556a4ff",
+  "scope": "Actual Linux x86_64 managed language servers using the production launch/configuration/mapping code in this change. No GUI, real IME or latency parity claim. Final main CI identity remains separately required.",
+  "packageSource": "crates/managed-env/packages.json; downloaded bytes matched both pinned size and SHA-256 and unchanged Manager reverified/extracted",
+  "results": [
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": true,
+      "label": "HashMap",
+      "language": "rust",
+      "parameterSnippet": false,
+      "platform": "linux-x64",
+      "resolve": true,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_RUST_ACTION_RESULT",
+      "guiLatencyQualified": false,
+      "platform": "linux-x64",
+      "protocolElapsedMs": 1501,
+      "resolved": true,
+      "sourceAfter": "fn example() {\n    let var_name = 1 + 2;\n    let value = (var_name) * 3;\n    let _ = value;\n}\n",
+      "sourceBefore": "fn example() {\n    let value = (1 + 2) * 3;\n    let _ = value;\n}\n",
+      "sourceOnly": true,
+      "title": "Extract into variable"
+    },
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": true,
+      "label": "Println",
+      "language": "golang",
+      "parameterSnippet": true,
+      "platform": "linux-x64",
+      "resolve": false,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": false,
+      "label": "exists",
+      "language": "python3",
+      "parameterSnippet": false,
+      "platform": "linux-x64",
+      "resolve": true,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_PYTHON_AUTOIMPORT_RESULT",
+      "additionalTextEdits": [
+        {
+          "newText": "from pathlib import PurePath\n",
+          "range": {
+            "end": {
+              "character": 0,
+              "line": 0
+            },
+            "start": {
+              "character": 0,
+              "line": 0
+            }
+          }
+        }
+      ],
+      "helperPrefix": 8,
+      "platform": "linux-x64",
+      "resolve": true
+    }
+  ],
+  "remaining": [
+    "Cross-platform exact-main workflow pending integration",
+    "Native Linux new UI cases pending CI",
+    "Windows/macOS native GUI and real OS IME unqualified"
+  ],
+  "localChecks": {
+    "productionRustModuleTests": 37,
+    "frontendDomainTests": 324,
+    "typescript": "PASS",
+    "build": "PASS",
+    "nativeGui": "NOT RUN here: missing GTK/WebKit libraries",
+    "browserUi": "NOT RUN here: execution sandbox Chromium sockets unavailable"
+  },
+  "qualificationCorrection": "The original direct-resolve probe did not establish initial-list usability. The follow-up now runs original cache capture, initial import mapping, lazy resolve and resolved mapping. PurePath requires previously analyzed pathlib; cold/global library autoimport indexing is not supported by this evidence.",
+  "followupBase": "fca79d81646634a584fa0d68fc382f89c3b4a159",
+  "correctedPythonAutoimportEvidence": {
+    "additionalTextEdits": [
+      {
+        "newText": "from pathlib import PurePath\n",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 0
+          },
+          "start": {
+            "character": 0,
+            "line": 0
+          }
+        }
+      }
+    ],
+    "helperPrefix": 8,
+    "initialMappedCandidate": true,
+    "originalWireItemRetained": true,
+    "platform": "linux-x64",
+    "resolve": true,
+    "previouslyAnalyzedModule": "pathlib"
+  },
+  "correctedPipelineResults": [
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": true,
+      "initialMappedCandidate": true,
+      "label": "HashMap",
+      "language": "rust",
+      "originalWireItemRetained": true,
+      "parameterSnippet": false,
+      "platform": "linux-x64",
+      "resolve": true,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_RUST_ACTION_URI_EVIDENCE",
+      "ownedUri": "file:///tmp/inkleet%20editing%20%E8%AF%AD%E8%A8%80%20wkxkGJ/rust/solution.rs",
+      "ownershipPolicy": "exact-uri-or-same-canonical-regular-file",
+      "platform": "linux-x64",
+      "returnedUris": [
+        "file:///tmp/inkleet%20editing%20%E8%AF%AD%E8%A8%80%20wkxkGJ/rust/solution.rs"
+      ]
+    },
+    {
+      "kind": "EDITING_RUST_ACTION_RESULT",
+      "guiLatencyQualified": false,
+      "platform": "linux-x64",
+      "protocolElapsedMs": 1816,
+      "resolved": true,
+      "sourceAfter": "fn example() {\n    let var_name = 1 + 2;\n    let value = (var_name) * 3;\n    let _ = value;\n}\n",
+      "sourceBefore": "fn example() {\n    let value = (1 + 2) * 3;\n    let _ = value;\n}\n",
+      "sourceOnly": true,
+      "title": "Extract into variable"
+    },
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": true,
+      "initialMappedCandidate": true,
+      "label": "Println",
+      "language": "golang",
+      "originalWireItemRetained": false,
+      "parameterSnippet": true,
+      "platform": "linux-x64",
+      "resolve": false,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": false,
+      "initialMappedCandidate": true,
+      "label": "exists",
+      "language": "python3",
+      "originalWireItemRetained": true,
+      "parameterSnippet": false,
+      "platform": "linux-x64",
+      "resolve": true,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_PYTHON_AUTOIMPORT_RESULT",
+      "additionalTextEdits": [
+        {
+          "newText": "from pathlib import PurePath\n",
+          "range": {
+            "end": {
+              "character": 0,
+              "line": 0
+            },
+            "start": {
+              "character": 0,
+              "line": 0
+            }
+          }
+        }
+      ],
+      "helperPrefix": 8,
+      "initialMappedCandidate": true,
+      "originalWireItemRetained": true,
+      "platform": "linux-x64",
+      "resolve": true
+    }
+  ],
+  "followupGuardTests": 38,
+  "coldPythonBoundary": {
+    "source": "path = PurePa",
+    "authoredPathlibPreviouslyAnalyzed": false,
+    "productionHelperPrefix": 8,
+    "rawCompletionPolls": 120,
+    "rawCandidateCounts": [
+      0
+    ],
+    "observationWindowApproximatelySeconds": 36,
+    "extraSettingsAttempted": {
+      "python.analysis.autoImportCompletions": true,
+      "python.analysis.indexing": true
+    },
+    "conclusion": "No cold candidate. The indexing setting is not consumed by pinned Pyright and is not a production workaround. Subsequent analyzed-module acceptance is a narrower capability."
+  },
+  "settledQualificationCorrection": "The prior warmed-then-removed import probe raced Pyright background cleanup: candidates disappeared after 300 ms. Earlier PurePath records establish wire/mapping behavior only, not stable native availability. Current acceptance retains the authored pathlib reference and waits 1 s before completion; source-aware required-import validation accepts the genuine comma augmentation.",
+  "settledPipelineResults": [
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": true,
+      "initialMappedCandidate": true,
+      "label": "HashMap",
+      "language": "rust",
+      "originalWireItemRetained": true,
+      "parameterSnippet": false,
+      "platform": "linux-x64",
+      "resolve": true,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_RUST_ACTION_URI_EVIDENCE",
+      "ownedUri": "file:///tmp/inkleet%20editing%20%E8%AF%AD%E8%A8%80%20Glw1DY/rust/solution.rs",
+      "ownershipPolicy": "exact-uri-or-same-canonical-regular-file",
+      "platform": "linux-x64",
+      "returnedUris": [
+        "file:///tmp/inkleet%20editing%20%E8%AF%AD%E8%A8%80%20Glw1DY/rust/solution.rs"
+      ]
+    },
+    {
+      "kind": "EDITING_RUST_ACTION_RESULT",
+      "guiLatencyQualified": false,
+      "platform": "linux-x64",
+      "protocolElapsedMs": 2171,
+      "resolved": true,
+      "sourceAfter": "fn example() {\n    let var_name = 1 + 2;\n    let value = (var_name) * 3;\n    let _ = value;\n}\n",
+      "sourceBefore": "fn example() {\n    let value = (1 + 2) * 3;\n    let _ = value;\n}\n",
+      "sourceOnly": true,
+      "title": "Extract into variable"
+    },
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": true,
+      "initialMappedCandidate": true,
+      "label": "Println",
+      "language": "golang",
+      "originalWireItemRetained": false,
+      "parameterSnippet": true,
+      "platform": "linux-x64",
+      "resolve": false,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_COMPLETION_RESULT",
+      "actualAdapter": true,
+      "autoimport": false,
+      "initialMappedCandidate": true,
+      "label": "exists",
+      "language": "python3",
+      "originalWireItemRetained": true,
+      "parameterSnippet": false,
+      "platform": "linux-x64",
+      "resolve": true,
+      "sourceMapping": true
+    },
+    {
+      "kind": "EDITING_PYTHON_AUTOIMPORT_RESULT",
+      "additionalTextEdits": [
+        {
+          "newText": ", PurePath",
+          "range": {
+            "end": {
+              "character": 24,
+              "line": 0
+            },
+            "start": {
+              "character": 24,
+              "line": 0
+            }
+          }
+        }
+      ],
+      "currentlyReferencedModule": "pathlib",
+      "helperPrefix": 8,
+      "initialMappedCandidate": true,
+      "originalWireItemRetained": true,
+      "platform": "linux-x64",
+      "resolve": true,
+      "settleDelayMs": 1000
+    }
+  ],
+  "removedImportRetentionObservations": [
+    {
+      "delaySeconds": 0,
+      "polls": 1,
+      "rawCandidateCounts": [
+        3
+      ]
+    },
+    {
+      "delaySeconds": 0.1,
+      "polls": 1,
+      "rawCandidateCounts": [
+        3
+      ]
+    },
+    {
+      "delaySeconds": 0.3,
+      "polls": 15,
+      "rawCandidateCounts": [
+        0
+      ]
+    },
+    {
+      "delaySeconds": 0.5,
+      "polls": 15,
+      "rawCandidateCounts": [
+        0
+      ]
+    },
+    {
+      "delaySeconds": 1,
+      "polls": 15,
+      "rawCandidateCounts": [
+        0
+      ]
+    },
+    {
+      "delaySeconds": 2,
+      "polls": 15,
+      "rawCandidateCounts": [
+        0
+      ]
+    },
+    {
+      "delaySeconds": 5,
+      "polls": 15,
+      "rawCandidateCounts": [
+        0
+      ]
+    }
+  ],
+  "stableRetainedFromImportObservations": [
+    {
+      "source": "from pathlib import Path\npath = PurePa",
+      "delaySeconds": 0.5,
+      "polls": 1,
+      "rawCandidateCounts": [
+        3
+      ]
+    },
+    {
+      "source": "from pathlib import Path\npath = PurePa",
+      "delaySeconds": 2,
+      "polls": 1,
+      "rawCandidateCounts": [
+        3
+      ]
+    }
+  ],
+  "nativeStableAugmentation": "PENDING next exact-source native CI; previous native runs correctly failed removed-import fixture. No native helper-line-zero relocation qualification claimed."
+}

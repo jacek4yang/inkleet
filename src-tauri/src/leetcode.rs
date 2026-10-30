@@ -92,7 +92,7 @@ impl Leetcode {
     pub fn new() -> Result<Self, String> {
         let client = Client::builder().https_only(true).redirect(Policy::none())
             .connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(20))
-            .user_agent("InkLeet/0.0.1 (+https://github.com/jacek4yang/inkleet)")
+            .user_agent(concat!("InkLeet/", env!("CARGO_PKG_VERSION"), " (+https://github.com/jacek4yang/inkleet)"))
             .build().map_err(|_| "无法初始化网络客户端")?;
         Ok(Self { client })
     }
@@ -130,14 +130,9 @@ impl Leetcode {
     }
     pub async fn identity(&self, cookie: &str, csrf: &str) -> Result<Identity, String> {
         let data = self.query_with_session("query globalData { userStatus { isSignedIn username userSlug } }", json!({}), Some((cookie, csrf))).await?;
-        let user = data.get("userStatus").ok_or("登录状态响应缺少字段")?;
-        if user.get("isSignedIn").and_then(Value::as_bool) != Some(true) {
-            return Err("会话已过期或尚未完成登录".into());
-        }
-        let username = user.get("username").and_then(Value::as_str).filter(|v| !v.is_empty()).ok_or("账号名称缺失")?;
-        let slug = user.get("userSlug").and_then(Value::as_str).filter(|v| !v.is_empty()).ok_or("账号标识缺失")?;
-        Ok(Identity { username: username.into(), account: slug.into(), persistence: "memory-only".into() })
+        decode_identity(&data)
     }
+
     pub async fn search(&self, keyword: &str, offset: u32) -> Result<QuestionList, String> {
         self.search_filtered(keyword, offset, None, None, None).await
     }
@@ -240,5 +235,32 @@ fn normalize_difficulty(value:&str)->Result<&'static str,String>{
             assert_eq!(normalize_difficulty(input).unwrap(),expected);
         }
         for input in ["", "unknown", "0", " easy ", "Easy<script>"] { assert!(normalize_difficulty(input).is_err()); }
+    }
+}
+
+fn decode_identity(data: &Value) -> Result<Identity, String> {
+    let user = data.get("userStatus").ok_or("登录状态响应缺少字段")?;
+    match user.get("isSignedIn").and_then(Value::as_bool) {
+        Some(true) => {},
+        Some(false) => return Err("SESSION_EXPIRED: 会话已过期或尚未完成登录".into()),
+        None => return Err("登录状态响应格式变化；未确认会话过期".into()),
+    }
+    let username = user.get("username").and_then(Value::as_str).filter(|v| !v.is_empty()).ok_or("账号名称缺失")?;
+    let slug = user.get("userSlug").and_then(Value::as_str).filter(|v| !v.is_empty()).ok_or("账号标识缺失")?;
+    Ok(Identity { username: username.into(), account: slug.into(), persistence: "memory-only".into() })
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn identity_requires_explicit_signed_in_status_and_account_identifier() {
+        let valid = json!({"userStatus":{"isSignedIn":true,"username":"fixture","userSlug":"fixture-cn"}});
+        assert_eq!(decode_identity(&valid).unwrap().account, "fixture-cn");
+        for value in [json!({}), json!({"userStatus":null}), json!({"userStatus":{"isSignedIn":"true"}}), json!({"userStatus":{"isSignedIn":true,"username":"fixture"}})] {
+            let error = decode_identity(&value).err().unwrap();
+            assert!(!error.contains("SESSION_EXPIRED"), "unknown protocol data is not evidence of expiry");
+        }
+        assert!(decode_identity(&json!({"userStatus":{"isSignedIn":false}})).err().unwrap().starts_with("SESSION_EXPIRED:"));
     }
 }

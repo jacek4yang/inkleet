@@ -205,6 +205,36 @@ function App() {
       resolve(false);
     }}));
   }
+  async function prepareSolutionArchive(id:string,text:string):Promise<string>{
+    const key=activeKey;
+    if(solution!==id||selected.current!==key||shuttingDown.current)throw Error("当前解答已变化，请重新确认归档");
+    // Invalidate unfinished formatting before draining writes. It must not
+    // introduce a new save after the archive's reviewed snapshot is checked.
+    ++formatEpoch.current;
+    await queue.current.idle;await draftQueue.current.idle;
+    if(selected.current!==key||codeSource.read()!==text)throw Error("源码已变化，请重新确认归档");
+    if(queue.current.failed(key)||draftQueue.current.failed(key)||saving.current.has(key))throw Error("请先处理保存或恢复草稿错误，再归档解答");
+    if(!isTauri())return text;
+    const baseline=persisted.current.get(key);
+    if(baseline===undefined||baseline===null)throw Error("解答文件尚未就绪，请刷新后重试");
+    return baseline;
+  }
+  function archivedSolution(id:string,text:string){
+    const key=draftKey({account:"local",problem:problemId,language,solution:id});
+    // Only the confirmed snapshot was archived. Keep any newer in-memory text
+    // instead of letting a delayed success erase it; restoring will retain it.
+    if(isTauri()&&documents.current.get(key)?.code===text){
+      documents.current.delete(key);persisted.current.delete(key);clean.current.delete(key);dirty.current.delete(key);
+    }
+    setSolutionSelections(current=>(current[solutionGroup]??"default")===id?{...current,[solutionGroup]:"default"}:current);
+  }
+  function restoredSolution(entry:{id:string}){
+    const key=draftKey({account:"local",problem:problemId,language,solution:entry.id});
+    // Reload disk and recovered drafts after restoration, except newer unsaved
+    // text retained from an interrupted archive response.
+    if(isTauri()&&!dirty.current.has(key)){documents.current.delete(key);persisted.current.delete(key);clean.current.delete(key);}
+    selectSolution(entry.id);
+  }
   useEffect(()=>{setFormatMessage("");},[activeKey]);
 
   useEffect(() => {
@@ -497,7 +527,7 @@ function App() {
     </section>
     {reading.handle}
     <section id="code-pane" className={"code-pane " + (tab !== "code" ? "mobile-hidden" : "")}>
-      <div className="pane-heading"><div className="document-selectors"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select>{problem && <SolutionPicker key={solutionGroup} problem={problemId} language={language} value={solution} codeSource={codeSource} template={baseCode} templateAvailable={baseTemplate!==null} disabled={editorLoading} onChange={selectSolution} onCreated={(entry,text) => {
+      <div className="pane-heading"><div className="document-selectors"><select aria-label="编程语言" value={language} onChange={e => setLanguage(e.target.value as Language)}>{languages.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}</select>{problem && <SolutionPicker key={solutionGroup} problem={problemId} language={language} value={solution} codeSource={codeSource} template={baseCode} templateAvailable={baseTemplate!==null} disabled={editorLoading} prepareArchive={prepareSolutionArchive} onArchived={archivedSolution} onRestored={restoredSolution} onChange={selectSolution} onCreated={(entry,text) => {
         const key=draftKey({account:"local",problem:problemId,language,solution:entry.id});
         documents.current.set(key,{code:editorText(text),notes:notes.current.get(problemId)??""});
         persisted.current.set(key,isTauri()?text:null);clean.current.set(key,editorText(text));dirty.current.delete(key);codeSignals.current.notify(key);selectSolution(entry.id);

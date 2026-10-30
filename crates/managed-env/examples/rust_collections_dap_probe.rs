@@ -27,7 +27,11 @@ const SOURCE: &str = r#"fn solve(values: Vec<i32>) -> i32 {
     let empty = std::collections::HashMap::<i32, usize>::new();
     let set = std::collections::HashSet::<i32>::from([3, 8]);
     let vector = vec![10_i32, 20, 30];
-    std::hint::black_box((&map, &string_map, &empty, &set, &vector)); // BREAKPOINT
+    let option_some = Some(41_i32);
+    let option_none = None::<i32>;
+    let option_nested_some = Some(Some(7_i32));
+    let option_nested_none = Some(None::<i32>);
+    std::hint::black_box((&map, &string_map, &empty, &set, &vector, &option_some, &option_none, &option_nested_some, &option_nested_none)); // BREAKPOINT
     values.iter().sum()
 }
 "#;
@@ -53,13 +57,16 @@ fn request(client: &Client, records: &mut Vec<Value>, command: &str, arguments: 
     result
 }
 
-fn children(client: &Client, records: &mut Vec<Value>, item: &Value) -> Result<Vec<Value>, String> {
+fn all_children(client: &Client, records: &mut Vec<Value>, item: &Value) -> Result<Vec<Value>, String> {
     let reference = item["variablesReference"].as_i64().filter(|v| *v > 0)
         .ok_or_else(|| format!("Missing expandable reference for {}", item["name"]))?;
     let result = request(client, records, "variables", json!({"variablesReference": reference, "start": 0, "count": 100}))?;
     let variables = result["variables"].as_array().ok_or("Missing DAP variables array")?;
     if variables.len() > 100 { return Err("Adapter ignored bounded variable count".into()); }
-    Ok(variables.iter().filter(|v| !is_raw(v)).cloned().collect())
+    Ok(variables.clone())
+}
+fn children(client: &Client, records: &mut Vec<Value>, item: &Value) -> Result<Vec<Value>, String> {
+    Ok(all_children(client, records, item)?.into_iter().filter(|v| !is_raw(v)).collect())
 }
 
 fn is_raw(value: &Value) -> bool {
@@ -87,6 +94,44 @@ fn map_pairs(client: &Client, records: &mut Vec<Value>, map: &Value) -> Result<B
         if !pairs.insert((scalar(key)?, scalar(value)?)) { return Err("Duplicate map pair".into()); }
     }
     Ok(pairs)
+}
+
+// Capture only structural variables. Never evaluate a debuggee expression or
+// derive a variant from a summary/empty child list. This bounded tree is evidence
+// for a separate shape review and renderer replay, not a pretty-printer guess.
+fn capture_tree(variable: &Value, depth: usize, ancestors: &mut Vec<i64>, budget: &mut usize,
+    read: &mut impl FnMut(&Value) -> Result<Vec<Value>, String>) -> Result<Value, String> {
+    if *budget == 0 { return Err("Option capture node budget exhausted".into()); }
+    *budget -= 1;
+    // A synthetic raw node exposes inactive enum layouts as well as the active
+    // value. It is not a second logical payload graph. Record the real node so
+    // the UI can expose its explicit raw action, but do not eagerly traverse it.
+    if is_raw(variable) { return Ok(json!({"variable":variable,"children":[],"rawDeferred":true})); }
+    let reference = variable["variablesReference"].as_i64().unwrap_or(0);
+    if reference <= 0 { return Ok(json!({"variable":variable,"children":[]})); }
+    if depth >= 8 { return Err("Option capture depth limit reached".into()); }
+    if ancestors.contains(&reference) { return Ok(json!({"variable":variable,"children":[],"repeatedReference":true})); }
+    ancestors.push(reference);
+    let mut captured = Vec::new();
+    for child in read(variable)? {
+        captured.push(capture_tree(&child, depth + 1, ancestors, budget, read)?);
+    }
+    ancestors.pop();
+    Ok(json!({"variable":variable,"children":captured}))
+}
+
+// Payload identity comes only from actual scalar children. A summary such as
+// `Some(41)` is not parsed, and a missing payload never establishes `None`.
+fn scalar_payloads(tree: &Value, expected: &str, found: &mut Vec<Value>) {
+    if tree["variable"]["variablesReference"].as_i64().unwrap_or(0) == 0
+        && tree["variable"]["value"].as_str() == Some(expected) {
+        found.push(tree["variable"].clone());
+    }
+    if let Some(children) = tree["children"].as_array() {
+        for child in children.iter().filter(|child| !is_raw(&child["variable"])) {
+            scalar_payloads(child, expected, found);
+        }
+    }
 }
 
 fn run_probe(client: &Arc<Client>, rx: &mpsc::Receiver<Value>, arguments: Value, work: &Path, records: &mut Vec<Value>) -> Result<Value, String> {
@@ -125,9 +170,24 @@ fn run_probe(client: &Arc<Client>, rx: &mpsc::Receiver<Value>, arguments: Value,
     if set != BTreeSet::from(["3".into(),"8".into()]) { return Err(format!("Incorrect set members: {set:?}")); }
     let vector: Vec<_> = children(client, records, find("vector")?)?.iter().map(scalar).collect::<Result<_,_>>()?;
     if vector != ["10","20","30"] { return Err(format!("Incorrect vector order: {vector:?}")); }
+    let mut options = serde_json::Map::new();
+    let mut option_budget = 64;
+    for name in ["option_some", "option_none", "option_nested_some", "option_nested_none"] {
+        options.insert(name.into(), capture_tree(find(name)?, 0, &mut Vec::new(), &mut option_budget, &mut |variable| all_children(client, records, variable))?);
+    }
+    let mut payloads = serde_json::Map::new();
+    for (name, expected) in [("option_some", "41"), ("option_nested_some", "7")] {
+        let mut found = Vec::new();
+        scalar_payloads(&options[name], expected, &mut found);
+        if found.len() != 1 { return Err(format!("Expected one structural scalar payload {expected} for {name}; adapter shape is not qualified")); }
+        payloads.insert(name.into(), json!(found[0]));
+    }
     request(client, records, "disconnect", json!({"terminateDebuggee":true}))?;
     Ok(json!({"status":"PASS","numericPairs":numeric,"stringPairs":strings,"setMembers":set,"vectorElements":vector,
-        "emptyMap":true,"stoppedLine":line,"locals":locals,"scope":"Real pinned adapter and production snapshot launch; not GUI acceptance"}))
+        "emptyMap":true,"stoppedLine":line,"locals":locals,"optionCapture":options,
+        "optionQualification":{"status":"CAPTURED_NOT_CLASSIFIED","rawTraversal":"DEFERRED","scalarPayloads":payloads,
+            "expectedFixture":{"option_some":"Some(41)","option_none":"None::<i32>","option_nested_some":"Some(Some(7))","option_nested_none":"Some(None::<i32>)"},
+            "scope":"Actual bounded logical-child capture and scalar identity only; synthetic raw subtrees are explicitly deferred, no Option classifier, no None inference from missing children or summary"},"scope":"Real pinned adapter and production snapshot launch; not GUI acceptance"}))
 }
 
 #[tokio::main]
@@ -138,7 +198,10 @@ async fn main() -> Result<(), String> {
     fs::create_dir_all(&evidence).map_err(|e| e.to_string())?;
     let temp = tempfile::Builder::new().prefix("inkleet Rust collections space ").tempdir().map_err(|e| e.to_string())?;
     let root = process::tool_path(&fs::canonicalize(temp.path()).map_err(|e| e.to_string())?);
-    let manager = Manager::new(root.join("tools"));
+    // An explicit app-owned cache may be reused, but Manager::install still
+    // validates pinned package receipts and executable hashes. No host tool paths.
+    let tool_root = std::env::var_os("INKLEET_PROBE_TOOL_ROOT").map(std::path::PathBuf::from).unwrap_or_else(|| root.join("tools"));
+    let manager = Manager::new(tool_root);
     let report: Report = Arc::new(|_| {});
     for id in ["rustc", "rust-std", "zig", "codelldb"] {
         println!("Installing pinned package {id}");
@@ -169,4 +232,69 @@ async fn main() -> Result<(), String> {
     let report = match &result { Ok(value) => value.clone(), Err(error) => json!({"status":"FAIL","error":error}) };
     write_json(&evidence.join("result.json"), &report)?;
     result.map(|_| ())
+}
+
+#[cfg(test)]
+mod option_evidence_tests {
+    use super::*;
+    #[test]
+    fn actual_three_platform_logical_trees_never_traverse_synthetic_raw_layouts() {
+        for text in [include_str!("../../../tests/fixtures/dap-options-linux.json"), include_str!("../../../tests/fixtures/dap-options-macos.json"), include_str!("../../../tests/fixtures/dap-options-windows.json")] {
+            let fixture: Value = serde_json::from_str(text).unwrap();
+            let mut budget = 64;
+            let mut queried = BTreeSet::new();
+            let mut read = |variable: &Value| {
+                assert!(!is_raw(variable), "raw layout must remain an explicit deferred view");
+                let reference = variable["variablesReference"].as_i64().unwrap().to_string();
+                queried.insert(reference.clone());
+                fixture["responses"][&reference].as_array().cloned().ok_or_else(|| format!("No actual capture for {reference}"))
+            };
+            for root in fixture["roots"].as_array().unwrap() {
+                let tree = capture_tree(root, 0, &mut Vec::new(), &mut budget, &mut read).unwrap();
+                let raw: Vec<_> = tree["children"].as_array().unwrap().iter().filter(|child| is_raw(&child["variable"])).collect();
+                assert_eq!(raw.len(), 1);
+                assert_eq!(raw[0]["rawDeferred"], true);
+                assert!(raw[0]["children"].as_array().unwrap().is_empty());
+                let expected = match root["name"].as_str().unwrap() { "option_some" => Some("41"), "option_nested_some" => Some("7"), "option_none" => None, _ => panic!("Unknown captured root") };
+                if let Some(expected) = expected {
+                    let mut found = Vec::new();
+                    scalar_payloads(&tree, expected, &mut found);
+                    assert_eq!(found.len(), 1, "{} structural payload", fixture["platform"]);
+                }
+                // The None fixture only preserves the adapter result. Empty
+                // logical children do not establish a variant classification.
+            }
+            assert_eq!(queried.len(), 4);
+            assert_eq!(budget, 54, "logical nodes + deferred raw nodes remain bounded");
+        }
+    }
+    #[test]
+    fn logical_depth_node_and_reference_guards_still_fail_closed() {
+        let node = json!({"name":"nested","value":"{...}","variablesReference":1});
+        let mut read = |_: &Value| -> Result<Vec<Value>,String> { panic!("guard must run before any adapter request") };
+        assert!(capture_tree(&node, 8, &mut Vec::new(), &mut 64, &mut read).is_err());
+        assert!(capture_tree(&node, 0, &mut Vec::new(), &mut 0, &mut read).is_err());
+        let repeated = capture_tree(&node, 0, &mut vec![1], &mut 64, &mut read).unwrap();
+        assert_eq!(repeated["repeatedReference"], true);
+        assert!(repeated["children"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn payload_evidence_uses_scalar_children_not_summaries_or_raw_duplicates() {
+        let mut found = Vec::new();
+        scalar_payloads(&json!({"variable":{"value":"Some(41)","variablesReference":1},"children":[]}), "41", &mut found);
+        assert!(found.is_empty());
+        let tree = json!({"variable":{"value":"Some(41)","variablesReference":1},"children":[
+            {"variable":{"name":"0","value":"41","variablesReference":0},"children":[]},
+            {"variable":{"name":"[raw]","value":"{...}","variablesReference":2,"presentationHint":{"attributes":["readOnly","virtual"]}},"children":[
+                {"variable":{"name":"0","value":"41","variablesReference":0},"children":[]}
+            ]}
+        ]});
+        scalar_payloads(&tree, "41", &mut found);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0]["name"], "0");
+        let mut none = Vec::new();
+        scalar_payloads(&json!({"variable":{"value":"None","variablesReference":1},"children":[]}), "41", &mut none);
+        assert!(none.is_empty()); // No variant conclusion follows from this absence.
+    }
 }

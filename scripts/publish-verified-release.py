@@ -13,13 +13,33 @@ import subprocess
 import zipfile
 
 REPO = 'jacek4yang/inkleet'
-TAG = 'v0.1.1'
-VERSION = '0.1.1'
-MANIFEST = 'releases/v0.1.1.json'
-NOTES = 'releases/v0.1.1.md'
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+VERSION = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']
+if not isinstance(VERSION, str) or re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', VERSION) is None:
+    raise ValueError('Publisher requires stable numeric application semver')
+TAG = 'v' + VERSION
+MANIFEST = f'releases/{TAG}.json'
+NOTES = f'releases/{TAG}.md'
 PROFILE = 'release; default features; diagnostic snippet features disabled'
+WINDOWS_STAGES = [
+    'current MSI fresh install and real WebView2 save',
+    'fresh uninstall preserves saved notebook',
+    'public v0.1.1 installed, actual source/notes/named solution saved',
+    'upgrade retains v0.1.1 data; real WebView2 reload, archive/restart/restore',
+    'upgraded uninstall preserves full synthetic notebook',
+]
+WINDOWS_UI_ASSERTIONS = {
+    'fresh': ['fresh MSI executable starts; settings opens/closes; source and notes saved through real IPC'],
+    'legacy': ['public hash-verified v0.1.1 saved source, shared notes and named solution via native UI'],
+    'upgraded': ['v0.1.1 source/notes/named ID preserved through MSI upgrade', 'archive cancel and confirm use real storage', 'restart then restore retains unsaved draft without overwriting saved source', 'explicit save persists restored draft'],
+}
+GUID = r'\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}'
+WINDOWS_PAYLOAD_RULE = 'tauri-single-bundle-marker-UNK-to-MSI'
+WINDOWS_PAYLOAD_ORIGIN = 'In-memory copy of built_path with the exact single Tauri UNK-to-MSI marker substitution; no files modified'
 GATES = {
     'ci': ('.github/workflows/ci.yml', {'CI Frontend Regression'}),
+    'editing': ('.github/workflows/editing-lsp.yml', {'Editing LSP (ubuntu-24.04)', 'Editing LSP (windows-2025)', 'Editing LSP (macos-15-intel)'}),
+    'harness': ('.github/workflows/local-features.yml', {'Local harness (ubuntu-24.04)', 'Local harness (windows-2025)', 'Local harness (macos-15-intel)'}),
     'native': ('.github/workflows/native.yml', {'Native Linux Full Validation'}),
     'dap': ('.github/workflows/rust-collections.yml', {'Rust collection DAP (linux-x64)', 'Rust collection DAP (windows-x64)', 'Rust collection DAP (macos-x64)'}),
     'package': ('.github/workflows/preview-installers.yml', {'Packaging Frontend Regression', 'Packaging macOS Intel', 'Packaging Windows x64', 'Packaging Linux x86_64', 'Packaging Required'}),
@@ -49,6 +69,7 @@ def positive(value):
 
 
 def validate_manifest(m):
+    require('publisher_recovery' not in m, 'Publisher recovery exceptions are not allowed')
     require(m.get('schema') == 1 and m.get('repository') == REPO, 'Manifest schema/repository mismatch')
     require(m.get('tag') == TAG and m.get('version') == VERSION and m.get('prerelease') is False, 'Unexpected release identity')
     require(hex_value(m.get('source_commit'), 40) and hex_value(m.get('source_tree'), 40), 'Invalid source identity')
@@ -59,8 +80,6 @@ def validate_manifest(m):
         require(hex_value(gate.get('qualification_commit'), 40), 'Invalid qualification commit')
         require(gate.get('event') == 'push', 'Only exact main push gates qualify')
         require(gate['qualification_commit'] == m['source_commit'], 'Every gate must qualify exact final main source')
-        if name == 'package':
-            require(gate['qualification_commit'] == m['source_commit'] and gate['event'] in ('push', 'workflow_dispatch'), 'Packages must come from exact final main source')
     require(set(m.get('artifacts', {})) == set(PLATFORMS), 'Expected three platform archives')
     filenames = []
     for platform, a in m['artifacts'].items():
@@ -97,6 +116,284 @@ def validate_gate(m, name, run, jobs, qualification_tree):
         require(len(matches) == 1 and matches[0]['run_id'] == run['id'] and matches[0]['conclusion'] == 'success' and matches[0]['status'] == 'completed', 'Required job missing, skipped or unsuccessful: ' + expected)
 
 
+def validate_windows_token(value, sid=None, session=None, standard=False):
+    require(isinstance(value, dict), 'Missing observed Windows token')
+    user = value.get('user_sid')
+    require(isinstance(user, str) and re.fullmatch(r'S-1-5-21-[0-9]+-[0-9]+-[0-9]+-[0-9]+', user), 'Invalid Windows user identity')
+    require(sid is None or user == sid, 'Windows child changed user')
+    require(type(value.get('session_id')) is int and value['session_id'] >= 0 and (session is None or value['session_id'] == session), 'Windows child changed session')
+    require(positive(value.get('process_id')) and type(value.get('integrity_rid')) is int, 'Invalid Windows process token identity')
+    require(all(type(value.get(key)) is bool for key in ('elevated', 'admin_enabled', 'sandbox_inert')) and value['sandbox_inert'] is False, 'Invalid or security-inert Windows token')
+    privileges = value.get('enabled_privileges')
+    require(isinstance(privileges, list) and len(privileges) <= 128 and all(isinstance(x, str) and x for x in privileges) and len(set(privileges)) == len(privileges), 'Invalid Windows privilege evidence')
+    if standard:
+        require(value.get('owner_sid') == user and value['integrity_rid'] == 8192 and value['elevated'] is False and value['admin_enabled'] is False, 'Windows UI host is not same-user standard medium integrity')
+        require(set(privileges) <= {'SeChangeNotifyPrivilege'}, 'Unexpected enabled standard-host privilege')
+    return user, value['session_id']
+
+
+def windows_owned_paths(values, sid):
+    require(isinstance(values, list) and len(values) == 4, 'Missing Windows synthetic path owners')
+    result = {}
+    for value in values:
+        require(isinstance(value, dict) and value.get('owner_sid') == sid, 'Synthetic path is not owned by the same user')
+        path = value.get('path')
+        require(isinstance(path, str) and 0 < len(path) <= 4096 and re.match(r'^[A-Za-z]:[\\/]', path) and '..' not in pathlib.PureWindowsPath(path).parts, 'Invalid owned Windows path')
+        key = str(pathlib.PureWindowsPath(path)).casefold()
+        require(key not in result, 'Duplicate owned Windows path')
+        result[key] = sid
+    return result
+
+
+def validate_windows_hosts(m, report):
+    hosts = report.get('hosts')
+    require(isinstance(hosts, dict) and set(hosts) == {'prepare', 'fresh', 'legacy', 'upgraded'}, 'Missing standard Windows host phases')
+    identity = None
+    for phase, host in hosts.items():
+        require(isinstance(host, dict) and host.get('result') == 'PASS' and host.get('phase') == phase and host.get('harnessCommit') == m['source_commit'], 'Windows host source/phase did not pass')
+        run = host.get('run')
+        require(isinstance(run, dict) and run.get('exited') is True and type(run.get('exit_code')) is int and run['exit_code'] == 0 and run.get('timed_out') is False and run.get('job_handle_closed') is True and run.get('job_tree_empty') is True, 'Windows host exit, empty owned job or handle closure incomplete')
+        parent = run.get('parent')
+        current = validate_windows_token(parent)
+        require(identity is None or current == identity, 'Windows host user/session changed between phases')
+        identity = current
+        validate_windows_token(run.get('child'), *identity, standard=True)
+        require(run['child']['process_id'] != parent['process_id'], 'Missing distinct Windows child process')
+        if run.get('mode') == 'already-standard-no-token-change':
+            validate_windows_token(parent, *identity, standard=True)
+        else:
+            require(run.get('mode') == 'same-user-LUA-medium' and parent['integrity_rid'] == 12288 and parent['elevated'] is True and parent['admin_enabled'] is True, 'Unexpected Windows host reduction or unverified parent token')
+    preflight = report.get('preflight')
+    require(isinstance(preflight, dict) and preflight.get('related_product_codes') == [], 'Windows pre-existing product refusal not established')
+    owners = windows_owned_paths(preflight.get('owned_paths'), identity[0])
+    return hosts, identity, owners
+
+
+def validate_windows_launch(launch, attempt, host, identity, owners, installed_path):
+    require(isinstance(launch, dict) and isinstance(attempt, dict), 'Invalid Windows launch records')
+    pid, node_pid, port = launch.get('pid'), launch.get('nodePid'), launch.get('port')
+    require(positive(pid) and node_pid == host['run']['child']['process_id'] and type(port) is int and 1 <= port <= 65535, 'Windows launch process/port ownership mismatch')
+    observed = launch.get('observedHost')
+    require(isinstance(observed, dict) and observed.get('result') == 'PASS', 'Missing observed standard app host')
+    for key in ('inspector_token', 'node_token', 'app_token'):
+        validate_windows_token(observed.get(key), *identity, standard=True)
+    require(observed['node_token']['process_id'] == node_pid and observed['app_token']['process_id'] == pid, 'Observed token belongs to another process')
+    require(windows_owned_paths(observed.get('owners'), identity[0]) == owners, 'Observed synthetic path ownership changed')
+    processes = observed.get('processes')
+    require(isinstance(processes, list) and 1 <= len(processes) <= 128, 'Missing owned process tree')
+    by_pid = {}
+    for process in processes:
+        require(isinstance(process, dict) and positive(process.get('pid')) and positive(process.get('parent_pid')) and type(process.get('session_id')) is int and process['session_id'] == identity[1] and process['pid'] not in by_pid and type(process.get('confirmed_exited')) is bool, 'Invalid owned process identity/session')
+        by_pid[process['pid']] = process
+    require(pid in by_pid and by_pid[pid]['parent_pid'] == node_pid and by_pid[pid]['confirmed_exited'] is False, 'Installed app is not the recorded Node child')
+    app = by_pid[pid]
+    require(isinstance(app.get('path'), str) and isinstance(app.get('name'), str) and app['name'].casefold() == 'inkleet.exe' and pathlib.PureWindowsPath(app['path']) == pathlib.PureWindowsPath(installed_path), 'Observed app is not the exact MSI payload location')
+    for process_id in by_pid:
+        seen = set()
+        while process_id != pid:
+            require(process_id in by_pid and process_id not in seen, 'Foreign or cyclic Windows process ancestry')
+            seen.add(process_id)
+            process_id = by_pid[process_id]['parent_pid']
+    require(any(p['confirmed_exited'] is False and p.get('name') == 'msedgewebview2.exe' and isinstance(p.get('webview_file_version'), str) and p['webview_file_version'] for p in processes), 'Missing observed WebView2 runtime version')
+    listeners = observed.get('listeners')
+    require(isinstance(listeners, list) and 1 <= len(listeners) <= 8, 'Missing owned loopback listener')
+    for listener in listeners:
+        require(isinstance(listener, dict) and listener.get('owned') is True and positive(listener.get('pid')) and listener['pid'] in by_pid and by_pid[listener['pid']]['confirmed_exited'] is False and type(listener.get('port')) is int and listener['port'] == port and listener.get('address') in ('127.0.0.1', '::1'), 'CDP is not exclusively owned and loopback-bound')
+    observed_pids = set(by_pid)
+    for key in ('initialObservedPids', 'closingObservedPids'):
+        snapshot = launch.get(key)
+        require(isinstance(snapshot, list) and 1 <= len(snapshot) <= 128 and all(positive(x) for x in snapshot) and len(set(snapshot)) == len(snapshot) and pid in snapshot, 'Missing initial/pre-close owned process observations')
+        observed_pids.update(snapshot)
+    final_pids = launch.get('finalObservedPids')
+    require(isinstance(final_pids, list) and 1 <= len(final_pids) <= 256 and all(positive(x) for x in final_pids) and final_pids == sorted(observed_pids), 'Missing exact union of owned process observations')
+    teardown = launch.get('teardown')
+    require(isinstance(teardown, dict) and teardown.get('result') == 'PASS' and teardown.get('app_pid') == pid and teardown.get('port') == port and teardown.get('app_absent') is True and teardown.get('listener_absent') is True and teardown.get('owned_processes_absent') is True and isinstance(teardown.get('owned_pids'), list) and teardown['owned_pids'] == final_pids, 'Actual app/listener/descendant teardown not observed')
+    require(attempt.get('pid') == pid and attempt.get('node_pid') == node_pid and attempt.get('port') == port and attempt.get('diagnostics') == observed and attempt.get('exited') is True and type(attempt.get('exit_code')) is int and attempt['exit_code'] == 0, 'Attempt did not observe the same app exiting normally')
+
+
+def validate_windows_payloads(metadata, report):
+    payloads = report.get('payloads', {})
+    require(isinstance(payloads, dict) and set(payloads) == {'fresh', 'upgraded'}, 'Missing exact installed MSI payload proofs')
+    for value in payloads.values():
+        require(isinstance(value, dict) and value.get('result') == 'PASS' and value.get('rule') == WINDOWS_PAYLOAD_RULE, 'Invalid installed MSI payload proof')
+        require(all(hex_value(value.get(key), 64) for key in ('built_sha256', 'expected_sha256', 'installed_sha256')), 'Invalid installed payload hashes')
+        require(value['expected_sha256'] == value['installed_sha256'] and value['built_sha256'] != value['expected_sha256'], 'Installed executable differs from exact MSI-patched build')
+        size = value.get('built_bytes')
+        require(positive(size) and 27 <= size < 200 * 1024 * 1024 and size == value.get('expected_bytes') == value.get('installed_bytes') == metadata.get('app_pe', {}).get('bytes'), 'Installed executable byte counts differ')
+        offset = value.get('marker_offset')
+        require(type(offset) is int and 0 <= offset <= size - 27 and type(value.get('marker_count')) is int and value['marker_count'] == 1 and type(value.get('marker_bytes')) is int and value['marker_bytes'] == 27, 'Invalid or nonunique MSI bundle marker proof')
+        require(all(isinstance(value.get(key), str) and value[key] and len(value[key]) <= 4096 for key in ('built_path', 'installed_path')), 'Missing installed payload paths')
+        require('expected_path' in value and value['expected_path'] is None and value.get('expected_origin') == WINDOWS_PAYLOAD_ORIGIN, 'Expected payload was not the exact in-memory marker copy')
+    for key in ('built_sha256', 'expected_sha256', 'installed_sha256', 'built_bytes', 'marker_offset', 'built_path', 'installed_path'):
+        require(payloads['fresh'][key] == payloads['upgraded'][key], 'Fresh and upgraded payload identities differ')
+
+
+def validate_windows_install(m, metadata, report):
+    require(isinstance(report, dict) and report.get('result') == 'PASS', 'Windows installed MSI acceptance missing or failed')
+    require(report.get('source_commit') == m['source_commit'] and report.get('version') == VERSION and report.get('runner') == 'windows-2025', 'Windows installed source/version/runner mismatch')
+    require(report.get('msi_uncertain') is False and report.get('cleanup_errors') == [], 'Windows installer outcome or cleanup uncertain')
+    require(report.get('stages') == WINDOWS_STAGES, 'Incomplete Windows install/upgrade/uninstall stages')
+    hosts, identity, owners = validate_windows_hosts(m, report)
+    validate_windows_payloads(metadata, report)
+    payloads = report['payloads']
+    prior_source = 'fbacb2041b83232a30a791965c58d93a7556a4ff'
+    prior = report.get('prior', {})
+    require(prior == {'url': f'https://github.com/{REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi', 'sha256': '1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0', 'bytes': 6885376, 'source_commit': prior_source, 'version': '0.1.1'}, 'Wrong public upgrade baseline')
+    ui = report.get('ui', {})
+    require(isinstance(ui, dict) and set(ui) == {'fresh', 'legacy', 'upgraded'}, 'Windows native phase missing or unexpected')
+    for phase, value in ui.items():
+        require(isinstance(value, dict), 'Invalid Windows native phase record')
+        expected_version = '0.1.1' if phase == 'legacy' else VERSION
+        expected_source = prior_source if phase == 'legacy' else m['source_commit']
+        require(value.get('result') == 'PASS' and value.get('phase') == phase and value.get('normalClose') is True, 'Windows native phase did not complete normally')
+        require(value.get('harnessCommit') == m['source_commit'] and value.get('applicationSourceCommit') == expected_source and value.get('nativeVersion') == expected_version, 'Windows native application/harness identity mismatch')
+        require(value.get('assertions') == WINDOWS_UI_ASSERTIONS[phase], 'Missing Windows native assertions')
+        launches = value.get('launches', [])
+        require(isinstance(launches, list) and len(launches) == (2 if phase == 'upgraded' else 1), 'Missing Windows native restart evidence')
+        attempts = value.get('launch_attempts')
+        require(isinstance(attempts, list) and len(attempts) == len(launches), 'Missing or extra installed launch attempts')
+        require('cleanupError' not in value, 'Windows UI cleanup failed')
+        for launch, attempt in zip(launches, attempts):
+            validate_windows_launch(launch, attempt, hosts[phase], identity, owners, payloads['fresh']['installed_path'])
+            require(positive(launch.get('pid')) and launch.get('version') == expected_version and re.fullmatch(r'https?://tauri\.localhost(?:/.*)?', launch.get('url', '')) and isinstance(launch.get('webviewVersion'), str) and launch['webviewVersion'], 'Invalid installed WebView2 launch evidence')
+    packages = report.get('packages', {})
+    require(isinstance(packages, dict), 'Invalid installed MSI package records')
+    current, old = packages.get('current', {}), packages.get('legacy', {})
+    require(isinstance(current, dict) and isinstance(old, dict), 'Invalid installed MSI identity records')
+    require(current.get('productCode') == metadata['msi'].get('product_code') and current.get('version') == VERSION and old.get('version') == '0.1.1' and current.get('name') == old.get('name') == 'InkLeet', 'Installed MSI identity differs from inspected package')
+    require(all(isinstance(value, str) and re.fullmatch(GUID, value) for value in [current.get('productCode'), old.get('productCode'), current.get('upgradeCode')]), 'Invalid MSI product/upgrade identifiers')
+    require(current.get('productCode') != old.get('productCode') and current.get('upgradeCode') == old.get('upgradeCode') and isinstance(current.get('upgradeCode'), str) and re.fullmatch(GUID, current['upgradeCode']), 'MSI upgrade identity evidence missing')
+
+
+# The v0.1.2 release deliberately qualifies installer behavior, not Windows GUI.
+# Keep this a mandatory, positive report: a skipped/failed GUI probe is never
+# converted into installer evidence, and the other six release gates are intact.
+WINDOWS_MSI_STAGES = ['fresh-install', 'fresh-uninstall', 'legacy-install', 'major-upgrade', 'upgraded-uninstall']
+WINDOWS_MSI_NOT_VERIFIED = [
+    'Windows real GUI and WebView2 startup',
+    'post-upgrade application runtime',
+    'old-application-authored storage compatibility or migration',
+    'application save/reload/archive/restart/restore',
+    'interactive MSI/NSIS installer',
+    'physical desktop/IME',
+    'signing or SmartScreen reputation',
+    'real account or online judge',
+    'managed LSP/tool installation',
+]
+
+
+def windows_local_path(value):
+    require(isinstance(value, str) and 0 < len(value) <= 4096 and re.match(r'^[A-Za-z]:[\\/]', value) and '..' not in pathlib.PureWindowsPath(value).parts and '\x00' not in value, 'Invalid local Windows evidence path')
+    return str(pathlib.PureWindowsPath(value)).casefold()
+
+
+def validate_windows_msi_lifecycle(m, metadata, report):
+    require(isinstance(report, dict) and type(report.get('schema')) is int and report['schema'] == 1 and report.get('scope') == 'installer-only-seeded-data' and report.get('result') == 'PASS', 'Windows MSI lifecycle evidence missing, failed or wrong scope')
+    require(report.get('source_commit') == m['source_commit'] and report.get('source_tree') == m['source_tree'] and report.get('version') == VERSION and report.get('runner') == 'windows-2025', 'Windows MSI lifecycle source/tree/version/runner mismatch')
+    require(report.get('application_launched') is False and report.get('not_verified') == WINDOWS_MSI_NOT_VERIFIED, 'Windows runtime deferral is missing or contradicted')
+    require(not any(key in report for key in ('ui', 'hosts', 'installed_msi_acceptance')), 'GUI evidence cannot masquerade as installer-only acceptance')
+    require(report.get('msi_uncertain') is False and report.get('cleanup_errors') == [] and report.get('stages') == WINDOWS_MSI_STAGES and 'error' not in report, 'Incomplete or uncertain Windows MSI lifecycle')
+    validate_windows_payloads(metadata, report)
+    prior = report.get('prior')
+    require(prior == {'url': f'https://github.com/{REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi', 'sha256': '1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0', 'bytes': 6885376, 'source_commit': 'fbacb2041b83232a30a791965c58d93a7556a4ff', 'version': '0.1.1'}, 'Wrong public MSI upgrade baseline')
+    packages = report.get('packages')
+    require(isinstance(packages, dict) and set(packages) == {'current', 'legacy'} and all(isinstance(v, dict) for v in packages.values()), 'Missing MSI package identities')
+    current, legacy = packages['current'], packages['legacy']
+    require(current.get('productCode') == metadata.get('msi', {}).get('product_code') and current.get('version') == VERSION and legacy.get('version') == '0.1.1' and current.get('name') == legacy.get('name') == 'InkLeet', 'MSI lifecycle package identity mismatch')
+    require(all(isinstance(value, str) and re.fullmatch(GUID, value) for value in (current.get('productCode'), legacy.get('productCode'), current.get('upgradeCode'))), 'Invalid MSI lifecycle GUID')
+    require(current['productCode'].casefold() != legacy['productCode'].casefold() and isinstance(legacy.get('upgradeCode'), str) and current['upgradeCode'].casefold() == legacy['upgradeCode'].casefold(), 'MSI major-upgrade identity missing')
+    msi_assets = [asset for asset in m['artifacts']['windows']['assets'] if asset['name'].endswith('.msi')]
+    require(len(msi_assets) == 1, 'Ambiguous frozen MSI asset')
+    require(current.get('bytes') == msi_assets[0]['bytes'] and current.get('sha256') == msi_assets[0]['sha256'] and type(current.get('bytes')) is int, 'Installed current MSI differs from frozen release asset')
+    require(legacy.get('bytes') == prior['bytes'] and legacy.get('sha256') == prior['sha256'] and type(legacy.get('bytes')) is int, 'Installed baseline MSI differs from public release')
+    for package in packages.values():
+        windows_local_path(package.get('path'))
+    require(windows_local_path(current['path']) != windows_local_path(legacy['path']), 'Current and prior MSI paths collide')
+
+    preflight = report.get('preflight')
+    require(isinstance(preflight, dict) and preflight.get('states') == {'current': -1, 'legacy': -1} and all(type(v) is int for v in preflight['states'].values()) and preflight.get('related_product_codes') == [] and preflight.get('no_processes') is True, 'MSI preflight did not prove absent products and application')
+    require(isinstance(preflight.get('current_user_sid'), str) and re.fullmatch(r'S-1-5-21-[0-9]+-[0-9]+-[0-9]+-[0-9]+', preflight['current_user_sid']), 'Missing MSI test user identity')
+    registrations, operations = report.get('registrations'), report.get('msi_operations')
+    require(isinstance(registrations, list) and len(registrations) == 5 and isinstance(operations, list) and len(operations) == 5, 'Missing or extra Windows MSI operations/registrations')
+    expected_states = [(5, -1), (-1, -1), (-1, 5), (5, -1), (-1, -1)]
+    expected_related = [[current['productCode']], [], [legacy['productCode']], [current['productCode']], []]
+    expected_packages = [current['path'], current['productCode'], legacy['path'], current['path'], current['productCode']]
+    log_paths = set()
+    for index, stage in enumerate(WINDOWS_MSI_STAGES):
+        registration, operation = registrations[index], operations[index]
+        require(isinstance(registration, dict) and registration.get('stage') == stage and registration.get('result') == 'PASS', 'Wrong MSI registration stage/outcome')
+        states = registration.get('states')
+        require(isinstance(states, dict) and states == dict(zip(('current', 'legacy'), expected_states[index])) and all(type(v) is int for v in states.values()), 'MSI registration did not observe exact installed/absent states')
+        for field in ('expected_related', 'related_product_codes'):
+            codes = registration.get(field)
+            require(isinstance(codes, list) and all(isinstance(v, str) for v in codes) and [v.casefold() for v in codes] == [v.casefold() for v in expected_related[index]], 'MSI registration has missing or unexpected related products')
+        require(isinstance(operation, dict) and operation.get('label') == stage and operation.get('action') == ('/x' if index in (1, 4) else '/i') and operation.get('package') == expected_packages[index], 'Wrong MSI operation order/action/package')
+        require(operation.get('result') == 'PASS' and positive(operation.get('pid')) and type(operation.get('exit_code')) is int and operation['exit_code'] == 0 and operation.get('uncertain') is False and 'error' not in operation, 'MSI operation did not finish successfully and certainly')
+        log = windows_local_path(operation.get('log'))
+        require(log not in log_paths and pathlib.PureWindowsPath(log).name == stage + '-msi.log', 'Missing or duplicated MSI operation log')
+        log_paths.add(log)
+    synthetic = report.get('synthetic')
+    require(isinstance(synthetic, dict) and synthetic.get('origin') == 'test-seeded-not-app-authored', 'Seeded fixture must not be represented as application-authored data')
+    marker = synthetic.get('marker')
+    require(isinstance(marker, str) and re.fullmatch(re.escape(m['source_commit']) + r':[0-9a-f]{32}', marker), 'Missing source-bound unique fixture marker')
+    roots = synthetic.get('roots')
+    require(isinstance(roots, list) and len(roots) == 2 and all(isinstance(v, dict) and isinstance(v.get('name'), str) for v in roots) and {v.get('name') for v in roots} == {'appData', 'appCache'}, 'Missing exact synthetic data/cache roots')
+    root_paths, root_owners = {}, {}
+    sid_pattern = r'S-1-[0-9]+(?:-[0-9]+)+'
+    for root in roots:
+        root_paths[root['name']] = windows_local_path(root.get('path'))
+        require(isinstance(root.get('owner_sid'), str) and re.fullmatch(sid_pattern, root['owner_sid']), 'Missing actual synthetic root owner')
+        root_owners[root['name']] = root['owner_sid']
+    paths = list(root_paths.values())
+    require(paths[0] != paths[1] and not any(pathlib.PureWindowsPath(paths[i]).is_relative_to(paths[1-i]) for i in (0, 1)), 'Synthetic roots collide or overlap')
+    absent = preflight.get('absent_paths')
+    require(isinstance(absent, list) and len(absent) == 3, 'Missing verified-absent synthetic locations')
+    absent = [windows_local_path(v) for v in absent]
+    temporary = str(pathlib.PureWindowsPath(legacy['path']).parent).casefold()
+    require(len(set(absent)) == 3 and set(absent) == {*paths, temporary}, 'Preflight absent paths do not cover the test-owned roots')
+    require(not any(pathlib.PureWindowsPath(a).is_relative_to(b) for a in absent for b in absent if a != b), 'Temporary and app-data/cache fixture locations overlap')
+    for payload in report['payloads'].values():
+        windows_local_path(payload['built_path'])
+        installed = windows_local_path(payload['installed_path'])
+        require(pathlib.PureWindowsPath(installed).is_relative_to(temporary) and pathlib.PureWindowsPath(installed).name == 'inkleet.exe', 'Installed payload is outside the test-owned temporary directory')
+    baseline = synthetic.get('baseline')
+    require(isinstance(baseline, dict) and set(baseline) == {'files', 'directories'}, 'Missing complete seeded fixture snapshot')
+    named = 'notebook/lc-1/.solutions/rust/11111111111111111111111111111111'
+    required_files = {('appData', name) for name in (
+        '.inkleet-msi-fixture', 'notebook/lc-1/solution.rs', 'notebook/lc-1/notes.md',
+        'notebook/lc-1/.solutions/rust/default.json', named + '/name.json', named + '/solution.rs',
+        'notebook/lc-1/.inkleet-drafts/solution.rs.json', named + '/.inkleet-drafts/solution.rs.json',
+        named + '/.inkleet-recovery/conflict-fixture.json', 'settings.json',
+    )} | {('appCache', '.inkleet-msi-fixture'), ('appCache', 'fixture-cache.json')}
+    files, directories = baseline.get('files'), baseline.get('directories')
+    require(isinstance(files, list) and len(files) == len(required_files) and isinstance(directories, list) and 2 <= len(directories) <= 100, 'Incomplete seeded file/directory set')
+    file_keys, directory_keys = set(), set()
+    for file in files:
+        require(isinstance(file, dict) and set(file) == {'root', 'relative_path', 'bytes', 'sha256', 'owner_sid'}, 'Malformed seeded file evidence')
+        key = (file.get('root'), file.get('relative_path'))
+        require(all(isinstance(v, str) for v in key) and key in required_files and key not in file_keys, 'Missing, duplicate or unexpected seeded file')
+        file_keys.add(key)
+        require(positive(file.get('bytes')) and file['bytes'] <= 4 * 1024 * 1024 and hex_value(file.get('sha256'), 64) and isinstance(file.get('owner_sid'), str) and re.fullmatch(sid_pattern, file['owner_sid']), 'Missing seeded bytes/hash/owner evidence')
+        if key[1] == '.inkleet-msi-fixture':
+            require(file['bytes'] == len(marker.encode()) and file['sha256'] == digest(marker.encode()), 'Synthetic ownership marker bytes do not match this run')
+    required_directories = {(name, '.') for name in root_paths}
+    for root, relative in required_files:
+        required_directories.update((root, str(parent)) for parent in pathlib.PurePosixPath(relative).parents)
+    for directory in directories:
+        require(isinstance(directory, dict) and set(directory) == {'root', 'relative_path', 'owner_sid'}, 'Malformed seeded directory evidence')
+        key = (directory.get('root'), directory.get('relative_path'))
+        require(all(isinstance(v, str) for v in key) and key in required_directories and key not in directory_keys, 'Unexpected or duplicate seeded directory')
+        directory_keys.add(key)
+        require(isinstance(directory.get('owner_sid'), str) and re.fullmatch(sid_pattern, directory['owner_sid']), 'Missing actual seeded directory owner')
+        if key[1] == '.':
+            require(directory['owner_sid'] == root_owners[key[0]], 'Synthetic root ownership records disagree')
+    require(file_keys == required_files and directory_keys == required_directories, 'Incomplete seeded notebook/draft/recovery/settings/cache tree')
+    boundaries = synthetic.get('boundaries')
+    require(isinstance(boundaries, list) and len(boundaries) == 5, 'Missing seeded-data preservation boundary')
+    for stage, boundary in zip(WINDOWS_MSI_STAGES, boundaries):
+        require(isinstance(boundary, dict) and boundary.get('stage') == stage and boundary.get('result') == 'PASS' and boundary.get('snapshot') == baseline, 'MSI lifecycle changed seeded files/directories/bytes/owners or skipped a boundary')
+
+
 def inspect_archive(m, platform, info, archive):
     a = m['artifacts'][platform]
     require(info['id'] == a['id'] and info['name'] == a['name'] and info['expired'] is False, 'Wrong/expired artifact')
@@ -128,6 +425,10 @@ def inspect_archive(m, platform, info, archive):
             require(metadata.get('file') == a['assets'][0]['name'] and metadata.get('sha256') == a['assets'][0]['sha256'] and metadata.get('bytes') == a['assets'][0]['bytes'], 'DMG metadata differs from frozen asset')
         if platform == 'windows':
             require(metadata['app_pe']['machine'] == 0x8664 and metadata['app_pe']['optional_header_magic'] == 0x20b and metadata['msi']['template'].split(';')[0] == 'x64', 'Missing Windows x64 package evidence')
+            report = metadata.get('msi_lifecycle_acceptance')
+            validate_windows_msi_lifecycle(m, metadata, report)
+            require('installed_msi_acceptance' not in metadata and 'MSI_INSTALLED_RESULT.json' not in names, 'Deferred Windows GUI acceptance must not be claimed by release metadata')
+            require('MSI_LIFECYCLE_RESULT.json' in names and json.dumps(json.loads(z.read('MSI_LIFECYCLE_RESULT.json')), sort_keys=True) == json.dumps(report, sort_keys=True), 'Windows MSI lifecycle evidence file differs from build metadata')
         result = {}
         for asset in a['assets']:
             data = z.read(asset['name'])
@@ -155,6 +456,11 @@ class GitHub:
         raise ValueError('Pagination exceeded safety bound')
 
     def binary(self, endpoint):
+        # Actions ZIP uses the default API media type and a binary redirect.
+        # Release assets instead require octet-stream content negotiation.
+        if re.fullmatch(r'actions/artifacts/[1-9][0-9]*/zip', endpoint):
+            return self.gh('api', f'repos/{REPO}/{endpoint}')
+        require(re.fullmatch(r'releases/assets/[1-9][0-9]*', endpoint), 'Unexpected binary endpoint')
         return self.gh('api', f'repos/{REPO}/{endpoint}', '-H', 'Accept: application/octet-stream')
 
 
@@ -172,8 +478,19 @@ def verify_assets(release, files, github):
         require(github.binary(f"releases/assets/{a['id']}") == expected, 'Uploaded bytes mismatch')
 
 
+def validate_publisher_comparison(comparison, read_bytes):
+    expected = {MANIFEST, NOTES}
+    files = comparison.get('files', [])
+    require(comparison['status'] == 'ahead' and len(files) == len(expected) and {f['filename'] for f in files} == expected, 'Publisher branch must only add frozen manifest/notes to main')
+    for f in files:
+        require(f['status'] == 'added', 'Frozen release records must be new files')
+        data = read_bytes(f['filename'])
+        blob = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+        require(f.get('sha') == blob, 'Remote publisher blob differs from checkout')
+
+
 def main():
-    require(os.environ.get('GITHUB_REPOSITORY') == REPO and os.environ.get('GITHUB_REF') == 'refs/heads/release/v0.1.1', 'Only reviewed release branch may publish')
+    require(os.environ.get('GITHUB_REPOSITORY') == REPO and os.environ.get('GITHUB_REF') == f'refs/heads/release/{TAG}', 'Only reviewed release branch may publish')
     publisher = os.environ.get('GITHUB_SHA', '')
     require(hex_value(publisher, 40), 'Missing publisher commit')
     root = pathlib.Path(__file__).resolve().parents[1]
@@ -186,8 +503,7 @@ def main():
     require(g.get('git/ref/heads/main')['object']['sha'] == source, 'Final main source moved; inspect before publication')
     require(g.get(f'git/commits/{source}')['tree']['sha'] == m['source_tree'], 'Source tree mismatch')
     comparison = g.get(f'compare/{source}...{publisher}')
-    require(comparison['status'] == 'ahead' and 0 < len(comparison.get('files', [])) <= 2 and {f['filename'] for f in comparison['files']} <= {MANIFEST, NOTES}, 'Publisher branch must only add frozen manifest/notes to main')
-    require(all(f['status'] == 'added' for f in comparison['files']), 'Frozen release records must be new files')
+    validate_publisher_comparison(comparison, lambda path: (root / path).read_bytes())
     # Verify app version directly at source, not at an arbitrary publisher checkout.
     package = g.get(f'contents/package.json?ref={source}')
     import base64
@@ -214,7 +530,7 @@ def main():
         (out / name).write_bytes(data)
     # Every subsequent mutation is one-shot. Failures leave a draft for inspection.
     require(g.get('git/ref/heads/main')['object']['sha'] == source, 'Main changed during verification')
-    g.gh('release', 'create', TAG, '--repo', REPO, '--target', source, '--draft', '--title', 'InkLeet v0.1.1', '--notes-file', str(root / NOTES))
+    g.gh('release', 'create', TAG, '--repo', REPO, '--target', source, '--draft', '--title', f'InkLeet {TAG}', '--notes-file', str(root / NOTES))
     g.gh('release', 'upload', TAG, '--repo', REPO, *[str(out / name) for name in sorted(files)])
     releases = [r for r in g.pages('releases') if r['tag_name'] == TAG]
     require(len(releases) == 1, 'Expected one draft')

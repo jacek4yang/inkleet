@@ -67,3 +67,10 @@ test("empty runtime errors remain failures eligible for explicit rerun",()=>{
   assert.equal(r.raw,false);
  }
 });
+
+test("design inputs have explicit operation and argument fields",()=>{
+ const meta=JSON.stringify({systemdesign:true,classname:"Counter",constructor:{params:[]},methods:[{name:"value",params:[],return:{type:"integer"}}]});
+ assert.deepEqual(parameterNames(meta),["操作","参数"]);
+ const cases=seedCases('["Counter","value"]\n[[],[]]',"",parameterNames(meta));
+ assert.equal(cases.length,1);assert.equal(cases[0].input,'["Counter","value"]\n[[],[]]');
+});
