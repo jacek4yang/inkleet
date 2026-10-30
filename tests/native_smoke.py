@@ -3,6 +3,7 @@ import base64, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.
 from native_wait import NativeDiagnostics, Polling, operation_label, read_only_command
 from native_window_close import check_clean_close
 from native_capture import CAPTURE_SNAPSHOT, reveal_capture
+from native_lsp_ready import latest_started, ready_java_session
 BASE = "http://127.0.0.1:4444"
 EID = "element-6066-11e4-a52e-4f735466cecf"
 session = None
@@ -1269,8 +1270,19 @@ try:
         wait_for(lambda: all(text(f'.environment-tools [data-tool="{tool}"] [role="status"]') == "已安装" for tool in ["jdk","jdtls","java-debug"]), "verified private JDK and JDTLS installed", seconds=300)
         screenshot("java-environment-native.png")
         click(".environments header button")
+        java_trace_enabled=os.environ.get("INKLEET_SNIPPET_VALIDATION") == "1"
+        before_java_id=latest_started(snippet_trace()) if java_trace_enabled else 0
         click('select[aria-label="编程语言"] option[value="java"]')
-        wait_for(lambda: "JDT LS 已连接" in text(".lsp-status"), "real private Java language server connected", seconds=100)
+        # Pinned JDT LS 1.61.0 emits language/status ServiceReady after its
+        # initialize reply. An actual same-session notice, not a sleep/retry,
+        # gates this ready-server completion scenario within the existing 100s.
+        # https://github.com/eclipse-jdtls/eclipse.jdt.ls/blob/v1.61.0/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/JDTLanguageServer.java#L276-L348
+        def java_ready():
+            if "JDT LS 已连接" not in text(".lsp-status"): return None
+            return ready_java_session(snippet_trace(),before_java_id) if java_trace_enabled else True
+        java_ready_id=wait_for(java_ready, "real private Java language server connected and service ready", seconds=100)
+        if java_trace_enabled:
+            (evidence/"JAVA_SERVICE_READY_NATIVE.json").write_text(json.dumps({"session":java_ready_id,"status":"ServiceReady","scope":"Ready-server completion only; not cold-start latency or completed-indexing proof","records":snippet_trace()},ensure_ascii=False,indent=2))
         java_doc="class Solution { void test() { java.util.ArrayList<String> values = new java.util.ArrayList<>(); values. } }"
         fill(code,java_doc)
         keys=[{"type":"keyDown","value":"\ue009"},{"type":"keyDown","value":"\ue010"},{"type":"keyUp","value":"\ue010"},{"type":"keyUp","value":"\ue009"}]

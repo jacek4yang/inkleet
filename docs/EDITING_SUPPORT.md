@@ -1,6 +1,6 @@
 # Editing support and qualification
 
-Updated 2026-10-29 for the next release candidate. This is a capability boundary,
+Updated 2026-10-30 for the next release candidate. This is a capability boundary,
 not a claim of editing parity with Zed or another mature IDE.
 
 ## Completion profile
@@ -27,6 +27,25 @@ The final candidate must still pass its own native and release-package gates.
 Default-feature unit tests establish the same capability flag in the release
 build. Installed/tar smoke checks launch/storage separately; they do not
 independently repeat the managed-tool snippet GUI suite.
+
+### Java native readiness boundary
+
+The native Java completion scenario waits for the **same JDT LS session's actual
+`language/status: ServiceReady` notification**, not just the initialize reply or
+“connected” UI label. Missing readiness fails within a bounded wait. The existing
+8-second completion request timeout and actual popup/member/documentation/snippet
+assertions remain unchanged; requests are not automatically retried until they pass.
+The opt-in native trace retains bounded allowlisted status types, session IDs and
+request outcome timing, not arbitrary server messages or authored source.
+
+Pinned [JDT LS 1.61.0 initialization](https://github.com/eclipse-jdtls/eclipse.jdt.ls/blob/v1.61.0/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/JDTLanguageServer.java#L276-L348)
+sends ServiceReady after initialization/capability/bundle synchronization. Some
+build/index work follows that notification: it is not proof all indexing is done.
+The earlier [PR run 41115458333](https://github.com/jacek4yang/inkleet/actions/runs/41115458333)
+failed its first Java completion with a timeout/disconnect status and no popup;
+the retained evidence did not prove which underlying cause occurred. Ready-server
+native qualification is not cold-start latency acceptance or a production latency
+improvement. The final candidate must execute this check successfully.
 
 ### Python autoimport safety
 

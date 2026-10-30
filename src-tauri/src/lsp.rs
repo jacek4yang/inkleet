@@ -76,7 +76,12 @@ impl Services {
                     let cancel=request.canceller();Ok((request,cancel))
                 })?
             };
+            let trace_started=crate::lsp_launch::snippet_validation_enabled().then(||{
+                crate::snippet_validation::request_started(&self.root,id,version,sequence,&session.language);
+                std::time::Instant::now()
+            });
             let result=request.wait(Duration::from_secs(8));
+            if let Some(started)=trace_started{crate::snippet_validation::request_finished(&self.root,id,version,sequence,&session.language,&result,started.elapsed().as_millis(),session.client.is_alive());}
             let mut requests=session.completion_requests.lock().map_err(|_|"补全请求状态不可用")?;
             requests.finish(sequence);
             let mut response=result?;
@@ -287,7 +292,10 @@ pub async fn start(app:tauri::AppHandle,text:String,language:String,metadata:Opt
         let semantic_revision=Arc::new(AtomicU64::new(0));let event_semantic=semantic_revision.clone();
         let completion_profile=crate::lsp_launch::completion_capabilities(&language);
         let completion_insert_text_mode=crate::lsp_launch::completion_default_mode(&completion_profile)?;
+        let event_root=state.root.clone();let event_language=language.clone();
         let client=Client::spawn(launch.command,launch.settings.clone(),Arc::new(move|event|{
+            // Status may arrive before the initialize response/Started record.
+            crate::snippet_validation::server_event(&event_root,generation,&event_language,&event);
             if event.get("method").and_then(Value::as_str)==Some("workspace/semanticTokens/refresh"){event_semantic.fetch_add(1,Ordering::Relaxed);}
             if event.get("method").and_then(Value::as_str)==Some("textDocument/publishDiagnostics"){
                 if let Some(params)=event.get("params"){

@@ -34,6 +34,7 @@ jobs:
         run: |
           python3 -m py_compile tests/native_smoke.py tests/native_wait.py tests/test_native_wait.py
           python3 -m unittest discover -s tests -p 'test_native_wait.py' -v
+          python3 -m unittest discover -s tests -p 'test_native_lsp_ready.py' -v
           python3 -m unittest discover -s tests -p 'test_release_version.py' -v
           python3 -m unittest discover -s tests -p 'test_verified_release.py' -v
       - name: Check TypeScript
