@@ -56,16 +56,49 @@ def windows_acceptance():
     return {'hosts':hosts,'preflight':{'related_product_codes':[],'owned_paths':owners},'payloads':{'fresh':copy.deepcopy(payload),'upgraded':copy.deepcopy(payload)},'result':'PASS','source_commit':SOURCE,'version':p.VERSION,'runner':'windows-2025','msi_uncertain':False,'cleanup_errors':[],'stages':list(p.WINDOWS_STAGES),'prior':{'url':f'https://github.com/{p.REPO}/releases/download/v0.1.1/InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi','sha256':'1246c47b6a814bb3c3d42ab4972c8ca6a52ecb3fd05d82dfd75000b6921f46e0','bytes':6885376,'source_commit':prior_source,'version':'0.1.1'},'ui':ui,'packages':{'current':{'productCode':code,'upgradeCode':upgrade,'version':p.VERSION,'name':'InkLeet'},'legacy':{'productCode':old,'upgradeCode':upgrade,'version':'0.1.1','name':'InkLeet'}}}
 
 
+def windows_msi_lifecycle():
+    old = windows_acceptance()
+    current, legacy = copy.deepcopy(old['packages']['current']), copy.deepcopy(old['packages']['legacy'])
+    current.update(path=r'C:\build\bundle\msi\InkLeet.msi', bytes=3, sha256=p.digest(b'abc'))
+    legacy.update(path=r'C:\owned\InkLeet-0.1.1-preview-fbacb2041b83-windows-x64.msi', bytes=old['prior']['bytes'], sha256=old['prior']['sha256'])
+    sid = windows_token(1)['user_sid']
+    marker = SOURCE + ':' + '1' * 32
+    named = 'notebook/lc-1/.solutions/rust/11111111111111111111111111111111'
+    files = [('appData', name) for name in (
+        '.inkleet-msi-fixture', 'notebook/lc-1/solution.rs', 'notebook/lc-1/notes.md',
+        'notebook/lc-1/.solutions/rust/default.json', named + '/name.json', named + '/solution.rs',
+        'notebook/lc-1/.inkleet-drafts/solution.rs.json', named + '/.inkleet-drafts/solution.rs.json',
+        named + '/.inkleet-recovery/conflict-fixture.json', 'settings.json',
+    )] + [('appCache', '.inkleet-msi-fixture'), ('appCache', 'fixture-cache.json')]
+    directories = {(root, str(parent)) for root, name in files for parent in pathlib.PurePosixPath(name).parents}
+    baseline = {
+        'files': [{'root':root,'relative_path':name,'bytes':len(marker) if name=='.inkleet-msi-fixture' else 3,'sha256':p.digest(marker.encode() if name=='.inkleet-msi-fixture' else b'abc'),'owner_sid':sid} for root,name in sorted(files)],
+        'directories': [{'root':root,'relative_path':name,'owner_sid':sid} for root,name in sorted(directories)],
+    }
+    states = [(5,-1),(-1,-1),(-1,5),(5,-1),(-1,-1)]
+    related = [[current['productCode']],[],[legacy['productCode']],[current['productCode']],[]]
+    packages = [current['path'],current['productCode'],legacy['path'],current['path'],current['productCode']]
+    return {
+        'schema':1,'scope':'installer-only-seeded-data','result':'PASS','source_commit':SOURCE,'source_tree':TREE,'version':p.VERSION,'runner':'windows-2025',
+        'application_launched':False,'not_verified':list(p.WINDOWS_MSI_NOT_VERIFIED),'msi_uncertain':False,'cleanup_errors':[],
+        'stages':list(p.WINDOWS_MSI_STAGES),'prior':copy.deepcopy(old['prior']),'packages':{'current':current,'legacy':legacy},'payloads':copy.deepcopy(old['payloads']),
+        'preflight':{'states':{'current':-1,'legacy':-1},'related_product_codes':[],'no_processes':True,'current_user_sid':sid,'absent_paths':[r'C:\owned',r'C:\data',r'C:\cache']},
+        'registrations':[{'stage':stage,'result':'PASS','states':dict(zip(('current','legacy'),states[i])),'expected_related':related[i][:],'related_product_codes':related[i][:]} for i,stage in enumerate(p.WINDOWS_MSI_STAGES)],
+        'msi_operations':[{'label':stage,'result':'PASS','action':'/x' if i in (1,4) else '/i','package':packages[i],'log':'C:\\evidence\\'+stage+'-msi.log','pid':100+i,'exit_code':0,'uncertain':False} for i,stage in enumerate(p.WINDOWS_MSI_STAGES)],
+        'synthetic':{'origin':'test-seeded-not-app-authored','marker':marker,'roots':[{'name':name,'path':path,'owner_sid':sid} for name,path in [('appData',r'C:\data'),('appCache',r'C:\cache')]],'baseline':baseline,'boundaries':[{'stage':stage,'result':'PASS','snapshot':copy.deepcopy(baseline)} for stage in p.WINDOWS_MSI_STAGES]},
+    }
+
+
 def archive(m, platform='windows', extra=None, metadata_changes=None, source=SOURCE):
     a=m['artifacts'][platform]
     metadata={'commit':SOURCE,'target':p.PLATFORMS[platform][1],'version':p.VERSION,'build_profile':p.PROFILE,'workflow_run':f"https://github.com/{p.REPO}/actions/runs/{m['gates']['package']['run_id']}",'developer_id_signed':False,'notarized':False}
     metadata.update({'mach_o_files':[{'architectures':['x86_64']}],'file':a['assets'][0]['name'],'sha256':a['assets'][0]['sha256'],'bytes':a['assets'][0]['bytes'],'app_pe':{'machine':0x8664,'optional_header_magic':0x20b,'bytes':128},'msi':{'template':'x64;1033','product_code':'{11111111-1111-1111-1111-111111111111}'}})
-    if platform=='windows':metadata['installed_msi_acceptance']=windows_acceptance()
+    if platform=='windows':metadata['msi_lifecycle_acceptance']=windows_msi_lifecycle()
     metadata.update(metadata_changes or {})
     stream=io.BytesIO()
     with zipfile.ZipFile(stream,'w') as z:
         z.writestr('BUILD_INFO.json',json.dumps(metadata));z.writestr('SOURCE_COMMIT.txt',source+'\n')
-        if platform=='windows':z.writestr('MSI_INSTALLED_RESULT.json',json.dumps(metadata.get('installed_msi_acceptance')))
+        if platform=='windows':z.writestr('MSI_LIFECYCLE_RESULT.json',json.dumps(metadata.get('msi_lifecycle_acceptance')))
         for asset in a['assets']:z.writestr(asset['name'],b'abc')
         if extra:extra(z)
     data=stream.getvalue();a['sha256']=p.digest(data)
@@ -317,6 +350,128 @@ class WindowsAcceptanceTest(unittest.TestCase):
         for mutate in (lambda r:r['prior'].update(sha256='f'*64),lambda r:r['ui'].pop('legacy'),lambda r:r['ui']['legacy'].update(applicationSourceCommit=SOURCE),lambda r:r['ui']['upgraded'].update(normalClose=False),lambda r:r['ui']['upgraded'].update(launches=r['ui']['upgraded']['launches'][:1]),lambda r:r['ui']['fresh']['launches'][0].update(url='http://localhost:5173'),lambda r:r['packages']['current'].update(productCode='other')):
             report=windows_acceptance();mutate(report)
             with self.assertRaises(ValueError):p.validate_windows_install(manifest(),self.metadata(),report)
+
+
+class WindowsMsiLifecycleTest(unittest.TestCase):
+    def metadata(self):return {'app_pe':{'bytes':128},'msi':{'product_code':'{11111111-1111-1111-1111-111111111111}'}}
+    def validate(self, report):p.validate_windows_msi_lifecycle(manifest(),self.metadata(),report)
+    def reject(self, mutate):
+        report=windows_msi_lifecycle();mutate(report)
+        with self.assertRaises(ValueError):self.validate(report)
+    def test_complete_installer_only_evidence_passes(self):self.validate(windows_msi_lifecycle())
+    def test_gui_report_cannot_substitute_for_installer_report(self):
+        with self.assertRaises(ValueError):self.validate(windows_acceptance())
+        for key in ('ui','hosts','installed_msi_acceptance'):
+            self.reject(lambda r:r.update({key:{}}))
+    def test_missing_failed_wrong_scope_source_tree_or_version_fails(self):
+        for change in ({'schema':True},{'schema':2},{'scope':'GUI'}, {'result':'FAIL'},{'result':'SKIP'},{'source_commit':'e'*40},{'source_tree':'e'*40},{'version':'0.1.1'},{'runner':'windows-2022'},{'msi_uncertain':True},{'msi_uncertain':0},{'cleanup_errors':['error']},{'error':'prior failure'}):
+            with self.subTest(change=change):self.reject(lambda r:r.update(change))
+        with self.assertRaises(ValueError):self.validate(None)
+        for key in ('source_tree','msi_uncertain','cleanup_errors','schema'):
+            self.reject(lambda r:r.pop(key))
+    def test_runtime_gap_must_be_explicit_and_app_not_launched(self):
+        for value in (True,0,None):self.reject(lambda r:r.update(application_launched=value))
+        self.reject(lambda r:r.pop('application_launched'))
+        for values in ([],['not tested'],p.WINDOWS_MSI_NOT_VERIFIED[:-1]):
+            self.reject(lambda r:r.update(not_verified=values))
+        self.reject(lambda r:r['synthetic'].update(origin='v0.1.1-app-authored'))
+    def test_all_exact_stages_required_in_order(self):
+        for key in ('stages','registrations','msi_operations'):
+            self.reject(lambda r:r[key].pop())
+            self.reject(lambda r:r[key].reverse())
+            self.reject(lambda r:r[key].append(copy.deepcopy(r[key][0])))
+        self.reject(lambda r:r.update(stages=['install']*5))
+    def test_exact_registered_and_removed_states_required(self):
+        for index in range(5):
+            for field in ('current','legacy'):
+                self.reject(lambda r:r['registrations'][index]['states'].update({field:1}))
+            for key in ('expected_related','related_product_codes'):
+                self.reject(lambda r:r['registrations'][index][key].append('{99999999-9999-9999-9999-999999999999}'))
+            self.reject(lambda r:r['registrations'][index].update(stage='wrong'))
+            self.reject(lambda r:r['registrations'][index].update(result='FAIL'))
+        self.reject(lambda r:r['registrations'][0].pop('states'))
+    def test_operations_must_finish_without_retry_or_uncertainty(self):
+        for index in range(5):
+            for change in ({'result':'FAIL'},{'action':'/repair'},{'label':'other'},{'package':'foreign'},{'pid':0},{'pid':True},{'exit_code':False},{'exit_code':3010},{'uncertain':True},{'uncertain':0},{'error':'prior failure'},{'log':None}):
+                with self.subTest(index=index,change=change):self.reject(lambda r:r['msi_operations'][index].update(change))
+        self.reject(lambda r:r['msi_operations'][1].update(log=r['msi_operations'][0]['log']))
+    def test_preflight_cannot_adopt_existing_data_or_products(self):
+        for change in ({'states':{'current':5,'legacy':-1}},{'states':{'current':-1,'legacy':1}},{'related_product_codes':['existing']},{'no_processes':False},{'current_user_sid':'S-1-5-32-544'},{'absent_paths':[]}):
+            self.reject(lambda r:r['preflight'].update(change))
+        self.reject(lambda r:r['preflight']['absent_paths'].__setitem__(0,r'C:\foreign'))
+        self.reject(lambda r:r['preflight']['absent_paths'].__setitem__(1,r['preflight']['absent_paths'][0]))
+    def test_public_upgrade_baseline_must_match_pinned_bytes_and_identity(self):
+        for change in ({'source_commit':SOURCE},{'sha256':'f'*64},{'bytes':1},{'version':'0.1.0'},{'url':'https://example.test/old.msi'}):
+            self.reject(lambda r:r['prior'].update(change))
+        for change in ({'sha256':'f'*64},{'bytes':1},{'version':p.VERSION},{'upgradeCode':'{99999999-9999-9999-9999-999999999999}'},{'productCode':None}):
+            self.reject(lambda r:r['packages']['legacy'].update(change))
+        self.reject(lambda r:r['packages']['legacy'].update(productCode=r['packages']['current']['productCode']))
+    def test_same_guid_with_different_case_is_not_a_major_upgrade(self):
+        report=windows_msi_lifecycle();current=report['packages']['current']['productCode'];legacy=report['packages']['legacy']['productCode']
+        code='{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}'
+        report=json.loads(json.dumps(report).replace(current,code).replace(legacy,code.lower()))
+        metadata=self.metadata();metadata['msi']['product_code']=code
+        with self.assertRaisesRegex(ValueError,'major-upgrade identity'):
+            p.validate_windows_msi_lifecycle(manifest(),metadata,report)
+    def test_current_installed_msi_is_bound_to_frozen_asset(self):
+        for change in ({'sha256':'f'*64},{'bytes':4},{'bytes':True},{'version':'0.1.1'},{'productCode':'{99999999-9999-9999-9999-999999999999}'},{'name':'Other'},{'upgradeCode':'invalid'}):
+            self.reject(lambda r:r['packages']['current'].update(change))
+        self.reject(lambda r:r['packages'].pop('current'))
+    def test_actual_paths_are_local_and_owned_fixture_is_not_overlapping(self):
+        for value in ('relative.msi',r'\\host\share\file.msi',r'C:\owned\..\foreign.msi',''):
+            self.reject(lambda r:r['packages']['current'].update(path=value))
+        self.reject(lambda r:r['packages']['current'].update(path=r['packages']['legacy']['path']))
+        self.reject(lambda r:r['synthetic']['roots'][1].update(path=r['synthetic']['roots'][0]['path']))
+        self.reject(lambda r:r['synthetic']['roots'][1].update(path=r'C:\data\nested'))
+        self.reject(lambda r:r['payloads']['fresh'].update(installed_path=r'C:\foreign\inkleet.exe'))
+        def parent_escape(report):
+            for payload in report['payloads'].values():payload['installed_path']=r'C:\owned\..\foreign\inkleet.exe'
+        self.reject(parent_escape)
+    def test_complete_seeded_tree_is_mandatory(self):
+        for key in ('files','directories'):
+            self.reject(lambda r:r['synthetic']['baseline'][key].pop())
+            self.reject(lambda r:r['synthetic']['baseline'][key].append(copy.deepcopy(r['synthetic']['baseline'][key][0])))
+        for change in ({'root':'foreign'},{'relative_path':'../foreign'},{'bytes':0},{'bytes':True},{'sha256':'short'},{'owner_sid':None}):
+            self.reject(lambda r:r['synthetic']['baseline']['files'][0].update(change))
+        self.reject(lambda r:r['synthetic']['baseline']['directories'][0].update(owner_sid=None))
+        self.reject(lambda r:r['synthetic'].update(baseline={'files':[],'directories':[]}))
+        self.reject(lambda r:r['synthetic']['roots'].pop())
+    def test_marker_is_source_bound_and_hash_verified(self):
+        for marker in ('x',('f'*40)+':'+('1'*32),SOURCE+':bad'):
+            self.reject(lambda r:r['synthetic'].update(marker=marker))
+        self.reject(lambda r:r['synthetic']['baseline']['files'][0].update(sha256='f'*64))
+        self.reject(lambda r:r['synthetic']['roots'][0].update(owner_sid='not-a-sid'))
+    def test_every_boundary_preserves_all_seeded_bytes_paths_and_owners(self):
+        self.reject(lambda r:r['synthetic']['boundaries'].pop())
+        self.reject(lambda r:r['synthetic']['boundaries'].reverse())
+        for index in range(5):
+            for change in ({'result':'FAIL'},{'stage':'skipped'},{'snapshot':None}):
+                self.reject(lambda r:r['synthetic']['boundaries'][index].update(change))
+            self.reject(lambda r:r['synthetic']['boundaries'][index]['snapshot']['files'][0].update(sha256='f'*64))
+            self.reject(lambda r:r['synthetic']['boundaries'][index]['snapshot']['files'][0].update(bytes=1))
+            self.reject(lambda r:r['synthetic']['boundaries'][index]['snapshot']['files'].pop())
+            self.reject(lambda r:r['synthetic']['boundaries'][index]['snapshot']['directories'][0].update(owner_sid='S-1-5-32-544'))
+    def test_exact_installed_payload_rule_remains_mandatory(self):
+        for phase in ('fresh','upgraded'):
+            for change in ({'installed_sha256':'f'*64},{'marker_count':2},{'marker_offset':True},{'expected_bytes':1},{'rule':'normalize-PE'},{'expected_origin':'arbitrary copy'}):
+                self.reject(lambda r:r['payloads'][phase].update(change))
+            self.reject(lambda r:r['payloads'].pop(phase))
+    def test_archive_requires_equal_dedicated_report_no_old_gui_claim(self):
+        for metadata in ({'msi_lifecycle_acceptance':None},{'installed_msi_acceptance':windows_acceptance()}):
+            m=manifest();info,data=archive(m,metadata_changes=metadata)
+            with self.assertRaises(ValueError):p.inspect_archive(m,'windows',info,data)
+        wrong_type=windows_msi_lifecycle();wrong_type['application_launched']=0
+        for replacement in (None,json.dumps({'result':'PASS'}),json.dumps(wrong_type)):
+            m=manifest();info,data=archive(m)
+            original=zipfile.ZipFile(io.BytesIO(data));stream=io.BytesIO()
+            with zipfile.ZipFile(stream,'w') as z:
+                for item in original.infolist():
+                    if item.filename!='MSI_LIFECYCLE_RESULT.json':z.writestr(item,original.read(item.filename))
+                if replacement is not None:z.writestr('MSI_LIFECYCLE_RESULT.json',replacement)
+            data=stream.getvalue();info['digest']='sha256:'+p.digest(data);m['artifacts']['windows']['sha256']=p.digest(data)
+            with self.assertRaises(ValueError):p.inspect_archive(m,'windows',info,data)
+        m=manifest();info,data=archive(m,extra=lambda z:z.writestr('MSI_INSTALLED_RESULT.json','{}'))
+        with self.assertRaises(ValueError):p.inspect_archive(m,'windows',info,data)
 
 
 class PublisherIdentityTest(unittest.TestCase):

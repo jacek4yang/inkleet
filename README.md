@@ -7,7 +7,7 @@
 ## 下载与安装
 - Preview package targets: macOS Intel x86_64 DMG, Windows x64 setup EXE / MSI, and Linux x86_64 tar.gz.
 - 从 [Releases](https://github.com/jacek4yang/inkleet/releases) 下载公开版本；每个版本的 `RELEASE_MANIFEST.json` 和 `SHA256SUMS` 记录精确源码、构建、验收和附件校验值。Actions 测试包不是公开 Release。
-- Windows 的 EXE / MSI 任选一种；未安装 WebView2 时可能需要联网获取运行时。CI 的无人值守 MSI 升级及实际安装后 WebView2 验收范围见 [Windows 验收](docs/WINDOWS_ACCEPTANCE.md)，不等于物理设备/交互安装或输入法认证。
+- Windows 的 EXE / MSI 任选一种；未安装 WebView2 时可能需要联网获取运行时。CI 要求无人值守 MSI 安装、卸载、升级与测试种子数据逐字节保留检查；**Windows 实机界面及升级后应用运行/迁移仍未完成验收**。见 [Windows 验收](docs/WINDOWS_ACCEPTANCE.md)，安装器检查不代表应用运行通过。
 - Linux tar.gz 解压后运行 `./start.sh`。面向 Ubuntu 24.04 / Mint 22 系列，需要 WebKitGTK 4.1 / GTK3；不是全静态或通用 Linux 包。
 - macOS 包仅面向 Intel。Ventura 的完整实际使用仍待验收；构建元数据里的最低系统版本不是兼容性保证。
 - Windows / macOS 包未签名，macOS 未公证；不要为安装而关闭系统安全保护。

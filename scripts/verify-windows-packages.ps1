@@ -107,7 +107,7 @@ $information = [ordered]@{
     msi = [ordered]@{template = $template; product_name = $productName; product_version = $productVersion; product_code = $productCode}
     authenticode = @($signatures)
     verified = @('locked frontend and native tests', 'x64 application PE32+', 'NSIS PE container', 'readable x64 MSI metadata', 'SHA-256')
-    not_verified = @('interactive MSI/NSIS installer', 'physical Windows GUI/IME', 'SmartScreen reputation', 'real account login and online submission')
+    not_verified = @('interactive MSI/NSIS installer', 'Windows installed GUI and post-upgrade application runtime', 'application migration or old-app-authored data compatibility', 'physical Windows GUI/IME', 'SmartScreen reputation', 'real account login and online submission')
 }
 $information | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $delivery 'BUILD_INFO.json')
 Copy-Item (Join-Path $delivery 'BUILD_INFO.json') (Join-Path $evidence 'package-inspection.json')
@@ -130,8 +130,11 @@ access. This is not an offline installer or a Windows 7 compatibility promise.
 
 CI inspects compilation, tests, application architecture, MSI metadata and hashes.
 A separate mandatory step exercises fresh MSI install, v0.1.1 upgrade, uninstall
-and the installed WebView2 app with synthetic data. Its actual outcome and scope
-are in BUILD_INFO.json under installed_msi_acceptance; missing/PENDING is not PASS.
+and exact installed payload plus test-seeded notebook byte preservation. It does
+not launch the application. Its actual outcome and scope are in BUILD_INFO.json
+under msi_lifecycle_acceptance; missing/PENDING is not PASS. Windows installed
+GUI and post-upgrade application runtime/migration acceptance remain deferred.
+Seeded bytes are not data authored or reopened by either app version.
 This does not certify interactive installer UI, physical IME, NSIS installation,
 SmartScreen reputation, account login or online submission. See the linked workflow.
 

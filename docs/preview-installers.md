@@ -49,8 +49,10 @@ PE container, and MSI metadata is readable with the expected product/version and
 `x64` Template Summary. NSIS's bootstrap stub may be 32-bit even though the app
 payload is x64. Those static checks alone do not install or launch either package.
 A separate mandatory step performs actual MSI installation, upgrade from the
-hash-verified public v0.1.1 MSI, installed WebView2 synthetic-data interaction and
-uninstall preservation checks. Publication requires its exact-run PASS report;
+hash-verified public v0.1.1 MSI, exact installed executable comparison and
+complete test-seeded data preservation through install/upgrade/uninstall. It
+never launches the app. Windows GUI and post-upgrade runtime/migration remain
+explicitly deferred, not passed. Publication requires its exact-run PASS report;
 see [Windows installed-release acceptance](WINDOWS_ACCEPTANCE.md). The NSIS
 installer is not covered by that MSI execution proof.
 
@@ -65,7 +67,8 @@ Real-device acceptance remains: install one format on a clean test machine,
 launch, verify Chinese text and Settings search/save/reopen, save and reopen a
 sample note, restart to check persistence, then check uninstall behavior. Repeat
 with the other format in a clean environment. The CI upgrade covers only its
-explicit Windows Server 2025 synthetic-data scenario, not every user environment.
+explicit Windows Server 2025 installer-only, test-seeded-data scenario. It does
+not establish application startup, migration or old-app-authored data compatibility.
 Real account/online submission flows need separate authorization and tests.
 Windows GUI acceptance is not inferred from Linux browser or native results.
 

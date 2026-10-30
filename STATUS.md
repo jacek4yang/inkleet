@@ -1,6 +1,6 @@
 # InkLeet source and release status
 
-Updated: 2026-10-29 UTC. Source version: **0.1.2**. Goal: a reliable everyday practice IDE; no Zed-equivalence claim.
+Updated: 2026-10-30 UTC. Source version: **0.1.2**. Goal: a reliable everyday practice IDE; no Zed-equivalence claim.
 
 ## Source, evidence and public packages are different
 
@@ -24,9 +24,10 @@ Updated: 2026-10-29 UTC. Source version: **0.1.2**. Goal: a reliable everyday pr
 - Confirmed solution archive/restore keeps immutable IDs, source, recovery drafts and conflict copies; shared notes are unchanged. The default solution remains active. Save/checkpoint ordering, changed disk/drafts, delayed replies and refresh/restore ownership are guarded. No permanent delete is exposed.
 - See [Local testing contracts](docs/LOCAL_TEST_POLICIES.md) and [User manual](docs/USER_MANUAL.md).
 
-### Installed Windows acceptance
-- A mandatory Windows packaging step now exercises unattended MSI fresh install/uninstall and upgrade from the hash-verified public v0.1.1 MSI. It launches the actual installed WebView2 app with real Tauri IPC, saves synthetic source/notes/named solutions, checks archive/restart/restore, and verifies notebook hashes survive upgrade/uninstall.
-- The test refuses pre-existing app data or related installed products, never disables security protections, and cannot substitute Chromium or mocked IPC. Its checked-in existence is not a PASS: the exact Windows job and embedded `MSI_INSTALLED_RESULT.json` must establish success before publication. Physical Windows desktop/IME, interactive MSI/NSIS and real LSP are separate. See [Windows acceptance](docs/WINDOWS_ACCEPTANCE.md).
+### Windows installer-only acceptance; GUI/runtime deferred
+- The mandatory Windows packaging check exercises unattended MSI fresh install/uninstall, hash-verified public v0.1.1 installation, in-place major upgrade and final uninstall. It requires exact product registration transitions, whole-byte installed executable comparison and complete test-seeded notebook/data preservation at every boundary. It never launches InkLeet.
+- `MSI_LIFECYCLE_RESULT.json` and matching `msi_lifecycle_acceptance` metadata must establish PASS for the exact source; source code or mocked control-flow tests are not installation evidence. Pre-existing app data/products are refused; uncertain MSI outcomes stop further actions without replay. No security settings, accounts or ACLs are changed.
+- **Windows real GUI and post-upgrade application runtime/migration acceptance remain unverified and are explicitly deferred for this release.** Seeded files are not old-app-authored storage or proof that the new app can load them. The former GUI harness failed before its JavaScript/MSI phase; it is not run by the release packaging gate. All other required tests and exact-main provenance remain mandatory. See [Windows acceptance](docs/WINDOWS_ACCEPTANCE.md).
 
 ### Login and debugging
 - Native QR and optional secure storage are retained. FAILED is not silently reinterpreted as QR expiry; account/site/session generations guard restored results and cancellation. Pending/failed credential deletion stays latched until confirmed cleanup.
