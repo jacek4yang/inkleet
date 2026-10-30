@@ -59,7 +59,13 @@ Rust/Python drivers on Linux x64, Windows x64 and macOS Intel. Their success is
 required independently of configured branch-protection checks. They do not replace
 Native Linux or imply native Windows/macOS GUI/IME acceptance.
 
-Windows BUILD_INFO must also contain a matching `MSI_INSTALLED_RESULT.json` PASS
-record: exact-current-source installed WebView2 phases, verified public v0.1.1
-upgrade provenance, normal close/restart, installer identity and no uncertain
-installer/cleanup state. Merely building an MSI is not this acceptance.
+Windows BUILD_INFO must contain `msi_lifecycle_acceptance` and an identical
+`MSI_LIFECYCLE_RESULT.json` PASS record: exact source/tree, five actual MSI
+install/upgrade/uninstall operations, verified public v0.1.1 provenance, exact
+installed payload bytes, complete test-seeded data preservation, and no uncertain
+installer/cleanup state. Merely building an MSI is not this acceptance. The old
+`installed_msi_acceptance` GUI report cannot substitute for this evidence.
+Windows real GUI and post-upgrade application runtime/migration remain explicitly
+deferred for this release and must be disclosed in the release notes. Seeded
+bytes are not proof of old-app-authored data compatibility or application runtime.
+See [Windows acceptance](../docs/WINDOWS_ACCEPTANCE.md).
